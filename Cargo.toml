@@ -1,0 +1,3 @@
+[workspace]
+members = ["safesocial_core"]
+resolver = "2"
