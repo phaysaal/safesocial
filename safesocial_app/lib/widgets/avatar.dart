@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 /// Avatar size presets.
@@ -10,10 +12,7 @@ enum AvatarSize {
   const AvatarSize(this.radius);
 }
 
-/// Reusable avatar widget that displays initials or an image.
-///
-/// If no image reference is provided, shows a CircleAvatar with the first
-/// letter of the display name and a color derived from the name string.
+/// Reusable avatar widget that displays an image or initials fallback.
 class UserAvatar extends StatelessWidget {
   final String displayName;
   final String? imageRef;
@@ -31,7 +30,17 @@ class UserAvatar extends StatelessWidget {
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
     final bgColor = _colorFromName(displayName);
 
-    // TODO: Support loading images from Veilid block store via imageRef.
+    // Show image if we have a local file path
+    if (imageRef != null && imageRef!.isNotEmpty) {
+      final file = File(imageRef!);
+      if (file.existsSync()) {
+        return CircleAvatar(
+          radius: size.radius,
+          backgroundImage: FileImage(file),
+        );
+      }
+    }
+
     return CircleAvatar(
       radius: size.radius,
       backgroundColor: bgColor,
@@ -46,13 +55,12 @@ class UserAvatar extends StatelessWidget {
     );
   }
 
-  /// Derive a consistent color from a name string.
   Color _colorFromName(String name) {
     if (name.isEmpty) return const Color(0xFF7B2FBE);
 
     final hash = name.codeUnits.fold<int>(0, (prev, c) => prev + c);
     final colors = [
-      const Color(0xFF00D4AA), // teal
+      const Color(0xFFC93D4E), // sunset rose
       const Color(0xFF7B2FBE), // purple
       const Color(0xFF2196F3), // blue
       const Color(0xFFFF6B35), // orange

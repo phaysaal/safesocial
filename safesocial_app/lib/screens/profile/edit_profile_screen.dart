@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/identity_service.dart';
 import '../../widgets/avatar.dart';
 
-/// Form for editing the user's display name and bio.
+/// Form for editing the user's display name, bio, and avatar photo.
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
 
@@ -33,6 +34,46 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _displayNameController.dispose();
     _bioController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    final picker = ImagePicker();
+
+    // Show bottom sheet to choose camera or gallery
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
+    final picked = await picker.pickImage(
+      source: source,
+      maxWidth: 512,
+      maxHeight: 512,
+      imageQuality: 85,
+    );
+
+    if (picked != null && mounted) {
+      await context.read<IdentityService>().updateAvatar(picked.path);
+      setState(() {});
+    }
   }
 
   Future<void> _saveProfile() async {
@@ -65,7 +106,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final cs = theme.colorScheme;
+    final profile = context.watch<IdentityService>().currentIdentity;
 
     return Scaffold(
       appBar: AppBar(
@@ -79,13 +121,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     height: 16,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: colorScheme.primary,
+                      color: cs.primary,
                     ),
                   )
-                : Text(
-                    'Save',
-                    style: TextStyle(color: colorScheme.primary),
-                  ),
+                : Text('Save', style: TextStyle(color: cs.primary)),
           ),
         ],
       ),
@@ -97,38 +136,43 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               const SizedBox(height: 16),
 
-              // Avatar placeholder with change button
-              Stack(
-                children: [
-                  UserAvatar(
-                    displayName: _displayNameController.text.isNotEmpty
-                        ? _displayNameController.text
-                        : '?',
-                    size: AvatarSize.large,
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.camera_alt,
-                        size: 16,
-                        color: colorScheme.onPrimary,
+              // Avatar with camera button — tap to change
+              GestureDetector(
+                onTap: _pickAvatar,
+                child: Stack(
+                  children: [
+                    UserAvatar(
+                      displayName: _displayNameController.text.isNotEmpty
+                          ? _displayNameController.text
+                          : '?',
+                      imageRef: profile?.avatarRef,
+                      size: AvatarSize.large,
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: cs.primary,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: cs.surface, width: 2),
+                        ),
+                        child: Icon(
+                          Icons.camera_alt,
+                          size: 16,
+                          color: cs.onPrimary,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Change avatar (coming soon)',
+                'Tap to change photo',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurface.withValues(alpha: 0.4),
+                  color: cs.primary,
                 ),
               ),
 

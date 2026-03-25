@@ -70,6 +70,7 @@ class ProfileScreen extends StatelessWidget {
                         children: [
                           UserAvatar(
                             displayName: profile.displayName,
+                            imageRef: profile.avatarRef,
                             size: AvatarSize.large,
                           ),
                           const SizedBox(width: 24),

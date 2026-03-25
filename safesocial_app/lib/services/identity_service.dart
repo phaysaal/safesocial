@@ -118,6 +118,19 @@ class IdentityService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Update the avatar to a local file path.
+  Future<void> updateAvatar(String filePath) async {
+    if (_currentIdentity == null) return;
+
+    _currentIdentity = _currentIdentity!.copyWith(
+      avatarRef: filePath,
+      updatedAt: DateTime.now(),
+    );
+
+    await _persistIdentity();
+    notifyListeners();
+  }
+
   /// Export the keypair as a shareable string for backup.
   Future<String> exportIdentity() async {
     if (_keypair == null) return '';
