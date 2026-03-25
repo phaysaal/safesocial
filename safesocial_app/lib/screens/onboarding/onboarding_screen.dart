@@ -75,18 +75,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const Spacer(flex: 2),
 
           // Logo
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              color: cs.primary,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: const Icon(
-              Icons.people_alt_rounded,
-              size: 52,
-              color: Colors.white,
-            ),
+          Image.asset(
+            'assets/images/logo.png',
+            width: 120,
+            height: 120,
           ),
           const SizedBox(height: 24),
 

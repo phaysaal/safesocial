@@ -2,26 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 // ---------------------------------------------------------------------------
-// Facebook / Instagram inspired color palette
+// SafeSocial brand palette — sunset coral/rose from the logo
 // ---------------------------------------------------------------------------
 
 // Light theme colors
-const _lightPrimary = Color(0xFF1877F2); // Facebook blue
+const _lightPrimary = Color(0xFFC93D4E); // Darker sunset rose from logo
 const _lightOnPrimary = Colors.white;
-const _lightSecondary = Color(0xFF42B72A); // FB green accent
-const _lightBackground = Color(0xFFF0F2F5); // FB light gray background
+const _lightSecondary = Color(0xFF7B3FE4); // Purple accent from logo shield
+const _lightBackground = Color(0xFFF5F0EF); // Warm light gray
 const _lightSurface = Colors.white;
-const _lightOnSurface = Color(0xFF1C1E21); // Near-black text
-const _lightOnSurfaceVariant = Color(0xFF65676B); // Gray secondary text
+const _lightOnSurface = Color(0xFF1C1E21);
+const _lightOnSurfaceVariant = Color(0xFF65676B);
 const _lightDivider = Color(0xFFDADDE1);
 const _lightError = Color(0xFFE41E3F);
 
-// Dark theme colors (keep existing aesthetic, harmonize with light palette)
-const _darkPrimary = Color(0xFF2D88FF); // Brighter blue for dark
+// Dark theme colors
+const _darkPrimary = Color(0xFFE8556A); // Brighter coral for dark mode
 const _darkOnPrimary = Colors.white;
-const _darkSecondary = Color(0xFF42B72A);
-const _darkBackground = Color(0xFF18191A); // FB dark mode bg
-const _darkSurface = Color(0xFF242526); // FB dark mode card
+const _darkSecondary = Color(0xFF9B6DFF); // Lighter purple for dark
+const _darkBackground = Color(0xFF18191A);
+const _darkSurface = Color(0xFF242526);
 const _darkOnSurface = Color(0xFFE4E6EB);
 const _darkOnSurfaceVariant = Color(0xFFB0B3B8);
 const _darkDivider = Color(0xFF3E4042);
