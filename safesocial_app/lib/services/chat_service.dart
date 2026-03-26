@@ -22,6 +22,7 @@ class ChatService extends ChangeNotifier {
 
   final Map<String, List<Message>> _conversations = {};
   final Map<String, RecordKey> _conversationDhtKeys = {};
+  final Map<String, String> _conversationRoles = {}; // 'owner' or 'member'
   String? _activeConversation;
 
   Map<String, List<Message>> get conversations => Map.unmodifiable(_conversations);
@@ -32,7 +33,9 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Create a new conversation DHT record for a contact.
-  /// If writerKeypair is null, creates a local-only conversation.
+  ///
+  /// Uses SMPL schema so both the creator AND the contact can write.
+  /// Owner gets subkeys 0-255, contact member gets subkeys 256-511.
   Future<RecordKey?> createConversation(String contactPublicKey, [KeyPair? writerKeypair]) async {
     final rc = _veilidService?.routingContext;
     if (rc == null) {
@@ -44,11 +47,25 @@ class ChatService extends ChangeNotifier {
     }
 
     try {
-      final schema = DHTSchema.dflt(oCnt: 512);
+      // Parse the contact's public key to create a member ID
+      final contactKey = PublicKey.fromString(contactPublicKey);
+      final memberId = await Veilid.instance.generateMemberId(contactKey);
+
+      // SMPL schema: owner gets 256 subkeys, contact member gets 256 subkeys
+      final schema = DHTSchema.smpl(
+        oCnt: 256,
+        members: [
+          DHTSchemaMember(mKey: memberId.value, mCnt: 256),
+        ],
+      );
+
       final record = await rc.createDHTRecord(bestCryptoKind, schema);
 
-      // Initialize counter at subkey 0
-      final meta = {'next_subkey': 1};
+      // Initialize metadata at subkey 0 (owner subkey range)
+      final meta = {
+        'owner_next': 1,      // next subkey for owner to write (1-255)
+        'member_next': 256,   // next subkey for member to write (256-511)
+      };
       await rc.setDHTValue(
         record.key, 0,
         Uint8List.fromList(utf8.encode(jsonEncode(meta))),
@@ -60,13 +77,15 @@ class ChatService extends ChangeNotifier {
 
       _conversationDhtKeys[contactPublicKey] = record.key;
       _conversations.putIfAbsent(contactPublicKey, () => []);
+      // Track if we're the owner of this conversation
+      _conversationRoles[contactPublicKey] = 'owner';
       await _persistConversationKeys();
       notifyListeners();
 
-      debugPrint('[ChatService] Created DHT conversation: ${record.key}');
+      debugPrint('[ChatService] Created SMPL conversation: ${record.key}');
       return record.key;
     } catch (e) {
-      debugPrint('[ChatService] Failed to create DHT conversation: $e');
+      debugPrint('[ChatService] Failed to create conversation: $e');
       _conversations.putIfAbsent(contactPublicKey, () => []);
       notifyListeners();
       return null;
@@ -97,15 +116,21 @@ class ChatService extends ChangeNotifier {
       try {
         await rc.openDHTRecord(dhtKey);
 
+        // Determine which subkey range to use based on our role
+        final role = _conversationRoles[recipientId] ?? 'member';
+        final metaField = role == 'owner' ? 'owner_next' : 'member_next';
+
         // Read current counter
         final metaData = await rc.getDHTValue(dhtKey, 0);
-        int nextSubkey = 1;
+        int nextSubkey;
         if (metaData != null) {
           final meta = jsonDecode(utf8.decode(metaData.data)) as Map<String, dynamic>;
-          nextSubkey = meta['next_subkey'] as int? ?? 1;
+          nextSubkey = meta[metaField] as int? ?? (role == 'owner' ? 1 : 256);
+        } else {
+          nextSubkey = role == 'owner' ? 1 : 256;
         }
 
-        // Write message
+        // Write message to our subkey range
         final msgJson = {
           'id': message.id,
           'sender': message.senderId,
@@ -119,11 +144,19 @@ class ChatService extends ChangeNotifier {
           Uint8List.fromList(utf8.encode(jsonEncode(msgJson))),
         );
 
-        // Increment counter
-        await rc.setDHTValue(
-          dhtKey, 0,
-          Uint8List.fromList(utf8.encode(jsonEncode({'next_subkey': nextSubkey + 1}))),
-        );
+        // Update our counter in metadata (only if we're the owner who can write subkey 0)
+        if (role == 'owner') {
+          try {
+            final currentMeta = metaData != null
+                ? jsonDecode(utf8.decode(metaData.data)) as Map<String, dynamic>
+                : <String, dynamic>{};
+            currentMeta['owner_next'] = nextSubkey + 1;
+            await rc.setDHTValue(
+              dhtKey, 0,
+              Uint8List.fromList(utf8.encode(jsonEncode(currentMeta))),
+            );
+          } catch (_) {}
+        }
 
         await rc.closeDHTRecord(dhtKey);
 
@@ -204,7 +237,8 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Join an existing conversation using a string key (from QR payload).
-  Future<void> joinConversationByString(String contactPublicKey, String dhtKeyStr) async {
+  /// Opens the record with our writer keypair so we can write to member subkeys.
+  Future<void> joinConversationByString(String contactPublicKey, String dhtKeyStr, {KeyPair? writerKeypair}) async {
     _conversations.putIfAbsent(contactPublicKey, () => []);
 
     final rc = _veilidService?.routingContext;
@@ -212,10 +246,17 @@ class ChatService extends ChangeNotifier {
       try {
         final dhtKey = RecordKey.fromString(dhtKeyStr);
         _conversationDhtKeys[contactPublicKey] = dhtKey;
-        await rc.openDHTRecord(dhtKey);
+        _conversationRoles[contactPublicKey] = 'member';
+
+        // Open with our writer keypair so we can write to member subkeys
+        if (writerKeypair != null) {
+          await rc.openDHTRecord(dhtKey, writer: writerKeypair);
+        } else {
+          await rc.openDHTRecord(dhtKey);
+        }
         await rc.watchDHTValues(dhtKey);
         await rc.closeDHTRecord(dhtKey);
-        debugPrint('[ChatService] Joined conversation: $dhtKeyStr');
+        debugPrint('[ChatService] Joined conversation as member: $dhtKeyStr');
       } catch (e) {
         debugPrint('[ChatService] Failed to join by string: $e');
       }
@@ -374,6 +415,8 @@ class ChatService extends ChangeNotifier {
         keysMap[entry.key] = entry.value.toString();
       }
       await prefs.setString(_prefsConversationsKey, jsonEncode(keysMap));
+      // Also persist roles
+      await prefs.setString('${_prefsConversationsKey}_roles', jsonEncode(_conversationRoles));
     } catch (e) {
       debugPrint('[ChatService] SharedPreferences persist failed: $e');
     }

@@ -79,9 +79,13 @@ class _AddContactScreenState extends State<AddContactScreen>
     await contactService.addContact(publicKey, displayName);
 
     if (conversationDhtKey != null && conversationDhtKey.isNotEmpty) {
-      // They already created a conversation — join it
+      // They already created a conversation — join it with our writer keypair
       try {
-        await chatService.joinConversationByString(publicKey, conversationDhtKey);
+        await chatService.joinConversationByString(
+          publicKey,
+          conversationDhtKey,
+          writerKeypair: identityService.keypair,
+        );
         debugPrint('[AddContact] Joined existing conversation: $conversationDhtKey');
       } catch (e) {
         debugPrint('[AddContact] Failed to join conversation: $e');
