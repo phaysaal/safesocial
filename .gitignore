@@ -32,3 +32,4 @@ spheres_app/assets/images/icon_candidate_*.png
 sphere-icon-bubble.svg
 sphere_v7_*.svg
 target/
+relay/node_modules/
