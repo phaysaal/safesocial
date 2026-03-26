@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import 'package:veilid/veilid.dart';
 
 import '../models/message.dart';
+import 'debug_log_service.dart';
 import 'veilid_service.dart';
 
 /// Manages chat conversations via Veilid DHT.
@@ -39,7 +40,7 @@ class ChatService extends ChangeNotifier {
   Future<RecordKey?> createConversation(String contactPublicKey, [KeyPair? writerKeypair]) async {
     final rc = _veilidService?.routingContext;
     if (rc == null) {
-      debugPrint('[ChatService] No routing context — creating local conversation');
+      DebugLogService().info('Chat',' No routing context — creating local conversation');
       _conversations.putIfAbsent(contactPublicKey, () => []);
       await _persistConversationKeys();
       notifyListeners();
@@ -82,10 +83,10 @@ class ChatService extends ChangeNotifier {
       await _persistConversationKeys();
       notifyListeners();
 
-      debugPrint('[ChatService] Created SMPL conversation: ${record.key}');
+      DebugLogService().info('Chat',' Created SMPL conversation: ${record.key}');
       return record.key;
     } catch (e) {
-      debugPrint('[ChatService] Failed to create conversation: $e');
+      DebugLogService().info('Chat',' Failed to create conversation: $e');
       _conversations.putIfAbsent(contactPublicKey, () => []);
       notifyListeners();
       return null;
@@ -167,9 +168,9 @@ class ChatService extends ChangeNotifier {
           notifyListeners();
         }
 
-        debugPrint('[ChatService] Message sent to DHT subkey $nextSubkey');
+        DebugLogService().info('Chat',' Message sent to DHT subkey $nextSubkey');
       } catch (e) {
-        debugPrint('[ChatService] DHT write failed: $e');
+        DebugLogService().info('Chat',' DHT write failed: $e');
       }
     }
 
@@ -221,9 +222,9 @@ class ChatService extends ChangeNotifier {
 
             _conversations.putIfAbsent(contactId, () => []);
             _conversations[contactId]!.add(message);
-            debugPrint('[ChatService] Received message from $senderId');
+            DebugLogService().info('Chat',' Received message from $senderId');
           } catch (e) {
-            debugPrint('[ChatService] Parse error at subkey $sk: $e');
+            DebugLogService().info('Chat',' Parse error at subkey $sk: $e');
           }
         }
       }
@@ -232,7 +233,7 @@ class ChatService extends ChangeNotifier {
       notifyListeners();
       await _cacheMessages(contactId);
     } catch (e) {
-      debugPrint('[ChatService] Value change handling failed: $e');
+      DebugLogService().info('Chat',' Value change handling failed: $e');
     }
   }
 
@@ -256,9 +257,9 @@ class ChatService extends ChangeNotifier {
         }
         await rc.watchDHTValues(dhtKey);
         await rc.closeDHTRecord(dhtKey);
-        debugPrint('[ChatService] Joined conversation as member: $dhtKeyStr');
+        DebugLogService().info('Chat',' Joined conversation as member: $dhtKeyStr');
       } catch (e) {
-        debugPrint('[ChatService] Failed to join by string: $e');
+        DebugLogService().info('Chat',' Failed to join by string: $e');
       }
     }
 
@@ -278,7 +279,7 @@ class ChatService extends ChangeNotifier {
         await rc.watchDHTValues(dhtKey);
         await rc.closeDHTRecord(dhtKey);
       } catch (e) {
-        debugPrint('[ChatService] Failed to watch conversation: $e');
+        DebugLogService().info('Chat',' Failed to watch conversation: $e');
       }
     }
 
@@ -336,7 +337,7 @@ class ChatService extends ChangeNotifier {
             }
           } finally { db.close(); }
         } catch (e) {
-          debugPrint('[ChatService] TableStore load failed: $e');
+          DebugLogService().info('Chat',' TableStore load failed: $e');
         }
       }
 
@@ -375,7 +376,7 @@ class ChatService extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      debugPrint('[ChatService] Failed to load conversations: $e');
+      DebugLogService().info('Chat',' Failed to load conversations: $e');
     }
   }
 
@@ -388,7 +389,7 @@ class ChatService extends ChangeNotifier {
         jsonEncode(msgs.map((m) => m.toJson()).toList()),
       );
     } catch (e) {
-      debugPrint('[ChatService] Cache failed: $e');
+      DebugLogService().info('Chat',' Cache failed: $e');
     }
   }
 
@@ -404,7 +405,7 @@ class ChatService extends ChangeNotifier {
           await db.storeStringJson(0, 'conversation_keys', keysMap);
         } finally { db.close(); }
       } catch (e) {
-        debugPrint('[ChatService] TableStore persist failed: $e');
+        DebugLogService().info('Chat',' TableStore persist failed: $e');
       }
     }
 
@@ -418,7 +419,7 @@ class ChatService extends ChangeNotifier {
       // Also persist roles
       await prefs.setString('${_prefsConversationsKey}_roles', jsonEncode(_conversationRoles));
     } catch (e) {
-      debugPrint('[ChatService] SharedPreferences persist failed: $e');
+      DebugLogService().info('Chat',' SharedPreferences persist failed: $e');
     }
   }
 }

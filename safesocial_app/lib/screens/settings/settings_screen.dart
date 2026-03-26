@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/backup_service.dart';
@@ -127,6 +128,16 @@ class SettingsScreen extends StatelessWidget {
             leading: Icon(Icons.code, color: cs.primary),
             title: const Text('Version'),
             subtitle: const Text('0.1.0 (development)'),
+          ),
+          const Divider(indent: 56),
+
+          // ── Developer ──────────────────────────────────
+          _SectionHeader(title: 'Developer'),
+          ListTile(
+            leading: Icon(Icons.terminal, color: cs.primary),
+            title: const Text('Debug Console'),
+            subtitle: const Text('View P2P network and messaging logs'),
+            onTap: () => context.push('/debug'),
           ),
           const SizedBox(height: 32),
         ],

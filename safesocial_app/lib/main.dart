@@ -11,6 +11,7 @@ import 'services/contact_service.dart';
 import 'services/media_service.dart';
 import 'services/group_service.dart';
 import 'services/theme_service.dart';
+import 'services/debug_log_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,6 +65,7 @@ void main() async {
         ChangeNotifierProvider.value(value: contactService),
         ChangeNotifierProvider.value(value: mediaService),
         ChangeNotifierProvider.value(value: groupService),
+        ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),
     ),

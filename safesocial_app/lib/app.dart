@@ -21,6 +21,7 @@ import 'screens/groups/group_settings_screen.dart';
 import 'screens/groups/add_group_member_screen.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/settings/settings_screen.dart';
+import 'screens/settings/debug_console_screen.dart';
 import 'screens/search/search_screen.dart';
 import 'screens/feed/post_detail_screen.dart';
 
@@ -118,6 +119,10 @@ class SpheresApp extends StatelessWidget {
         GoRoute(
           path: '/search',
           builder: (context, state) => const SearchScreen(),
+        ),
+        GoRoute(
+          path: '/debug',
+          builder: (context, state) => const DebugConsoleScreen(),
         ),
         GoRoute(
           path: '/post/:id',

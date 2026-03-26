@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:veilid/veilid.dart';
 
+import 'debug_log_service.dart';
+
 /// Manages the Veilid node lifecycle and network state.
 ///
 /// Provides access to the VeilidAPI and RoutingContext that all other
@@ -44,7 +46,7 @@ class VeilidService extends ChangeNotifier {
       _updateSubscription = updateStream.listen(
         _handleUpdate,
         onError: (e) {
-          debugPrint('[VeilidService] Update stream error: $e');
+          DebugLogService().error('Veilid', 'Update stream error: $e');
           _error = e.toString();
           notifyListeners();
         },
@@ -57,11 +59,11 @@ class VeilidService extends ChangeNotifier {
       );
 
       _isInitialized = true;
-      debugPrint('[VeilidService] Initialized and attaching...');
+      DebugLogService().success('Veilid', 'Initialized and attaching...');
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      debugPrint('[VeilidService] Initialization failed: $e');
+      DebugLogService().error('Veilid', 'Initialization failed: $e');
       notifyListeners();
       rethrow;
     }
@@ -85,7 +87,7 @@ class VeilidService extends ChangeNotifier {
       _attachmentState = AttachmentState.detached;
       notifyListeners();
     } catch (e) {
-      debugPrint('[VeilidService] Shutdown error: $e');
+      DebugLogService().error('Veilid', 'Shutdown error: $e');
     }
   }
 
@@ -129,20 +131,19 @@ class VeilidService extends ChangeNotifier {
             state == AttachmentState.attachedStrong ||
             state == AttachmentState.fullyAttached ||
             state == AttachmentState.overAttached;
-        debugPrint('[VeilidService] Attachment: $state');
+        DebugLogService().info('Veilid', 'Attachment: $state');
         notifyListeners();
 
       case VeilidUpdateNetwork(:final started, :final peers):
-        debugPrint(
-            '[VeilidService] Network: started=$started, peers=${peers.length}');
+        DebugLogService().info('Veilid', 'Network: started=$started, peers=${peers.length}');
 
       case VeilidUpdateValueChange(:final key, :final subkeys):
-        debugPrint('[VeilidService] Value changed: $key subkeys=$subkeys');
+        DebugLogService().info('Veilid', 'DHT value changed: $key subkeys=$subkeys');
         onValueChange?.call(key, subkeys);
 
       case VeilidLog(:final message, :final logLevel):
         if (logLevel == VeilidLogLevel.error) {
-          debugPrint('[Veilid] ERROR: $message');
+          DebugLogService().error('Veilid', message);
         }
 
       default:
