@@ -24,9 +24,9 @@ import 'screens/settings/settings_screen.dart';
 import 'screens/search/search_screen.dart';
 import 'screens/feed/post_detail_screen.dart';
 
-/// Root application widget for Sphere.
-class SphereApp extends StatelessWidget {
-  const SphereApp({super.key});
+/// Root application widget for Spheres.
+class SpheresApp extends StatelessWidget {
+  const SpheresApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +129,7 @@ class SphereApp extends StatelessWidget {
     );
 
     return MaterialApp.router(
-      title: 'Sphere',
+      title: 'Spheres',
       debugShowCheckedModeBanner: false,
       theme: lightTheme,
       darkTheme: darkTheme,

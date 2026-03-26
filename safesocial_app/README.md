@@ -1,4 +1,4 @@
-# sphere_app
+# spheres_app
 
 A new Flutter project.
 

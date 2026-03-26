@@ -1,8 +1,8 @@
-# Sphere
+# Spheres
 
 **Your data. Your network. Your rules.**
 
-Sphere is a decentralized peer-to-peer social network where all data stays on your device. Built on [Veilid](https://veilid.com/) (a Rust P2P framework with onion routing) and [Flutter](https://flutter.dev/), Sphere requires no servers, no accounts, and performs no metadata collection. Your identity is a cryptographic keypair -- not an email address or phone number.
+Spheres is a decentralized peer-to-peer social network where all data stays on your device. Built on [Veilid](https://veilid.com/) (a Rust P2P framework with onion routing) and [Flutter](https://flutter.dev/), Spheres requires no servers, no accounts, and performs no metadata collection. Your identity is a cryptographic keypair -- not an email address or phone number.
 
 ## Key Features
 
@@ -28,7 +28,7 @@ Sphere is a decentralized peer-to-peer social network where all data stays on yo
 |              veilid_support (FFI)                  |
 |         Flutter <-> Rust bridge via Veilid         |
 +---------------------------------------------------+
-|              sphere_core (Rust)                  |
+|              spheres_core (Rust)                  |
 |  node | identity | schema | profile | contacts     |
 |  messaging | groups | feed | media                 |
 +---------------------------------------------------+
@@ -49,23 +49,23 @@ Sphere is a decentralized peer-to-peer social network where all data stays on yo
 
 ```bash
 # Build Rust core
-cd sphere_core && cargo build
+cd spheres_core && cargo build
 
 # Run Flutter app
-cd sphere_app && flutter run
+cd spheres_app && flutter run
 ```
 
 ## Project Structure
 
 ```
-sphere/
-  sphere_core/          Rust crate — Veilid integration and P2P logic
+spheres/
+  spheres_core/          Rust crate — Veilid integration and P2P logic
     src/
       lib.rs              Core struct, error types, module declarations
       node.rs             Veilid node lifecycle and attachment state
       identity.rs         Ed25519 keypair generation, storage, import/export
       schema.rs           DHT record schemas and serialization helpers
-  sphere_app/           Flutter application
+  spheres_app/           Flutter application
     lib/
       main.dart           Entry point, service initialization, Provider setup
       app.dart            GoRouter configuration, bottom navigation shell
@@ -83,12 +83,12 @@ sphere/
 
 ## Part of SafeSelf
 
-Sphere is the second phase of the **SafeSelf** umbrella project:
+Spheres is the second phase of the **SafeSelf** umbrella project:
 
 1. **SeeSelf** (Phase 1) -- Personal data audit crawler that discovers what information about you is publicly available and models what an AI system could infer from it.
-2. **Sphere** (Phase 2) -- This project. A decentralized social network that gives you a practical alternative to surveillance-based platforms.
+2. **Spheres** (Phase 2) -- This project. A decentralized social network that gives you a practical alternative to surveillance-based platforms.
 
-The motivation: if SeeSelf shows you how exposed you are, Sphere gives you a way to take back control.
+The motivation: if SeeSelf shows you how exposed you are, Spheres gives you a way to take back control.
 
 ## License
 

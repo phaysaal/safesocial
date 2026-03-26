@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="sphere_app"
+        android:label="spheres_app"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

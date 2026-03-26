@@ -1,16 +1,16 @@
 # Rust
-sphere_core/target/
+spheres_core/target/
 **/*.rs.bk
 Cargo.lock
 
 # Flutter
-sphere_app/.dart_tool/
-sphere_app/.packages
-sphere_app/.pub/
-sphere_app/build/
-sphere_app/.flutter-plugins
-sphere_app/.flutter-plugins-dependencies
-sphere_app/pubspec.lock
+spheres_app/.dart_tool/
+spheres_app/.packages
+spheres_app/.pub/
+spheres_app/build/
+spheres_app/.flutter-plugins
+spheres_app/.flutter-plugins-dependencies
+spheres_app/pubspec.lock
 
 # IDE
 .idea/
@@ -27,8 +27,8 @@ Thumbs.db
 **/table_store/
 **/block_store/
 **/protected_store/
-sphere_app/generate_*.py
-sphere_app/assets/images/icon_candidate_*.png
+spheres_app/generate_*.py
+spheres_app/assets/images/icon_candidate_*.png
 sphere-icon-bubble.svg
 sphere_v7_*.svg
 target/

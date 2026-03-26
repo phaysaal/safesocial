@@ -1,5 +1,5 @@
 """
-Place the Sphere v7 golden v2 logo on a white rounded-square background.
+Place the Spheres v7 golden v2 logo on a white rounded-square background.
 """
 
 from PIL import Image, ImageDraw
@@ -59,7 +59,7 @@ def main():
         fg.paste(resized, (pad, pad))
         fg.save(f"{res_dir}/{folder}/ic_launcher_foreground.png", "PNG")
 
-    print("Done! Icon generated from sphere_v7_golden_v2.png")
+    print("Done! Icon generated from spheres_v7_golden_v2.png")
 
 
 if __name__ == "__main__":

@@ -121,7 +121,7 @@ pub async fn wait_for_attach(api: &VeilidAPI, timeout: Duration) -> Result<()> {
         }
 
         if start.elapsed() >= timeout {
-            return Err(crate::SphereError::Generic(format!(
+            return Err(crate::SpheresError::Generic(format!(
                 "Timed out waiting for node to attach after {:?}",
                 timeout
             )));

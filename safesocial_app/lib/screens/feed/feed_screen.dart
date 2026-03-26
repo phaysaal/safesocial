@@ -195,7 +195,7 @@ class _FeedScreenState extends State<FeedScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Sphere',
+          'Spheres',
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
             fontSize: 24,

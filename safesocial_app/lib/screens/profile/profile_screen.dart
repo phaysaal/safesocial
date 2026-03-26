@@ -335,7 +335,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               ListTile(
                 leading: const Icon(Icons.info_outline),
-                title: const Text('About Sphere'),
+                title: const Text('About Spheres'),
                 onTap: () => Navigator.pop(ctx),
               ),
               const SizedBox(height: 8),

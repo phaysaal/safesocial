@@ -19,9 +19,9 @@ import 'veilid_service.dart';
 /// Stub implementation that generates UUID-based mock keypairs and
 /// persists to SharedPreferences instead of Veilid's TableStore.
 class IdentityService extends ChangeNotifier {
-  static const _prefsProfileKey = 'sphere_identity_profile';
-  static const _prefsKeypairKey = 'sphere_identity_keypair';
-  static const _prefsDhtKeyKey = 'sphere_identity_dht_key';
+  static const _prefsProfileKey = 'spheres_identity_profile';
+  static const _prefsKeypairKey = 'spheres_identity_keypair';
+  static const _prefsDhtKeyKey = 'spheres_identity_dht_key';
 
   final VeilidService veilidService;
 

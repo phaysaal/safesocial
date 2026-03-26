@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 // ---------------------------------------------------------------------------
-// Sphere brand palette — sunset coral/rose from the logo
+// Spheres brand palette — sunset coral/rose from the logo
 // ---------------------------------------------------------------------------
 
 // Light theme colors

@@ -224,7 +224,7 @@ pub async fn send_group_message(
         .iter()
         .position(|m| m.public_key == msg.sender)
         .ok_or_else(|| {
-            crate::SphereError::Generic(format!(
+            crate::SpheresError::Generic(format!(
                 "Sender {} is not a member of group {:?}",
                 msg.sender, group_key
             ))

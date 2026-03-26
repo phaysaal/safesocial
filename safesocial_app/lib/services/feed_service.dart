@@ -13,8 +13,8 @@ import '../models/post.dart';
 /// Persists posts to SharedPreferences for offline access. On refresh,
 /// merges any new posts from contacts into the timeline.
 class FeedService extends ChangeNotifier {
-  static const _postsKey = 'sphere_feed_posts';
-  static const _hiddenKey = 'sphere_hidden_posts';
+  static const _postsKey = 'spheres_feed_posts';
+  static const _hiddenKey = 'spheres_hidden_posts';
 
   final List<Post> _posts = [];
   final Set<String> _hiddenPostIds = {};

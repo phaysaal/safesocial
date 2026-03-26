@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.sphere" "\0"
-            VALUE "FileDescription", "sphere_app" "\0"
+            VALUE "CompanyName", "com.spheres" "\0"
+            VALUE "FileDescription", "spheres_app" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "sphere_app" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.sphere. All rights reserved." "\0"
-            VALUE "OriginalFilename", "sphere_app.exe" "\0"
-            VALUE "ProductName", "sphere_app" "\0"
+            VALUE "InternalName", "spheres_app" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.spheres. All rights reserved." "\0"
+            VALUE "OriginalFilename", "spheres_app.exe" "\0"
+            VALUE "ProductName", "spheres_app" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

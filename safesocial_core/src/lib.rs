@@ -1,6 +1,6 @@
-//! Sphere P2P social network core library.
+//! Spheres P2P social network core library.
 //!
-//! This crate provides the Veilid-based backend for Sphere, a decentralized
+//! This crate provides the Veilid-based backend for Spheres, a decentralized
 //! peer-to-peer social network where all data stays on user devices. It handles
 //! identity management, profile storage, messaging, group chats, feeds, and
 //! media — all via Veilid's DHT and encrypted routing.
@@ -21,9 +21,9 @@ use veilid_core::*;
 /// Callback type for receiving Veilid network updates.
 pub type UpdateCallback = Arc<dyn Fn(VeilidUpdate) + Send + Sync>;
 
-/// Errors that can occur within the Sphere core library.
+/// Errors that can occur within the Spheres core library.
 #[derive(Debug, thiserror::Error)]
-pub enum SphereError {
+pub enum SpheresError {
     /// An error originating from the Veilid API.
     #[error("Veilid error: {0}")]
     Veilid(#[from] VeilidAPIError),
@@ -49,22 +49,22 @@ pub enum SphereError {
     Generic(String),
 }
 
-/// A convenience Result type for Sphere operations.
-pub type Result<T> = std::result::Result<T, SphereError>;
+/// A convenience Result type for Spheres operations.
+pub type Result<T> = std::result::Result<T, SpheresError>;
 
-/// The main entry point for the Sphere P2P network.
+/// The main entry point for the Spheres P2P network.
 ///
-/// `SphereCore` manages the Veilid API lifecycle, routing context, and
+/// `SpheresCore` manages the Veilid API lifecycle, routing context, and
 /// the user's local identity. All higher-level operations (profiles, messaging,
 /// contacts, etc.) use the API and routing context held here.
-pub struct SphereCore {
+pub struct SpheresCore {
     api: VeilidAPI,
     routing_context: RoutingContext,
     identity: Option<KeyPair>,
 }
 
-impl SphereCore {
-    /// Initialize the Sphere core, starting the Veilid node.
+impl SpheresCore {
+    /// Initialize the Spheres core, starting the Veilid node.
     ///
     /// This builds the Veilid configuration, starts the API, attaches to the
     /// network, and creates a privacy-routed routing context with sequencing.
@@ -73,10 +73,10 @@ impl SphereCore {
     /// * `state_dir` — filesystem path where Veilid stores its tables, blocks, and secrets
     /// * `update_callback` — callback invoked on every Veilid network update
     pub async fn new(state_dir: &str, update_callback: UpdateCallback) -> Result<Self> {
-        tracing::info!("Initializing Sphere core with state_dir={}", state_dir);
+        tracing::info!("Initializing Spheres core with state_dir={}", state_dir);
 
         let config_json = serde_json::json!({
-            "program_name": "sphere",
+            "program_name": "spheres",
             "namespace": "",
             "network": {
                 "connection_initial_timeout_ms": 2000,
@@ -99,7 +99,7 @@ impl SphereCore {
         });
 
         let config: VeilidConfig = serde_json::from_value(config_json)
-            .map_err(SphereError::Serialization)?;
+            .map_err(SpheresError::Serialization)?;
 
         let api = api_startup(update_callback, config).await?;
 
@@ -124,7 +124,7 @@ impl SphereCore {
     ///
     /// Detaches from the network and shuts down the API.
     pub async fn shutdown(self) -> Result<()> {
-        tracing::info!("Shutting down Sphere core");
+        tracing::info!("Shutting down Spheres core");
         self.api.detach().await?;
         self.api.shutdown().await;
         Ok(())

@@ -83,7 +83,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           const SizedBox(height: 24),
 
           Text(
-            'Sphere',
+            'Spheres',
             style: theme.textTheme.headlineLarge?.copyWith(
               fontWeight: FontWeight.w800,
               fontSize: 32,
@@ -172,7 +172,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'This is how friends will see you on Sphere.',
+              'This is how friends will see you on Spheres.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: cs.onSurfaceVariant,
               ),

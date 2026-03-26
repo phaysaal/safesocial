@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Sphere dark theme matching SeeSelf's aesthetic.
+/// Spheres dark theme matching SeeSelf's aesthetic.
 final ThemeData darkTheme = ThemeData(
   useMaterial3: true,
   brightness: Brightness.dark,
