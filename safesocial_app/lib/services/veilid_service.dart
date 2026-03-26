@@ -125,17 +125,24 @@ class VeilidService extends ChangeNotifier {
   void _handleUpdate(VeilidUpdate update) {
     switch (update) {
       case VeilidUpdateAttachment(:final state):
+        final wasAttached = _isAttached;
         _attachmentState = state;
         _isAttached = state == AttachmentState.attachedWeak ||
             state == AttachmentState.attachedGood ||
             state == AttachmentState.attachedStrong ||
             state == AttachmentState.fullyAttached ||
             state == AttachmentState.overAttached;
-        DebugLogService().info('Veilid', 'Attachment: $state');
+        // Only log when state actually changes
+        if (_isAttached != wasAttached) {
+          DebugLogService().success('Veilid', _isAttached ? 'Connected ($state)' : 'Disconnected ($state)');
+        }
         notifyListeners();
 
       case VeilidUpdateNetwork(:final started, :final peers):
-        DebugLogService().info('Veilid', 'Network: started=$started, peers=${peers.length}');
+        // Only log network changes when they're significant (not every update)
+        if (started && peers.isNotEmpty && peers.length % 10 == 0) {
+          DebugLogService().info('Veilid', 'Network: ${peers.length} peers');
+        }
 
       case VeilidUpdateValueChange(:final key, :final subkeys):
         DebugLogService().info('Veilid', 'DHT value changed: $key subkeys=$subkeys');

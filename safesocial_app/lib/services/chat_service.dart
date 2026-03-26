@@ -360,6 +360,15 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Delete a message locally.
+  Future<void> deleteMessage(String conversationId, String messageId) async {
+    final msgs = _conversations[conversationId];
+    if (msgs == null) return;
+    msgs.removeWhere((m) => m.id == messageId);
+    await _cacheMessages(conversationId);
+    notifyListeners();
+  }
+
   Future<List<Message>> getMessages(String conversationId) async {
     return _conversations[conversationId] ?? [];
   }

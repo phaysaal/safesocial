@@ -205,6 +205,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       return MessageBubble(
                         message: message,
                         isMine: isMine,
+                        onDelete: (msg) {
+                          chatService.deleteMessage(
+                            widget.conversationId, msg.id);
+                        },
                       );
                     },
                   ),
