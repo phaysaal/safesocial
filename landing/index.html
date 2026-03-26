@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spheres — Decentralized P2P Social Network</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #e8455a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 24px;
+      padding: 48px 40px;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    }
+    .icon {
+      width: 120px;
+      height: 120px;
+      border-radius: 28px;
+      margin: 0 auto 24px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      color: #1c1e21;
+      margin-bottom: 8px;
+    }
+    .tagline {
+      font-size: 16px;
+      color: #65676b;
+      margin-bottom: 32px;
+      line-height: 1.5;
+    }
+    .features {
+      text-align: left;
+      margin-bottom: 32px;
+    }
+    .feature {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+    .feature-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-right: 12px;
+      font-size: 18px;
+    }
+    .feature-icon.lock { background: #e8f4fd; }
+    .feature-icon.cloud { background: #fef3e2; }
+    .feature-icon.heart { background: #fde8ea; }
+    .feature h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1c1e21;
+    }
+    .feature p {
+      font-size: 13px;
+      color: #65676b;
+      margin-top: 2px;
+    }
+    .download-btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #e8455a 0%, #d47858 100%);
+      color: white;
+      text-decoration: none;
+      padding: 16px 40px;
+      border-radius: 12px;
+      font-size: 17px;
+      font-weight: 700;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 16px rgba(232, 69, 90, 0.3);
+    }
+    .download-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(232, 69, 90, 0.4);
+    }
+    .version {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #999;
+    }
+    .github {
+      margin-top: 24px;
+      font-size: 14px;
+    }
+    .github a {
+      color: #1877f2;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .github a:hover { text-decoration: underline; }
+    .privacy-note {
+      margin-top: 24px;
+      padding: 12px 16px;
+      background: #f0f2f5;
+      border-radius: 12px;
+      font-size: 12px;
+      color: #65676b;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="https://raw.githubusercontent.com/phaysaal/safesocial/main/safesocial_app/assets/images/icon_1024.png"
+         alt="Spheres" class="icon">
+
+    <h1>Spheres</h1>
+    <p class="tagline">Your data. Your network. Your rules.<br>
+    A decentralized social network with no servers, no accounts, and no tracking.</p>
+
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon lock">&#128274;</div>
+        <div>
+          <h3>Private by Design</h3>
+          <p>End-to-end encryption. Messages never touch a server.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon cloud">&#9729;&#65039;</div>
+        <div>
+          <h3>No Servers</h3>
+          <p>Peer-to-peer via Veilid. Your data stays on your device.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon heart">&#10084;&#65039;</div>
+        <div>
+          <h3>Familiar Experience</h3>
+          <p>Feed, chat, stories, reactions — feels like home.</p>
+        </div>
+      </div>
+    </div>
+
+    <a href="https://github.com/phaysaal/safesocial/releases/download/v0.1.0/Spheres-v0.1.0-arm64.apk"
+       download
+       class="download-btn">
+      Download for Android (53MB)
+    </a>
+
+    <p class="version">v0.1.0 &middot; Android 5.0+ &middot; <a href="https://github.com/phaysaal/safesocial/releases/download/v0.1.0/Spheres-v0.1.0-arm32.apk" style="color:#65676b">Older phones (32-bit)</a></p>
+
+    <div class="github">
+      <a href="https://github.com/phaysaal/safesocial">View on GitHub</a>
+    </div>
+
+    <div class="privacy-note">
+      Spheres is part of the <strong>SafeSelf</strong> project. No data is collected,
+      no analytics are tracked, and no accounts are required. Your identity is a
+      cryptographic keypair that never leaves your device.
+    </div>
+  </div>
+</body>
+</html>

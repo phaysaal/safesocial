@@ -2,6 +2,14 @@ name = "spheres-relay"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 
+# Custom domain — to enable:
+# 1. Delete existing relay.spheres.dev DNS record in Cloudflare dashboard
+# 2. Uncomment the routes below
+# 3. Run: npx wrangler deploy
+# routes = [
+#   { pattern = "relay.spheres.dev", custom_domain = true }
+# ]
+
 # Durable Objects for room state
 [durable_objects]
 bindings = [
@@ -11,8 +19,3 @@ bindings = [
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RelayRoom"]
-
-# Optional: custom domain
-# routes = [
-#   { pattern = "relay.spheres.dev", custom_domain = true }
-# ]
