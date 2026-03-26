@@ -1,6 +1,6 @@
-//! SafeSocial P2P social network core library.
+//! Sphere P2P social network core library.
 //!
-//! This crate provides the Veilid-based backend for SafeSocial, a decentralized
+//! This crate provides the Veilid-based backend for Sphere, a decentralized
 //! peer-to-peer social network where all data stays on user devices. It handles
 //! identity management, profile storage, messaging, group chats, feeds, and
 //! media — all via Veilid's DHT and encrypted routing.
@@ -21,9 +21,9 @@ use veilid_core::*;
 /// Callback type for receiving Veilid network updates.
 pub type UpdateCallback = Arc<dyn Fn(VeilidUpdate) + Send + Sync>;
 
-/// Errors that can occur within the SafeSocial core library.
+/// Errors that can occur within the Sphere core library.
 #[derive(Debug, thiserror::Error)]
-pub enum SafeSocialError {
+pub enum SphereError {
     /// An error originating from the Veilid API.
     #[error("Veilid error: {0}")]
     Veilid(#[from] VeilidAPIError),
@@ -49,22 +49,22 @@ pub enum SafeSocialError {
     Generic(String),
 }
 
-/// A convenience Result type for SafeSocial operations.
-pub type Result<T> = std::result::Result<T, SafeSocialError>;
+/// A convenience Result type for Sphere operations.
+pub type Result<T> = std::result::Result<T, SphereError>;
 
-/// The main entry point for the SafeSocial P2P network.
+/// The main entry point for the Sphere P2P network.
 ///
-/// `SafeSocialCore` manages the Veilid API lifecycle, routing context, and
+/// `SphereCore` manages the Veilid API lifecycle, routing context, and
 /// the user's local identity. All higher-level operations (profiles, messaging,
 /// contacts, etc.) use the API and routing context held here.
-pub struct SafeSocialCore {
+pub struct SphereCore {
     api: VeilidAPI,
     routing_context: RoutingContext,
     identity: Option<KeyPair>,
 }
 
-impl SafeSocialCore {
-    /// Initialize the SafeSocial core, starting the Veilid node.
+impl SphereCore {
+    /// Initialize the Sphere core, starting the Veilid node.
     ///
     /// This builds the Veilid configuration, starts the API, attaches to the
     /// network, and creates a privacy-routed routing context with sequencing.
@@ -73,10 +73,10 @@ impl SafeSocialCore {
     /// * `state_dir` — filesystem path where Veilid stores its tables, blocks, and secrets
     /// * `update_callback` — callback invoked on every Veilid network update
     pub async fn new(state_dir: &str, update_callback: UpdateCallback) -> Result<Self> {
-        tracing::info!("Initializing SafeSocial core with state_dir={}", state_dir);
+        tracing::info!("Initializing Sphere core with state_dir={}", state_dir);
 
         let config_json = serde_json::json!({
-            "program_name": "safesocial",
+            "program_name": "sphere",
             "namespace": "",
             "network": {
                 "connection_initial_timeout_ms": 2000,
@@ -99,7 +99,7 @@ impl SafeSocialCore {
         });
 
         let config: VeilidConfig = serde_json::from_value(config_json)
-            .map_err(SafeSocialError::Serialization)?;
+            .map_err(SphereError::Serialization)?;
 
         let api = api_startup(update_callback, config).await?;
 
@@ -124,7 +124,7 @@ impl SafeSocialCore {
     ///
     /// Detaches from the network and shuts down the API.
     pub async fn shutdown(self) -> Result<()> {
-        tracing::info!("Shutting down SafeSocial core");
+        tracing::info!("Shutting down Sphere core");
         self.api.detach().await?;
         self.api.shutdown().await;
         Ok(())

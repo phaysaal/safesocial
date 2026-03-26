@@ -1,4 +1,4 @@
-# SafeSocial Threat Model
+# Sphere Threat Model
 
 ## Assets
 
@@ -86,11 +86,11 @@ An attacker without the appropriate secret key cannot forge writes.
 - TableStore data is encrypted at rest by Veilid.
 - Device-level protections (PIN, biometrics, full-disk encryption) provide an additional layer.
 
-**Residual risk:** A fully compromised device (root access, malware with keychain access) exposes all local data. This is a fundamental limitation of any local-first design. SafeSocial cannot protect data on a device that the user does not control.
+**Residual risk:** A fully compromised device (root access, malware with keychain access) exposes all local data. This is a fundamental limitation of any local-first design. Sphere cannot protect data on a device that the user does not control.
 
 ### 7. Network-Level Surveillance
 
-**Threat:** An ISP, government, or network operator monitors the user's internet traffic to identify SafeSocial usage and communication patterns.
+**Threat:** An ISP, government, or network operator monitors the user's internet traffic to identify Sphere usage and communication patterns.
 
 **Mitigation:**
 - Private routes hide the true source and destination of all DHT operations.
@@ -114,7 +114,7 @@ An attacker without the appropriate secret key cannot forge writes.
 **Mitigation:**
 - **Local-first design:** All data is stored locally. The user can read their messages, contacts, and posts even when the network is completely unavailable.
 - **DHT replication:** Records are replicated across multiple Veilid peers. Taking down a subset of peers does not destroy records.
-- **Offline operation:** SafeSocial is designed to work offline. Messages composed offline are queued and delivered when connectivity is restored.
+- **Offline operation:** Sphere is designed to work offline. Messages composed offline are queued and delivered when connectivity is restored.
 
 **Residual risk:** A sustained, large-scale attack on the Veilid network could delay message delivery. It cannot destroy data or prevent local access to already-synced content.
 
@@ -122,25 +122,25 @@ An attacker without the appropriate secret key cannot forge writes.
 
 **Threat:** The user loses their device and with it their identity keypair, permanently losing access to their identity and encrypted data.
 
-**Mitigation:** SafeSocial provides identity export/backup functionality (`identity_to_string()` / `identity_from_string()`). Users can export their full keypair as a base64 string and store it in a secure location (password manager, printed paper in a safe, etc.).
+**Mitigation:** Sphere provides identity export/backup functionality (`identity_to_string()` / `identity_from_string()`). Users can export their full keypair as a base64 string and store it in a secure location (password manager, printed paper in a safe, etc.).
 
 **Residual risk:** This is entirely the user's responsibility. If the user does not back up their identity and loses their device, the identity is unrecoverable. There is no "forgot password" flow -- this is by design.
 
-## What SafeSocial Does NOT Protect Against
+## What Sphere Does NOT Protect Against
 
 These threats are explicitly out of scope:
 
 | Threat | Why It Is Out of Scope |
 |--------|----------------------|
 | **Compromised device (root/jailbreak)** | If an attacker has root access to the device, they can extract keys from the keychain, read decrypted messages from memory, and install keyloggers. No application-level protection can defend against this. |
-| **Rubber-hose cryptanalysis** | If a user is physically coerced into unlocking their device or revealing their backup key, SafeSocial cannot help. This is a physical security problem, not a software problem. |
-| **Screenshots by recipient** | Once a message is decrypted and displayed on a contact's screen, that contact can screenshot, photograph, or transcribe it. SafeSocial provides no DRM. |
+| **Rubber-hose cryptanalysis** | If a user is physically coerced into unlocking their device or revealing their backup key, Sphere cannot help. This is a physical security problem, not a software problem. |
+| **Screenshots by recipient** | Once a message is decrypted and displayed on a contact's screen, that contact can screenshot, photograph, or transcribe it. Sphere provides no DRM. |
 | **Metadata within shared groups** | Group members can see each other's public keys, display names, message timestamps, and online status. This is inherent to the group functionality. A group member could share this information externally. |
-| **Correlation via shared content** | If a user posts the same text or image on SafeSocial and a public platform, an observer could correlate the two identities. SafeSocial cannot prevent users from de-anonymizing themselves. |
+| **Correlation via shared content** | If a user posts the same text or image on Sphere and a public platform, an observer could correlate the two identities. Sphere cannot prevent users from de-anonymizing themselves. |
 
 ## Comparison with Centralized Alternatives
 
-The primary motivation for SafeSocial is protection against systemic, AI-powered surveillance platforms (Palantir-like systems) that aggregate data from social networks to model psychology, behavior, and predict future actions.
+The primary motivation for Sphere is protection against systemic, AI-powered surveillance platforms (Palantir-like systems) that aggregate data from social networks to model psychology, behavior, and predict future actions.
 
 ### What surveillance systems can extract from centralized social networks
 
@@ -156,9 +156,9 @@ The primary motivation for SafeSocial is protection against systemic, AI-powered
 | Device fingerprint | Browser/app telemetry, device model, OS version, installed apps |
 | Cross-platform correlation | Shared identifiers (email, phone) link profiles across platforms |
 
-### What surveillance systems can extract from SafeSocial
+### What surveillance systems can extract from Sphere
 
-| Data Category | Available from SafeSocial |
+| Data Category | Available from Sphere |
 |---------------|------------------------|
 | Real identity | None. Identity is a cryptographic keypair with no link to real-world identity. |
 | Social graph | None. Contact lists are local-only (TableStore). No server has a copy. |

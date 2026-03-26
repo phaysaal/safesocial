@@ -2,7 +2,7 @@
 name = "safesocial_core"
 version = "0.1.0"
 edition = "2021"
-description = "SafeSocial P2P social network core — Veilid integration"
+description = "Sphere P2P social network core — Veilid integration"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]

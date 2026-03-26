@@ -106,7 +106,7 @@ pub async fn retrieve_media(
             tracing::debug!("Retrieved {} bytes", data.len());
             Ok(data)
         }
-        None => Err(crate::SafeSocialError::RecordNotFound(format!(
+        None => Err(crate::SphereError::RecordNotFound(format!(
             "Media not found: {}",
             media_ref.block_id
         ))),

@@ -4,20 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SafeSocial is a decentralized P2P social network built on **Veilid** (Rust P2P framework with onion routing) and **Flutter**. No servers, no accounts, no metadata collection. Identity is a cryptographic Ed25519 keypair. Part of the SafeSelf umbrella project (Phase 2, after SeeSelf).
+Sphere is a decentralized P2P social network built on **Veilid** (Rust P2P framework with onion routing) and **Flutter**. No servers, no accounts, no metadata collection. Identity is a cryptographic Ed25519 keypair. Part of the SafeSelf umbrella project (Phase 2, after SeeSelf).
 
 ## Build & Run Commands
 
-### Rust core (`safesocial_core/`)
+### Rust core (`sphere_core/`)
 ```bash
-cargo build                      # Debug build (from workspace root or safesocial_core/)
+cargo build                      # Debug build (from workspace root or sphere_core/)
 cargo build --release            # Release build
 cargo test                       # Run all tests
 cargo test <test_name>           # Run a single test
 cargo check                      # Type-check without building
 ```
 
-### Flutter app (`safesocial_app/`)
+### Flutter app (`sphere_app/`)
 ```bash
 flutter pub get                  # Fetch dependencies
 flutter analyze                  # Lint (uses analysis_options.yaml with flutter_lints)
@@ -37,13 +37,13 @@ Flutter UI (Provider/ChangeNotifier + GoRouter)
     ↓ Dart method calls
 Dart Services (VeilidService, IdentityService, ChatService, FeedService, ContactService, MediaService, GroupService)
     ↓ FFI via veilid_support (JSON serialization across boundary)
-safesocial_core (Rust) — node, identity, schema, profile, contacts, messaging, groups, feed, media
+sphere_core (Rust) — node, identity, schema, profile, contacts, messaging, groups, feed, media
     ↓ Rust API calls
 veilid-core — DHT, ProtectedStore, TableStore, BlockStore, Private Routes, Crypto
 ```
 
-### Rust core (`safesocial_core/src/`)
-- `lib.rs` — `SafeSocialCore` struct (holds VeilidAPI, RoutingContext, KeyPair), `SafeSocialError` enum via `thiserror`
+### Rust core (`sphere_core/src/`)
+- `lib.rs` — `SphereCore` struct (holds VeilidAPI, RoutingContext, KeyPair), `SphereError` enum via `thiserror`
 - `node.rs` — Veilid node start/stop/attach lifecycle, state tracking
 - `identity.rs` — Ed25519 keypair generation/storage/import/export via ProtectedStore
 - `schema.rs` — DHT record schema definitions, JSON serialization helpers
@@ -54,7 +54,7 @@ veilid-core — DHT, ProtectedStore, TableStore, BlockStore, Private Routes, Cry
 - `feed.rs` — Post publish/subscribe, reactions (post DHT: content=subkey 0, reactions=subkey 1)
 - `media.rs` — BlockStore put/get for photos/videos
 
-### Flutter app (`safesocial_app/lib/`)
+### Flutter app (`sphere_app/lib/`)
 - `main.dart` — Entry point, MultiProvider setup for all services
 - `app.dart` — GoRouter config, bottom navigation shell
 - `services/` — Dart service layer, each service is a `ChangeNotifier` consumed via Provider
@@ -76,7 +76,7 @@ All persistence goes through Veilid's four-tier storage:
 
 ## Key Conventions
 
-- **Rust error handling**: Custom `SafeSocialError` enum with `thiserror`; `Result<T>` type alias throughout
+- **Rust error handling**: Custom `SphereError` enum with `thiserror`; `Result<T>` type alias throughout
 - **Rust async**: All I/O uses Tokio; Veilid API is fully async
 - **Rust logging**: `tracing` crate (`info!`, `debug!`, `error!`)
 - **Dart state**: Provider with `ChangeNotifier` — services are injected at app root

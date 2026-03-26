@@ -1,16 +1,16 @@
 # Rust
-safesocial_core/target/
+sphere_core/target/
 **/*.rs.bk
 Cargo.lock
 
 # Flutter
-safesocial_app/.dart_tool/
-safesocial_app/.packages
-safesocial_app/.pub/
-safesocial_app/build/
-safesocial_app/.flutter-plugins
-safesocial_app/.flutter-plugins-dependencies
-safesocial_app/pubspec.lock
+sphere_app/.dart_tool/
+sphere_app/.packages
+sphere_app/.pub/
+sphere_app/build/
+sphere_app/.flutter-plugins
+sphere_app/.flutter-plugins-dependencies
+sphere_app/pubspec.lock
 
 # IDE
 .idea/
@@ -27,8 +27,8 @@ Thumbs.db
 **/table_store/
 **/block_store/
 **/protected_store/
-safesocial_app/generate_*.py
-safesocial_app/assets/images/icon_candidate_*.png
-safesocial-icon-bubble.svg
-safesocial_v7_*.svg
+sphere_app/generate_*.py
+sphere_app/assets/images/icon_candidate_*.png
+sphere-icon-bubble.svg
+sphere_v7_*.svg
 target/

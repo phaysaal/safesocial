@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 512 560"
+   width="512"
+   height="560"
+   version="1.1"
+   id="svg11"
+   sodipodi:docname="safesocial-icon-bubble.svg"
+   inkscape:version="1.4.3 (1:1.4.3+202512261035+0d15f75042)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview11"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="1.6160714"
+     inkscape:cx="255.8674"
+     inkscape:cy="280"
+     inkscape:window-width="1920"
+     inkscape:window-height="1139"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg11" />
+  <defs
+     id="defs3">
+    <linearGradient
+       id="bg"
+       x1="0%"
+       y1="0%"
+       x2="100%"
+       y2="100%">
+      <stop
+         offset="0%"
+         stop-color="#1E6EF0"
+         id="stop1" />
+      <stop
+         offset="48%"
+         stop-color="#7B3FE4"
+         id="stop2" />
+      <stop
+         offset="100%"
+         stop-color="#00C49A"
+         id="stop3" />
+    </linearGradient>
+    <clipPath
+       id="shapeClip">
+      <path
+         d="         M 256 18         C 256 18 420 60 440 80         C 468 108 468 148 468 200         C 468 300 390 370 256 410         C 122 370 44 300 44 200         C 44 148 44 108 72 80         C 92 60 256 18 256 18         Z         M 256 410 L 224 480 L 296 430 Z       "
+         id="path3" />
+    </clipPath>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#bg"
+       id="linearGradient12"
+       x1="277.88113"
+       y1="219.49313"
+       x2="307.61327"
+       y2="249.22527"
+       gradientTransform="matrix(0.87447463,0,0,1.1435437,1.2375691,-79.20442)"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#bg"
+       id="linearGradient13"
+       x1="240.5"
+       y1="223.5"
+       x2="271.5"
+       y2="254.5"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="translate(1.2375691,-79.20442)" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#bg"
+       id="linearGradient14"
+       x1="39.664974"
+       y1="18.657824"
+       x2="454.28329"
+       y2="433.27614"
+       gradientTransform="matrix(1.0365458,0,0,1.043841,0,-1.4758011)"
+       gradientUnits="userSpaceOnUse" />
+  </defs>
+  <!-- The shield-bubble IS the entire shape — filled with gradient -->
+  <path
+     d="m 256,18 c 0,0 -198,58.427404 -212,153.64243 -8,51.93547 0,108.1989 32,157.97038 40,62.75537 108,101.70697 180,121.18277 72,-19.4758 140,-58.4274 180,-121.18277 C 468,279.84133 476,223.5779 468,171.64243 454,76.427404 256,18 256,18 Z"
+     fill="url(#bg)"
+     id="path4"
+     style="fill:url(#linearGradient14);stroke-width:1.04019" />
+  <!-- Bubble tail — pointing down-left, off-center like reference -->
+  <!-- Shield outline inside — white stroke, bold -->
+  <!-- Signal arcs — 3 concentric, above head -->
+  <path
+     d="m 184.42741,112.52693 q 73.42894,-30.84393 146.85788,0"
+     fill="none"
+     stroke="#ffffff"
+     stroke-width="11.6108"
+     stroke-linecap="round"
+     opacity="0.35"
+     id="path7" />
+  <path
+     d="m 199.1132,94.90182 q 58.74315,-27.53922 117.48631,0"
+     fill="none"
+     stroke="#ffffff"
+     stroke-width="11.6108"
+     stroke-linecap="round"
+     opacity="0.65"
+     id="path8" />
+  <path
+     d="m 215.02281,78.37829 q 42.83354,-22.03137 85.66709,0"
+     fill="none"
+     stroke="#ffffff"
+     stroke-width="11.6108"
+     stroke-linecap="round"
+     id="path9" />
+  <!-- Head -->
+  <ellipse
+     cx="257.85635"
+     cy="172.01163"
+     fill="#ffffff"
+     id="circle9"
+     rx="61.190784"
+     ry="55.078438"
+     style="stroke-width:1.16108" />
+  <!-- Keyhole: circle + tapered slot -->
+  <circle
+     cx="257.23758"
+     cy="159.79558"
+     r="15.5"
+     fill="url(#bg)"
+     id="circle10"
+     style="fill:url(#linearGradient13)" />
+  <path
+     d="m 246.73757,171.79558 -2.5,28 q 0,6 6,6 h 14 q 6,0 6,-6 l -2.5,-28 z"
+     fill="url(#bg)"
+     id="path10"
+     style="fill:url(#linearGradient12)" />
+  <!-- Neck -->
+  <rect
+     x="241.94673"
+     y="223.78539"
+     width="31.819208"
+     height="30.843924"
+     rx="8.5667095"
+     fill="#ffffff"
+     id="rect10"
+     style="stroke-width:1.16108" />
+  <!-- Shoulders — soft human arc -->
+  <path
+     d="m 142.81768,335.04381 q 0,-63.89099 115.03867,-63.89099 115.03868,0 115.03868,63.89099 v 8.81255 H 142.81768 Z"
+     fill="#ffffff"
+     id="path11"
+     style="stroke-width:1.16108" />
+</svg>

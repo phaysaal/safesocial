@@ -62,7 +62,7 @@ void main() async {
         ChangeNotifierProvider.value(value: mediaService),
         ChangeNotifierProvider.value(value: groupService),
       ],
-      child: const SafeSocialApp(),
+      child: const SphereApp(),
     ),
   );
 }

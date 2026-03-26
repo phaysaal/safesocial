@@ -14,8 +14,8 @@ import '../models/friend_request.dart';
 /// full friends. Until the handshake completes, the contact is
 /// marked as pending.
 class ContactService extends ChangeNotifier {
-  static const _contactsKey = 'safesocial_contacts';
-  static const _requestsKey = 'safesocial_friend_requests';
+  static const _contactsKey = 'sphere_contacts';
+  static const _requestsKey = 'sphere_friend_requests';
 
   List<Contact> _contacts = [];
   List<FriendRequest> _friendRequests = [];

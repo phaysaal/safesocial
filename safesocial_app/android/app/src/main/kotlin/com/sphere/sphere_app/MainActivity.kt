@@ -1,4 +1,4 @@
-package com.safesocial.safesocial_app
+package com.sphere.sphere_app
 
 import io.flutter.embedding.android.FlutterActivity
 

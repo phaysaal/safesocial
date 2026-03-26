@@ -1,6 +1,6 @@
 //! Identity management using Ed25519 keypairs.
 //!
-//! Each SafeSocial user has a single identity keypair stored in the Veilid
+//! Each Sphere user has a single identity keypair stored in the Veilid
 //! ProtectedStore. The public key serves as the user's global identifier
 //! on the network, and the secret key is used to sign DHT records and
 //! decrypt private messages.
@@ -52,14 +52,14 @@ pub fn load_identity(api: &VeilidAPI) -> Result<Option<KeyPair>> {
     match (secret_str, public_str) {
         (Some(secret_b64), Some(public_b64)) => {
             let secret_bytes = BASE64.decode(&secret_b64).map_err(|e| {
-                crate::SafeSocialError::CryptoError(format!("Failed to decode secret key: {}", e))
+                crate::SphereError::CryptoError(format!("Failed to decode secret key: {}", e))
             })?;
             let public_bytes = BASE64.decode(&public_b64).map_err(|e| {
-                crate::SafeSocialError::CryptoError(format!("Failed to decode public key: {}", e))
+                crate::SphereError::CryptoError(format!("Failed to decode public key: {}", e))
             })?;
 
             if secret_bytes.len() != KEY_LENGTH || public_bytes.len() != KEY_LENGTH {
-                return Err(crate::SafeSocialError::CryptoError(
+                return Err(crate::SphereError::CryptoError(
                     "Invalid key length in protected store".to_string(),
                 ));
             }
@@ -112,12 +112,12 @@ pub fn identity_to_string(keypair: &KeyPair) -> String {
 /// Decode a keypair from a base64-encoded string produced by `identity_to_string`.
 pub fn identity_from_string(s: &str) -> Result<KeyPair> {
     let bytes = BASE64.decode(s).map_err(|e| {
-        crate::SafeSocialError::CryptoError(format!("Failed to decode identity string: {}", e))
+        crate::SphereError::CryptoError(format!("Failed to decode identity string: {}", e))
     })?;
 
     let expected_len = 4 + KEY_LENGTH * 2;
     if bytes.len() != expected_len {
-        return Err(crate::SafeSocialError::CryptoError(format!(
+        return Err(crate::SphereError::CryptoError(format!(
             "Invalid identity string length: expected {}, got {}",
             expected_len,
             bytes.len()

@@ -108,16 +108,16 @@ class SettingsScreen extends StatelessWidget {
           _SectionHeader(title: 'About'),
           ListTile(
             leading: Icon(Icons.info_outline, color: cs.primary),
-            title: const Text('About SafeSocial'),
+            title: const Text('About Sphere'),
             subtitle: const Text('Part of the SafeSelf project'),
             onTap: () {
               showAboutDialog(
                 context: context,
-                applicationName: 'SafeSocial',
+                applicationName: 'Sphere',
                 applicationVersion: '0.1.0',
                 applicationLegalese:
                     'Your data. Your network. Your rules.\n\n'
-                    'SafeSocial is a decentralized peer-to-peer social network '
+                    'Sphere is a decentralized peer-to-peer social network '
                     'built on Veilid.',
               );
             },

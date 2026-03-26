@@ -81,10 +81,10 @@ pub fn group_schema(max_members: u16) -> VeilidAPIResult<DHTSchema> {
 
 /// Serialize a value to a JSON byte vector for DHT storage.
 pub fn serialize<T: Serialize>(value: &T) -> crate::Result<Vec<u8>> {
-    serde_json::to_vec(value).map_err(crate::SafeSocialError::Serialization)
+    serde_json::to_vec(value).map_err(crate::SphereError::Serialization)
 }
 
 /// Deserialize a value from a JSON byte slice read from the DHT.
 pub fn deserialize<T: DeserializeOwned>(data: &[u8]) -> crate::Result<T> {
-    serde_json::from_slice(data).map_err(crate::SafeSocialError::Serialization)
+    serde_json::from_slice(data).map_err(crate::SphereError::Serialization)
 }

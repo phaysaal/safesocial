@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-/// Represents a user's public profile in the SafeSocial network.
+/// Represents a user's public profile in the Sphere network.
 class UserProfile with EquatableMixin {
   final String publicKey;
   final String displayName;

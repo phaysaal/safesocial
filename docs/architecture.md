@@ -1,8 +1,8 @@
-# SafeSocial Architecture
+# Sphere Architecture
 
 ## Overview
 
-SafeSocial uses a layered architecture with a clear separation between the Flutter UI, Dart service layer, and the Rust core that interfaces directly with Veilid.
+Sphere uses a layered architecture with a clear separation between the Flutter UI, Dart service layer, and the Rust core that interfaces directly with Veilid.
 
 ```
 +---------------------------------------------------+
@@ -22,7 +22,7 @@ SafeSocial uses a layered architecture with a clear separation between the Flutt
 +---------------------------------------------------+
           |  FFI via veilid_support  |
 +---------------------------------------------------+
-|              safesocial_core (Rust)                  |
+|              sphere_core (Rust)                  |
 |  node.rs      — Veilid API start/stop/attach       |
 |  identity.rs  — Ed25519 keypair management          |
 |  schema.rs    — DHT schema definitions              |
@@ -47,7 +47,7 @@ SafeSocial uses a layered architecture with a clear separation between the Flutt
 
 ## Storage Model
 
-SafeSocial uses four distinct Veilid storage subsystems, each serving a different purpose:
+Sphere uses four distinct Veilid storage subsystems, each serving a different purpose:
 
 | Store | Purpose | Scope | Encryption | Examples |
 |-------|---------|-------|------------|----------|
@@ -198,11 +198,11 @@ The routing context is also configured with `.with_sequencing(Sequencing::Prefer
 
 ## Module Responsibilities
 
-### Rust Modules (`safesocial_core`)
+### Rust Modules (`sphere_core`)
 
 | Module | File | Responsibility |
 |--------|------|----------------|
-| `lib` | `lib.rs` | `SafeSocialCore` struct (API, routing context, identity), error types, module declarations |
+| `lib` | `lib.rs` | `SphereCore` struct (API, routing context, identity), error types, module declarations |
 | `node` | `node.rs` | Veilid node lifecycle: start, stop, attachment state tracking, `wait_for_attach` |
 | `identity` | `identity.rs` | Ed25519 keypair creation, loading, import/export via ProtectedStore |
 | `schema` | `schema.rs` | DHT schema definitions (profile, conversation, post, group), JSON serialization helpers |
@@ -213,7 +213,7 @@ The routing context is also configured with `.with_sequencing(Sequencing::Prefer
 | `feed` | `feed.rs` | Post creation, feed polling, reaction handling |
 | `media` | `media.rs` | BlockStore put/get for photos, videos, and attachments |
 
-### Dart Services (`safesocial_app`)
+### Dart Services (`sphere_app`)
 
 | Service | Responsibility |
 |---------|----------------|
@@ -226,7 +226,7 @@ The routing context is also configured with `.with_sequencing(Sequencing::Prefer
 
 ## FFI Bridge Architecture
 
-SafeSocial uses the `veilid_support` Flutter package (from the Veilid repository) as the FFI bridge between Dart and Rust:
+Sphere uses the `veilid_support` Flutter package (from the Veilid repository) as the FFI bridge between Dart and Rust:
 
 ```
 Flutter (Dart)                      veilid_support                      Rust (veilid-core)
@@ -249,7 +249,7 @@ Flutter (Dart)                      veilid_support                      Rust (ve
 
 ### Key Details
 
-- **Platform libraries**: `safesocial_core` compiles as a `cdylib` (shared library) and `staticlib` (for iOS). The Flutter app loads it at runtime via `veilid_support`.
+- **Platform libraries**: `sphere_core` compiles as a `cdylib` (shared library) and `staticlib` (for iOS). The Flutter app loads it at runtime via `veilid_support`.
 - **Async model**: Dart `Future`s map to Rust `async` functions running on a Tokio runtime inside the native library.
 - **Callbacks**: Veilid update events flow from Rust to Dart via a callback mechanism. The `UpdateCallback` type (`Arc<dyn Fn(VeilidUpdate) + Send + Sync>`) is registered at startup and delivers network state changes, DHT value changes, and other events.
 - **Serialization**: Complex types cross the FFI boundary as JSON strings. The `schema.rs` module provides `serialize()` and `deserialize()` helpers using `serde_json`.

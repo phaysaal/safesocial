@@ -1,4 +1,4 @@
-# safesocial_app
+# sphere_app
 
 A new Flutter project.
 

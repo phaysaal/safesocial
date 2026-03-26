@@ -1,10 +1,10 @@
-# SafeSocial Protocol Specification
+# Sphere Protocol Specification
 
 ## Identity
 
 ### Keypair Generation
 
-Each SafeSocial user is identified by a single Ed25519 keypair generated via Veilid's crypto system (`crypto.best().generate_keypair()`). The keypair consists of:
+Each Sphere user is identified by a single Ed25519 keypair generated via Veilid's crypto system (`crypto.best().generate_keypair()`). The keypair consists of:
 
 - **Public key** (32 bytes) -- the user's globally unique identifier on the Veilid network
 - **Secret key** (32 bytes) -- used to sign DHT records and decrypt private messages

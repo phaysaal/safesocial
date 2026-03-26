@@ -1,8 +1,8 @@
-# SafeSocial
+# Sphere
 
 **Your data. Your network. Your rules.**
 
-SafeSocial is a decentralized peer-to-peer social network where all data stays on your device. Built on [Veilid](https://veilid.com/) (a Rust P2P framework with onion routing) and [Flutter](https://flutter.dev/), SafeSocial requires no servers, no accounts, and performs no metadata collection. Your identity is a cryptographic keypair -- not an email address or phone number.
+Sphere is a decentralized peer-to-peer social network where all data stays on your device. Built on [Veilid](https://veilid.com/) (a Rust P2P framework with onion routing) and [Flutter](https://flutter.dev/), Sphere requires no servers, no accounts, and performs no metadata collection. Your identity is a cryptographic keypair -- not an email address or phone number.
 
 ## Key Features
 
@@ -28,7 +28,7 @@ SafeSocial is a decentralized peer-to-peer social network where all data stays o
 |              veilid_support (FFI)                  |
 |         Flutter <-> Rust bridge via Veilid         |
 +---------------------------------------------------+
-|              safesocial_core (Rust)                  |
+|              sphere_core (Rust)                  |
 |  node | identity | schema | profile | contacts     |
 |  messaging | groups | feed | media                 |
 +---------------------------------------------------+
@@ -49,23 +49,23 @@ SafeSocial is a decentralized peer-to-peer social network where all data stays o
 
 ```bash
 # Build Rust core
-cd safesocial_core && cargo build
+cd sphere_core && cargo build
 
 # Run Flutter app
-cd safesocial_app && flutter run
+cd sphere_app && flutter run
 ```
 
 ## Project Structure
 
 ```
-safesocial/
-  safesocial_core/          Rust crate — Veilid integration and P2P logic
+sphere/
+  sphere_core/          Rust crate — Veilid integration and P2P logic
     src/
       lib.rs              Core struct, error types, module declarations
       node.rs             Veilid node lifecycle and attachment state
       identity.rs         Ed25519 keypair generation, storage, import/export
       schema.rs           DHT record schemas and serialization helpers
-  safesocial_app/           Flutter application
+  sphere_app/           Flutter application
     lib/
       main.dart           Entry point, service initialization, Provider setup
       app.dart            GoRouter configuration, bottom navigation shell
@@ -83,12 +83,12 @@ safesocial/
 
 ## Part of SafeSelf
 
-SafeSocial is the second phase of the **SafeSelf** umbrella project:
+Sphere is the second phase of the **SafeSelf** umbrella project:
 
 1. **SeeSelf** (Phase 1) -- Personal data audit crawler that discovers what information about you is publicly available and models what an AI system could infer from it.
-2. **SafeSocial** (Phase 2) -- This project. A decentralized social network that gives you a practical alternative to surveillance-based platforms.
+2. **Sphere** (Phase 2) -- This project. A decentralized social network that gives you a practical alternative to surveillance-based platforms.
 
-The motivation: if SeeSelf shows you how exposed you are, SafeSocial gives you a way to take back control.
+The motivation: if SeeSelf shows you how exposed you are, Sphere gives you a way to take back control.
 
 ## License
 

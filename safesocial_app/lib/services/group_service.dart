@@ -13,7 +13,7 @@ import '../models/message.dart';
 /// In production, groups will be backed by shared Veilid DHT records so that
 /// every member can read and write to the same data structure.
 class GroupService extends ChangeNotifier {
-  static const _groupsKey = 'safesocial_groups';
+  static const _groupsKey = 'sphere_groups';
 
   List<Group> _groups = [];
   final Map<String, List<Message>> _groupMessages = {};

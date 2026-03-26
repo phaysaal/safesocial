@@ -1,5 +1,5 @@
-name: safesocial_app
-description: SafeSocial — Decentralized P2P Social Network
+name: sphere_app
+description: Sphere — Decentralized P2P Social Network
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -9,12 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # Veilid P2P — enable when Android NDK + Rust toolchain are configured:
-  #   rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-  # veilid:
-  #   git:
-  #     url: https://gitlab.com/veilid/veilid.git
-  #     path: veilid-flutter
+  veilid:
+    git:
+      url: https://gitlab.com/veilid/veilid.git
+      path: veilid-flutter
   provider: ^6.1.1
   go_router: ^14.0.0
   shared_preferences: ^2.2.2

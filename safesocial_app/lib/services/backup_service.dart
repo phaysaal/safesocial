@@ -19,24 +19,24 @@ class BackupService {
   Future<String> createBackup({String? passphrase}) async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Gather all SafeSocial data from SharedPreferences
+    // Gather all Sphere data from SharedPreferences
     final backupData = <String, dynamic>{
       'version': _backupVersion,
       'created_at': DateTime.now().toIso8601String(),
       'identity': {
-        'keypair': prefs.getString('safesocial_identity_keypair'),
-        'profile': prefs.getString('safesocial_identity_profile'),
-        'dht_key': prefs.getString('safesocial_identity_dht_key'),
+        'keypair': prefs.getString('sphere_identity_keypair'),
+        'profile': prefs.getString('sphere_identity_profile'),
+        'dht_key': prefs.getString('sphere_identity_dht_key'),
       },
-      'contacts': prefs.getString('safesocial_contacts'),
-      'conversations': prefs.getString('safesocial_conversations'),
-      'feed_posts': prefs.getString('safesocial_feed_posts'),
-      'hidden_posts': prefs.getStringList('safesocial_hidden_posts'),
+      'contacts': prefs.getString('sphere_contacts'),
+      'conversations': prefs.getString('sphere_conversations'),
+      'feed_posts': prefs.getString('sphere_feed_posts'),
+      'hidden_posts': prefs.getStringList('sphere_hidden_posts'),
       'theme_mode': prefs.getString('theme_mode'),
     };
 
     // Also gather cached messages
-    final msgKeys = prefs.getKeys().where((k) => k.startsWith('safesocial_msgs_'));
+    final msgKeys = prefs.getKeys().where((k) => k.startsWith('sphere_msgs_'));
     final messages = <String, String?>{};
     for (final key in msgKeys) {
       messages[key] = prefs.getString(key);
@@ -55,7 +55,7 @@ class BackupService {
     // Write to file
     final dir = await getApplicationDocumentsDirectory();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final filePath = '${dir.path}/safesocial_backup_$timestamp.ssb';
+    final filePath = '${dir.path}/sphere_backup_$timestamp.ssb';
     final file = File(filePath);
     await file.writeAsString(jsonStr);
 
@@ -94,36 +94,36 @@ class BackupService {
     final identity = backupData['identity'] as Map<String, dynamic>?;
     if (identity != null) {
       if (identity['keypair'] != null) {
-        await prefs.setString('safesocial_identity_keypair', identity['keypair'] as String);
+        await prefs.setString('sphere_identity_keypair', identity['keypair'] as String);
       }
       if (identity['profile'] != null) {
-        await prefs.setString('safesocial_identity_profile', identity['profile'] as String);
+        await prefs.setString('sphere_identity_profile', identity['profile'] as String);
       }
       if (identity['dht_key'] != null) {
-        await prefs.setString('safesocial_identity_dht_key', identity['dht_key'] as String);
+        await prefs.setString('sphere_identity_dht_key', identity['dht_key'] as String);
       }
     }
 
     // Restore contacts
     if (backupData['contacts'] != null) {
-      await prefs.setString('safesocial_contacts', backupData['contacts'] as String);
+      await prefs.setString('sphere_contacts', backupData['contacts'] as String);
     }
 
     // Restore conversations
     if (backupData['conversations'] != null) {
-      await prefs.setString('safesocial_conversations', backupData['conversations'] as String);
+      await prefs.setString('sphere_conversations', backupData['conversations'] as String);
     }
 
     // Restore feed posts
     if (backupData['feed_posts'] != null) {
-      await prefs.setString('safesocial_feed_posts', backupData['feed_posts'] as String);
+      await prefs.setString('sphere_feed_posts', backupData['feed_posts'] as String);
     }
 
     // Restore hidden posts
     final hidden = backupData['hidden_posts'];
     if (hidden != null) {
       await prefs.setStringList(
-        'safesocial_hidden_posts',
+        'sphere_hidden_posts',
         (hidden as List<dynamic>).map((e) => e as String).toList(),
       );
     }
@@ -145,7 +145,7 @@ class BackupService {
 
     // Restore friend requests
     if (backupData['friend_requests'] != null) {
-      await prefs.setString('safesocial_friend_requests', backupData['friend_requests'] as String);
+      await prefs.setString('sphere_friend_requests', backupData['friend_requests'] as String);
     }
 
     debugPrint('[BackupService] Backup restored from $filePath');

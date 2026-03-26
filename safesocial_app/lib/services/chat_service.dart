@@ -20,8 +20,8 @@ import '../models/message.dart';
 /// conversation metadata to SharedPreferences. When Veilid is available,
 /// messages will be exchanged via DHT records.
 class ChatService extends ChangeNotifier {
-  static const _conversationsPrefsKey = 'safesocial_conversations';
-  static const _msgsCachePrefix = 'safesocial_msgs_';
+  static const _conversationsPrefsKey = 'sphere_conversations';
+  static const _msgsCachePrefix = 'sphere_msgs_';
 
   final Map<String, List<Message>> _conversations = {};
   final Map<String, String> _conversationKeys = {}; // contactId -> mock DHT key

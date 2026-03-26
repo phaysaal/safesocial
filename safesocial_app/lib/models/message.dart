@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-/// A chat message between two peers in the SafeSocial network.
+/// A chat message between two peers in the Sphere network.
 class Message with EquatableMixin {
   final String id;
   final String senderId;
