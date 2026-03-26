@@ -33,3 +33,7 @@ sphere-icon-bubble.svg
 sphere_v7_*.svg
 target/
 relay/node_modules/
+
+# Release signing (keep secret)
+safesocial_app/android/key.properties
+safesocial_app/android/app/*.jks
