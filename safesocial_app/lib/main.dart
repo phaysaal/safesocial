@@ -40,8 +40,15 @@ void main() async {
   await groupService.loadGroups();
   await feedService.loadPosts();
 
+  // Set up relay for existing contacts
+  if (identityService.publicKey != null) {
+    chatService.setMyPublicKey(identityService.publicKey!);
+    for (final contact in contactService.contacts) {
+      chatService.connectRelay(contact.publicKey);
+    }
+  }
+
   // Start Veilid in the background AFTER the app is running
-  // (deferred to avoid native crash blocking app startup)
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     try {
       final appDir = await getApplicationDocumentsDirectory();
@@ -49,6 +56,14 @@ void main() async {
       await veilidService.initialize(statePath);
       await identityService.loadIdentity();
       await chatService.loadConversations();
+
+      // Connect relay for any contacts loaded from Veilid
+      if (identityService.publicKey != null) {
+        chatService.setMyPublicKey(identityService.publicKey!);
+        for (final contact in contactService.contacts) {
+          chatService.connectRelay(contact.publicKey);
+        }
+      }
     } catch (e) {
       debugPrint('[main] Veilid startup failed (local mode): $e');
     }

@@ -8,6 +8,7 @@ import 'package:veilid/veilid.dart';
 
 import '../models/message.dart';
 import 'debug_log_service.dart';
+import 'relay_service.dart';
 import 'veilid_service.dart';
 
 /// Manages chat conversations via Veilid DHT.
@@ -20,6 +21,8 @@ class ChatService extends ChangeNotifier {
   static const _prefsMsgPrefix = 'spheres_msgs_';
 
   VeilidService? _veilidService;
+  final RelayService _relayService = RelayService();
+  String? _myPublicKey;
 
   final Map<String, List<Message>> _conversations = {};
   final Map<String, RecordKey> _conversationDhtKeys = {};
@@ -31,6 +34,21 @@ class ChatService extends ChangeNotifier {
 
   void attachVeilidService(VeilidService vs) {
     _veilidService = vs;
+  }
+
+  /// Set the user's public key and configure relay for incoming messages.
+  void setMyPublicKey(String publicKey) {
+    _myPublicKey = publicKey;
+    _relayService.onMessageReceived = (contactKey, encryptedMsg) {
+      _handleRelayMessage(contactKey, encryptedMsg);
+    };
+  }
+
+  /// Connect relay for a specific contact (called after adding contact).
+  void connectRelay(String contactPublicKey) {
+    if (_myPublicKey != null) {
+      _relayService.connect(_myPublicKey!, contactPublicKey);
+    }
   }
 
   /// Create a new conversation DHT record for a contact.
@@ -170,11 +188,51 @@ class ChatService extends ChangeNotifier {
 
         DebugLogService().info('Chat',' Message sent to DHT subkey $nextSubkey');
       } catch (e) {
-        DebugLogService().info('Chat',' DHT write failed: $e');
+        DebugLogService().error('Chat',' DHT write failed: $e');
       }
     }
 
+    // Also send via relay as parallel/fallback path
+    final msgPayload = jsonEncode({
+      'id': message.id,
+      'sender': message.senderId,
+      'recipient': message.recipientId,
+      'content': message.content,
+      'timestamp': message.timestamp.millisecondsSinceEpoch,
+      'media_refs': message.mediaRefs,
+    });
+    _relayService.sendViaRelay(recipientId, msgPayload);
+
     await _cacheMessages(recipientId);
+  }
+
+  /// Handle a message received via the relay fallback.
+  void _handleRelayMessage(String contactKey, String rawMessage) {
+    try {
+      final msgJson = jsonDecode(rawMessage) as Map<String, dynamic>;
+      final msgId = msgJson['id'] as String;
+
+      // Skip duplicates (may already have it via DHT)
+      if (_conversations[contactKey]?.any((m) => m.id == msgId) ?? false) return;
+
+      final message = Message(
+        id: msgId,
+        senderId: msgJson['sender'] as String? ?? contactKey,
+        recipientId: msgJson['recipient'] as String? ?? '',
+        content: msgJson['content'] as String? ?? '',
+        timestamp: DateTime.fromMillisecondsSinceEpoch(msgJson['timestamp'] as int? ?? 0),
+        delivered: true,
+        mediaRefs: (msgJson['media_refs'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [],
+      );
+
+      _conversations.putIfAbsent(contactKey, () => []);
+      _conversations[contactKey]!.add(message);
+      DebugLogService().success('Chat', 'Message received via RELAY from $contactKey');
+      notifyListeners();
+      _cacheMessages(contactKey);
+    } catch (e) {
+      DebugLogService().error('Chat', 'Relay message parse failed: $e');
+    }
   }
 
   /// Handle DHT value change — incoming message from contact.

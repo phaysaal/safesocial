@@ -78,6 +78,9 @@ class _AddContactScreenState extends State<AddContactScreen>
     // Add as contact
     await contactService.addContact(publicKey, displayName);
 
+    // Connect relay for instant messaging fallback
+    chatService.connectRelay(publicKey);
+
     if (conversationDhtKey != null && conversationDhtKey.isNotEmpty) {
       // They already created a conversation — join it with our writer keypair
       try {
