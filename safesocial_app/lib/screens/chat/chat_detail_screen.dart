@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/message.dart';
@@ -139,9 +140,36 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             icon: Icon(Icons.call, color: cs.primary),
             onPressed: () {},
           ),
-          IconButton(
-            icon: Icon(Icons.videocam, color: cs.primary),
-            onPressed: () {},
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant),
+            onSelected: (value) {
+              if (value == 'delete') {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Delete Contact'),
+                    content: Text('Remove $displayName and all messages?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          context.read<ContactService>().removeContact(widget.conversationId);
+                          Navigator.pop(ctx);
+                          context.pop();
+                        },
+                        child: Text('Delete', style: TextStyle(color: cs.error)),
+                      ),
+                    ],
+                  ),
+                );
+              }
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(value: 'delete', child: Text('Delete contact')),
+            ],
           ),
         ],
       ),
