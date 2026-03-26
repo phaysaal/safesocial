@@ -245,6 +245,21 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Remove a conversation and all its messages.
+  Future<void> removeConversation(String contactPublicKey) async {
+    _conversations.remove(contactPublicKey);
+    _conversationDhtKeys.remove(contactPublicKey);
+    await _persistConversationKeys();
+
+    // Remove cached messages
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('$_prefsMsgPrefix$contactPublicKey');
+    } catch (_) {}
+
+    notifyListeners();
+  }
+
   Future<List<Message>> getMessages(String conversationId) async {
     return _conversations[conversationId] ?? [];
   }

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/friend_request.dart';
+import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../widgets/avatar.dart';
 
@@ -139,6 +140,7 @@ class ContactListScreen extends StatelessWidget {
                     },
                     onDismissed: (_) {
                       contactService.removeContact(contact.publicKey);
+                      context.read<ChatService>().removeConversation(contact.publicKey);
                     },
                     child: ListTile(
                       leading: UserAvatar(

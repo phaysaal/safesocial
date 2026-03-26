@@ -165,6 +165,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       TextButton(
                         onPressed: () {
                           context.read<ContactService>().removeContact(widget.conversationId);
+                          context.read<ChatService>().removeConversation(widget.conversationId);
                           Navigator.pop(ctx);
                           context.pop();
                         },
