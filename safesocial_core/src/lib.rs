@@ -14,6 +14,7 @@ pub mod messaging;
 pub mod groups;
 pub mod feed;
 pub mod media;
+pub mod privacy;
 
 use std::sync::Arc;
 use veilid_core::*;
