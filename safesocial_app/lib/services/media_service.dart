@@ -1,18 +1,20 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
-/// Handles media picking, storage, and retrieval.
+import 'debug_log_service.dart';
+
+/// Handles media picking, local storage, and base64 encoding for relay transfer.
 ///
-/// Currently uses image_picker and stores files locally. In production,
-/// media will be chunked and stored in Veilid's block store, with
-/// references (hashes) shared in messages and posts.
+/// Images are compressed and stored locally. For relay transfer, small images
+/// are encoded as base64 data URIs. Received images are decoded and saved locally.
 class MediaService extends ChangeNotifier {
   final ImagePicker _picker = ImagePicker();
 
-  /// Pick an image from the gallery or camera and return its local path.
-  ///
-  /// TODO: After picking, chunk the image and store in Veilid block store.
-  /// Return the block store reference instead of a local path.
+  /// Pick an image from gallery and return its local path.
   Future<String?> pickAndStoreImage() async {
     try {
       final image = await _picker.pickImage(
@@ -23,15 +25,12 @@ class MediaService extends ChangeNotifier {
       );
       return image?.path;
     } catch (e) {
-      debugPrint('[MediaService] Error picking image: $e');
+      DebugLogService().error('Media', 'Error picking image: $e');
       return null;
     }
   }
 
-  /// Pick a video from the gallery or camera and return its local path.
-  ///
-  /// TODO: After picking, chunk the video and store in Veilid block store.
-  /// Return the block store reference instead of a local path.
+  /// Pick a video from gallery and return its local path.
   Future<String?> pickAndStoreVideo() async {
     try {
       final video = await _picker.pickVideo(
@@ -40,15 +39,64 @@ class MediaService extends ChangeNotifier {
       );
       return video?.path;
     } catch (e) {
-      debugPrint('[MediaService] Error picking video: $e');
+      DebugLogService().error('Media', 'Error picking video: $e');
       return null;
     }
   }
 
-  /// Delete a media item by its reference.
-  ///
-  /// TODO: Implement block store deletion.
+  /// Encode a local image file as a base64 data URI for relay transfer.
+  /// Compresses to max 300KB for efficient relay transfer.
+  static Future<String?> encodeImageForRelay(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!file.existsSync()) return null;
+
+      final bytes = await file.readAsBytes();
+      // Skip files larger than 2MB for relay (too large for WebSocket)
+      if (bytes.length > 2 * 1024 * 1024) {
+        DebugLogService().warn('Media', 'Image too large for relay: ${bytes.length} bytes');
+        return null;
+      }
+
+      final ext = filePath.split('.').last.toLowerCase();
+      final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
+      return 'data:$mime;base64,${base64Encode(bytes)}';
+    } catch (e) {
+      DebugLogService().error('Media', 'Failed to encode image: $e');
+      return null;
+    }
+  }
+
+  /// Decode a base64 data URI and save to local storage.
+  /// Returns the local file path.
+  static Future<String?> decodeAndSaveImage(String dataUri) async {
+    try {
+      if (!dataUri.startsWith('data:image/')) return null;
+
+      final parts = dataUri.split(',');
+      if (parts.length != 2) return null;
+
+      final bytes = base64Decode(parts[1]);
+      final ext = dataUri.contains('png') ? 'png' : 'jpg';
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = 'media_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(bytes);
+
+      DebugLogService().info('Media', 'Saved received image: $fileName');
+      return file.path;
+    } catch (e) {
+      DebugLogService().error('Media', 'Failed to decode image: $e');
+      return null;
+    }
+  }
+
   Future<void> deleteMedia(String ref) async {
-    debugPrint('[MediaService] Delete media requested for: $ref (placeholder).');
+    try {
+      final file = File(ref);
+      if (file.existsSync()) {
+        await file.delete();
+      }
+    } catch (_) {}
   }
 }

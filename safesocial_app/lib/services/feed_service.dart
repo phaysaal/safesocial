@@ -6,12 +6,13 @@ import 'package:uuid/uuid.dart';
 
 import '../models/contact.dart';
 import '../models/post.dart';
+import 'debug_log_service.dart';
+import 'relay_service.dart';
 
-/// Manages the social feed — creating, reading, reacting to, liking, and
-/// commenting on posts.
+/// Manages the social feed with relay-based sync between contacts.
 ///
-/// Persists posts to SharedPreferences for offline access. On refresh,
-/// merges any new posts from contacts into the timeline.
+/// When you create a post, it's broadcast to all contacts via the relay.
+/// When contacts' posts arrive via relay, they're merged into the feed.
 class FeedService extends ChangeNotifier {
   static const _postsKey = 'spheres_feed_posts';
   static const _hiddenKey = 'spheres_hidden_posts';
@@ -20,19 +21,37 @@ class FeedService extends ChangeNotifier {
   final Set<String> _hiddenPostIds = {};
   bool _isRefreshing = false;
 
-  /// All visible posts in the feed, newest first.
-  /// Filters out hidden posts. Muted/unfollowed contacts are filtered
-  /// by the UI layer which has access to ContactService.
+  final RelayService _feedRelay = RelayService();
+  String? _myPublicKey;
+  List<Contact> _contacts = [];
+
   List<Post> get posts =>
       _posts.where((p) => !_hiddenPostIds.contains(p.id)).toList();
 
-  /// All posts including hidden (for profile grid, etc.)
   List<Post> get allPosts => List.unmodifiable(_posts);
-
   bool get isRefreshing => _isRefreshing;
   Set<String> get hiddenPostIds => Set.unmodifiable(_hiddenPostIds);
 
-  /// Load persisted posts and hidden IDs from SharedPreferences.
+  /// Initialize feed sync — connect relay for each contact's feed channel.
+  void initSync(String myPublicKey, List<Contact> contacts) {
+    _myPublicKey = myPublicKey;
+    _contacts = contacts;
+
+    _feedRelay.onMessageReceived = (contactKey, data) {
+      _handleIncomingFeedItem(contactKey, data);
+    };
+
+    // Connect a feed-specific relay room for each contact
+    for (final contact in contacts.where((c) => !c.blocked)) {
+      _feedRelay.connect(
+        'feed:$myPublicKey',
+        'feed:${contact.publicKey}',
+      );
+    }
+    DebugLogService().info('Feed', 'Sync initialized for ${contacts.length} contacts');
+  }
+
+  /// Load persisted posts and hidden IDs.
   Future<void> loadPosts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -54,7 +73,7 @@ class FeedService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Create a new post with the given content and optional media references.
+  /// Create a new post and broadcast to contacts via relay.
   Future<void> createPost(
     String content, {
     List<String>? mediaRefs,
@@ -63,7 +82,7 @@ class FeedService extends ChangeNotifier {
   }) async {
     final post = Post(
       id: const Uuid().v4(),
-      authorId: 'self',
+      authorId: _myPublicKey ?? 'self',
       authorName: authorName,
       content: content,
       mediaRefs: mediaRefs ?? [],
@@ -74,25 +93,107 @@ class FeedService extends ChangeNotifier {
     _posts.insert(0, post);
     await _persistPosts();
     notifyListeners();
+
+    // Broadcast to contacts via relay
+    if (_myPublicKey != null) {
+      final postJson = jsonEncode({
+        'type': 'post',
+        'data': post.toJson(),
+      });
+      for (final contact in _contacts.where((c) => !c.blocked)) {
+        _feedRelay.sendViaRelay('feed:${contact.publicKey}', postJson);
+      }
+      DebugLogService().success('Feed', 'Post broadcast to ${_contacts.length} contacts');
+    }
   }
 
-  /// Toggle like on a post.
+  /// Handle incoming post/like/comment from a contact via relay.
+  void _handleIncomingFeedItem(String contactKey, String data) {
+    try {
+      final payload = jsonDecode(data) as Map<String, dynamic>;
+      final type = payload['type'] as String?;
+
+      switch (type) {
+        case 'post':
+          final postData = payload['data'] as Map<String, dynamic>;
+          final post = Post.fromJson(postData);
+          // Skip duplicates
+          if (_posts.any((p) => p.id == post.id)) return;
+          _posts.insert(0, post);
+          _posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          _persistPosts();
+          DebugLogService().success('Feed', 'Received post from ${post.authorName}');
+          notifyListeners();
+
+        case 'like':
+          final postId = payload['post_id'] as String;
+          final userId = payload['user_id'] as String;
+          final index = _posts.indexWhere((p) => p.id == postId);
+          if (index != -1 && !_posts[index].likes.contains(userId)) {
+            _posts[index] = _posts[index].copyWith(
+              likes: [..._posts[index].likes, userId],
+            );
+            _persistPosts();
+            notifyListeners();
+          }
+
+        case 'comment':
+          final postId = payload['post_id'] as String;
+          final comment = Comment.fromJson(payload['comment'] as Map<String, dynamic>);
+          final index = _posts.indexWhere((p) => p.id == postId);
+          if (index != -1 && !_posts[index].comments.any((c) => c.id == comment.id)) {
+            _posts[index] = _posts[index].copyWith(
+              comments: [..._posts[index].comments, comment],
+            );
+            _persistPosts();
+            notifyListeners();
+          }
+
+        case 'reaction':
+          final postId = payload['post_id'] as String;
+          final reaction = Reaction.fromJson(payload['reaction'] as Map<String, dynamic>);
+          final index = _posts.indexWhere((p) => p.id == postId);
+          if (index != -1) {
+            _posts[index] = _posts[index].copyWith(
+              reactions: [..._posts[index].reactions, reaction],
+            );
+            _persistPosts();
+            notifyListeners();
+          }
+      }
+    } catch (e) {
+      DebugLogService().error('Feed', 'Failed to process incoming feed item: $e');
+    }
+  }
+
+  /// Toggle like — also broadcasts to contacts.
   Future<void> toggleLike(String postId) async {
     final index = _posts.indexWhere((p) => p.id == postId);
     if (index == -1) return;
 
     final post = _posts[index];
     final liked = post.likes.contains('self');
+    final userId = _myPublicKey ?? 'self';
     final newLikes = liked
-        ? post.likes.where((id) => id != 'self').toList()
-        : [...post.likes, 'self'];
+        ? post.likes.where((id) => id != 'self' && id != userId).toList()
+        : [...post.likes, userId];
 
     _posts[index] = post.copyWith(likes: newLikes);
     await _persistPosts();
     notifyListeners();
+
+    // Broadcast like to post author
+    if (!liked && post.authorId != 'self' && post.authorId != _myPublicKey) {
+      final payload = jsonEncode({
+        'type': 'like',
+        'post_id': postId,
+        'user_id': userId,
+      });
+      _feedRelay.sendViaRelay('feed:${post.authorId}', payload);
+    }
   }
 
-  /// Add a comment to a post.
+  /// Add comment — also broadcasts to post author.
   Future<void> commentOnPost(
     String postId,
     String text, {
@@ -105,7 +206,7 @@ class FeedService extends ChangeNotifier {
     final post = _posts[index];
     final comment = Comment(
       id: const Uuid().v4(),
-      authorId: 'self',
+      authorId: _myPublicKey ?? 'self',
       authorName: authorName,
       text: text,
       createdAt: DateTime.now(),
@@ -117,30 +218,25 @@ class FeedService extends ChangeNotifier {
     );
     await _persistPosts();
     notifyListeners();
+
+    // Broadcast comment to post author
+    if (post.authorId != 'self' && post.authorId != _myPublicKey) {
+      final payload = jsonEncode({
+        'type': 'comment',
+        'post_id': postId,
+        'comment': comment.toJson(),
+      });
+      _feedRelay.sendViaRelay('feed:${post.authorId}', payload);
+    }
   }
 
-  /// Refresh the feed — reload persisted posts and simulate fetching
-  /// contacts' updates. When Veilid is connected, this will poll contacts'
-  /// DHT records for new posts.
+  /// Refresh feed.
   Future<void> refreshFeed({List<Contact>? contacts}) async {
     _isRefreshing = true;
     notifyListeners();
 
     try {
-      // Reload persisted posts (picks up any changes)
       await loadPosts();
-
-      // In the real Veilid implementation, this would:
-      // for (final contact in contacts) {
-      //   final profileKey = contact.profileDhtKey;
-      //   final feedKeys = await rc.getDHTValue(profileKey, feedSubkey);
-      //   for (final postKey in feedKeys) {
-      //     final postData = await rc.getDHTValue(postKey, 0);
-      //     // merge into _posts if not already present
-      //   }
-      // }
-
-      // Sort by newest first
       _posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     } catch (e) {
       debugPrint('[FeedService] Feed refresh failed: $e');
@@ -150,28 +246,38 @@ class FeedService extends ChangeNotifier {
     }
   }
 
-  /// Add a reaction to a post.
+  /// Add reaction — also broadcasts.
   Future<void> reactToPost(String postId, String emoji) async {
     final index = _posts.indexWhere((p) => p.id == postId);
     if (index == -1) return;
 
     final post = _posts[index];
+    final userId = _myPublicKey ?? 'self';
 
-    // Toggle: remove if same emoji from self already exists
     final existing = post.reactions.indexWhere(
-      (r) => r.reactorId == 'self' && r.emoji == emoji,
+      (r) => (r.reactorId == 'self' || r.reactorId == userId) && r.emoji == emoji,
     );
     List<Reaction> newReactions;
     if (existing != -1) {
       newReactions = [...post.reactions]..removeAt(existing);
     } else {
-      // Remove any other reaction from self first, then add new
-      newReactions = post.reactions.where((r) => r.reactorId != 'self').toList();
-      newReactions.add(Reaction(
-        reactorId: 'self',
+      newReactions = post.reactions
+          .where((r) => r.reactorId != 'self' && r.reactorId != userId)
+          .toList();
+      final reaction = Reaction(
+        reactorId: userId,
         emoji: emoji,
         timestamp: DateTime.now(),
-      ));
+      );
+      newReactions.add(reaction);
+
+      // Broadcast to post author
+      if (post.authorId != 'self' && post.authorId != _myPublicKey) {
+        _feedRelay.sendViaRelay(
+          'feed:${post.authorId}',
+          jsonEncode({'type': 'reaction', 'post_id': postId, 'reaction': reaction.toJson()}),
+        );
+      }
     }
 
     _posts[index] = post.copyWith(reactions: newReactions);
@@ -179,14 +285,12 @@ class FeedService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Hide a post from the feed.
   Future<void> hidePost(String postId) async {
     _hiddenPostIds.add(postId);
     await _persistHidden();
     notifyListeners();
   }
 
-  /// Unhide a previously hidden post.
   Future<void> unhidePost(String postId) async {
     _hiddenPostIds.remove(postId);
     await _persistHidden();

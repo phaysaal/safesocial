@@ -40,12 +40,14 @@ void main() async {
   await groupService.loadGroups();
   await feedService.loadPosts();
 
-  // Set up relay for existing contacts
+  // Set up relay for existing contacts (chat + feed sync)
   if (identityService.publicKey != null) {
     chatService.setMyPublicKey(identityService.publicKey!);
     for (final contact in contactService.contacts) {
       chatService.connectRelay(contact.publicKey);
     }
+    feedService.initSync(identityService.publicKey!, contactService.contacts);
+    groupService.initSync(identityService.publicKey!);
   }
 
   // Start Veilid in the background AFTER the app is running
@@ -63,6 +65,8 @@ void main() async {
         for (final contact in contactService.contacts) {
           chatService.connectRelay(contact.publicKey);
         }
+        feedService.initSync(identityService.publicKey!, contactService.contacts);
+        groupService.initSync(identityService.publicKey!);
       }
     } catch (e) {
       debugPrint('[main] Veilid startup failed (local mode): $e');

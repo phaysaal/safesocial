@@ -6,47 +6,66 @@ import 'package:uuid/uuid.dart';
 
 import '../models/group.dart';
 import '../models/message.dart';
+import 'debug_log_service.dart';
+import 'relay_service.dart';
 
-/// Manages group lifecycle — creation, membership, and group messaging.
+/// Manages groups with relay-based group messaging.
 ///
-/// Currently persists groups to SharedPreferences and keeps messages in-memory.
-/// In production, groups will be backed by shared Veilid DHT records so that
-/// every member can read and write to the same data structure.
+/// Each group has a relay room (keyed by group dhtKey). All members
+/// connect to the same room. Messages broadcast to all members.
 class GroupService extends ChangeNotifier {
   static const _groupsKey = 'spheres_groups';
+  static const _msgPrefix = 'spheres_group_msgs_';
 
   List<Group> _groups = [];
   final Map<String, List<Message>> _groupMessages = {};
+  final RelayService _groupRelay = RelayService();
+  String? _myPublicKey;
 
-  /// All groups the user belongs to.
   List<Group> get groups => List.unmodifiable(_groups);
+  Map<String, List<Message>> get groupMessages => Map.unmodifiable(_groupMessages);
 
-  /// Messages keyed by group dhtKey.
-  Map<String, List<Message>> get groupMessages =>
-      Map.unmodifiable(_groupMessages);
+  /// Initialize group messaging relay.
+  void initSync(String myPublicKey) {
+    _myPublicKey = myPublicKey;
+    _groupRelay.onMessageReceived = (groupKey, data) {
+      _handleGroupMessage(groupKey, data);
+    };
 
-  /// Load groups from local storage.
+    // Connect to relay rooms for all groups
+    for (final group in _groups) {
+      _groupRelay.connect('grp:$myPublicKey', 'grp:${group.dhtKey}');
+    }
+  }
+
   Future<void> loadGroups() async {
     final prefs = await SharedPreferences.getInstance();
     final groupsJson = prefs.getString(_groupsKey);
     if (groupsJson != null) {
       try {
         final list = jsonDecode(groupsJson) as List<dynamic>;
-        _groups = list
-            .map((e) => Group.fromJson(e as Map<String, dynamic>))
-            .toList();
+        _groups = list.map((e) => Group.fromJson(e as Map<String, dynamic>)).toList();
       } catch (e) {
         debugPrint('[GroupService] Failed to load groups: $e');
         _groups = [];
       }
     }
+
+    // Load cached messages
+    for (final group in _groups) {
+      final msgsJson = prefs.getString('$_msgPrefix${group.dhtKey}');
+      if (msgsJson != null) {
+        try {
+          final list = jsonDecode(msgsJson) as List<dynamic>;
+          _groupMessages[group.dhtKey] =
+              list.map((e) => Message.fromJson(e as Map<String, dynamic>)).toList();
+        } catch (_) {}
+      }
+    }
+
     notifyListeners();
   }
 
-  /// Create a new group and add the current user as admin.
-  ///
-  /// [publicKey] and [displayName] identify the creating user.
-  /// TODO: Integrate with Veilid DHT — create a shared DHT record for the group.
   Future<void> createGroup(
     String name,
     String description, {
@@ -75,46 +94,34 @@ class GroupService extends ChangeNotifier {
     _groups.add(group);
     await _persist();
     notifyListeners();
+
+    // Connect to group relay room
+    if (_myPublicKey != null) {
+      _groupRelay.connect('grp:$_myPublicKey', 'grp:$dhtKey');
+    }
   }
 
-  /// Delete a group if the caller is an admin.
   Future<void> deleteGroup(String dhtKey) async {
     _groups.removeWhere((g) => g.dhtKey == dhtKey);
     _groupMessages.remove(dhtKey);
+    _groupRelay.disconnect('grp:$dhtKey');
     await _persist();
     notifyListeners();
   }
 
-  /// Update a group's name and/or description.
-  Future<void> updateGroup(
-    String dhtKey, {
-    String? name,
-    String? description,
-  }) async {
+  Future<void> updateGroup(String dhtKey, {String? name, String? description}) async {
     final index = _groups.indexWhere((g) => g.dhtKey == dhtKey);
     if (index == -1) return;
-
-    _groups[index] = _groups[index].copyWith(
-      name: name,
-      description: description,
-    );
+    _groups[index] = _groups[index].copyWith(name: name, description: description);
     await _persist();
     notifyListeners();
   }
 
-  /// Add a member to a group.
-  Future<void> addMember(
-    String dhtKey,
-    String publicKey,
-    String displayName, {
-    GroupRole role = GroupRole.member,
-  }) async {
+  Future<void> addMember(String dhtKey, String publicKey, String displayName,
+      {GroupRole role = GroupRole.member}) async {
     final index = _groups.indexWhere((g) => g.dhtKey == dhtKey);
     if (index == -1) return;
-
     final group = _groups[index];
-
-    // Avoid duplicates.
     if (group.members.any((m) => m.publicKey == publicKey)) return;
 
     final member = GroupMember(
@@ -124,60 +131,43 @@ class GroupService extends ChangeNotifier {
       joinedAt: DateTime.now(),
     );
 
+    _groups[index] = group.copyWith(members: [...group.members, member]);
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> removeMember(String dhtKey, String publicKey) async {
+    final index = _groups.indexWhere((g) => g.dhtKey == dhtKey);
+    if (index == -1) return;
+    final group = _groups[index];
     _groups[index] = group.copyWith(
-      members: [...group.members, member],
+      members: group.members.where((m) => m.publicKey != publicKey).toList(),
     );
     await _persist();
     notifyListeners();
   }
 
-  /// Remove a member from a group.
-  Future<void> removeMember(String dhtKey, String publicKey) async {
-    final index = _groups.indexWhere((g) => g.dhtKey == dhtKey);
-    if (index == -1) return;
+  Future<void> promoteMember(String dhtKey, String publicKey) async =>
+      _changeMemberRole(dhtKey, publicKey, GroupRole.admin);
 
-    final group = _groups[index];
-    final updatedMembers =
-        group.members.where((m) => m.publicKey != publicKey).toList();
+  Future<void> demoteMember(String dhtKey, String publicKey) async =>
+      _changeMemberRole(dhtKey, publicKey, GroupRole.member);
 
-    _groups[index] = group.copyWith(members: updatedMembers);
+  Future<void> _changeMemberRole(String dhtKey, String publicKey, GroupRole role) async {
+    final gi = _groups.indexWhere((g) => g.dhtKey == dhtKey);
+    if (gi == -1) return;
+    final group = _groups[gi];
+    final mi = group.members.indexWhere((m) => m.publicKey == publicKey);
+    if (mi == -1) return;
+    final updated = List<GroupMember>.from(group.members);
+    updated[mi] = updated[mi].copyWith(role: role);
+    _groups[gi] = group.copyWith(members: updated);
     await _persist();
     notifyListeners();
   }
 
-  /// Promote a member to admin.
-  Future<void> promoteMember(String dhtKey, String publicKey) async {
-    _changeMemberRole(dhtKey, publicKey, GroupRole.admin);
-  }
-
-  /// Demote an admin to regular member.
-  Future<void> demoteMember(String dhtKey, String publicKey) async {
-    _changeMemberRole(dhtKey, publicKey, GroupRole.member);
-  }
-
-  void _changeMemberRole(String dhtKey, String publicKey, GroupRole role) async {
-    final groupIndex = _groups.indexWhere((g) => g.dhtKey == dhtKey);
-    if (groupIndex == -1) return;
-
-    final group = _groups[groupIndex];
-    final memberIndex =
-        group.members.indexWhere((m) => m.publicKey == publicKey);
-    if (memberIndex == -1) return;
-
-    final updatedMembers = List<GroupMember>.from(group.members);
-    updatedMembers[memberIndex] =
-        updatedMembers[memberIndex].copyWith(role: role);
-
-    _groups[groupIndex] = group.copyWith(members: updatedMembers);
-    await _persist();
-    notifyListeners();
-  }
-
-  /// Remove self from a group.
   Future<void> leaveGroup(String dhtKey, String publicKey) async {
     await removeMember(dhtKey, publicKey);
-
-    // If the group is now empty, remove it entirely.
     final group = getGroup(dhtKey);
     if (group != null && group.members.isEmpty) {
       _groups.removeWhere((g) => g.dhtKey == dhtKey);
@@ -187,33 +177,58 @@ class GroupService extends ChangeNotifier {
     }
   }
 
-  /// Send a message to a group.
-  ///
-  /// TODO: Integrate with Veilid DHT for real message distribution.
-  Future<void> sendGroupMessage(
-    String dhtKey,
-    String senderId,
-    String content,
-  ) async {
+  /// Send a message to a group — broadcasts via relay to all members.
+  Future<void> sendGroupMessage(String dhtKey, String senderId, String content) async {
     final message = Message(
       id: const Uuid().v4(),
       senderId: senderId,
-      recipientId: dhtKey, // group dhtKey as the recipient
+      recipientId: dhtKey,
       content: content,
       timestamp: DateTime.now(),
+      delivered: true,
     );
 
     _groupMessages.putIfAbsent(dhtKey, () => []);
     _groupMessages[dhtKey]!.add(message);
     notifyListeners();
+
+    // Broadcast via relay
+    final payload = jsonEncode({
+      'type': 'group_msg',
+      'group_id': dhtKey,
+      'message': message.toJson(),
+    });
+    _groupRelay.sendViaRelay('grp:$dhtKey', payload);
+    DebugLogService().info('Group', 'Message sent to group $dhtKey');
+
+    await _persistMessages(dhtKey);
   }
 
-  /// Get all messages for a group.
-  List<Message> getGroupMessages(String dhtKey) {
-    return _groupMessages[dhtKey] ?? [];
+  void _handleGroupMessage(String groupKey, String data) {
+    try {
+      final payload = jsonDecode(data) as Map<String, dynamic>;
+      if (payload['type'] != 'group_msg') return;
+
+      final groupId = payload['group_id'] as String;
+      final msgData = payload['message'] as Map<String, dynamic>;
+      final message = Message.fromJson(msgData);
+
+      // Skip own messages and duplicates
+      if (message.senderId == _myPublicKey || message.senderId == 'self') return;
+      if (_groupMessages[groupId]?.any((m) => m.id == message.id) ?? false) return;
+
+      _groupMessages.putIfAbsent(groupId, () => []);
+      _groupMessages[groupId]!.add(message);
+      DebugLogService().success('Group', 'Received group message in $groupId');
+      notifyListeners();
+      _persistMessages(groupId);
+    } catch (e) {
+      DebugLogService().error('Group', 'Failed to handle group message: $e');
+    }
   }
 
-  /// Look up a group by its dhtKey.
+  List<Message> getGroupMessages(String dhtKey) => _groupMessages[dhtKey] ?? [];
+
   Group? getGroup(String dhtKey) {
     try {
       return _groups.firstWhere((g) => g.dhtKey == dhtKey);
@@ -222,14 +237,11 @@ class GroupService extends ChangeNotifier {
     }
   }
 
-  /// Check if a user is an admin in a group.
   bool isAdmin(String dhtKey, String publicKey) {
     final group = getGroup(dhtKey);
     if (group == null) return false;
     try {
-      final member =
-          group.members.firstWhere((m) => m.publicKey == publicKey);
-      return member.role == GroupRole.admin;
+      return group.members.firstWhere((m) => m.publicKey == publicKey).role == GroupRole.admin;
     } catch (_) {
       return false;
     }
@@ -237,7 +249,17 @@ class GroupService extends ChangeNotifier {
 
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
-    final json = jsonEncode(_groups.map((g) => g.toJson()).toList());
-    await prefs.setString(_groupsKey, json);
+    await prefs.setString(_groupsKey, jsonEncode(_groups.map((g) => g.toJson()).toList()));
+  }
+
+  Future<void> _persistMessages(String dhtKey) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final msgs = _groupMessages[dhtKey] ?? [];
+      await prefs.setString(
+        '$_msgPrefix$dhtKey',
+        jsonEncode(msgs.map((m) => m.toJson()).toList()),
+      );
+    } catch (_) {}
   }
 }
