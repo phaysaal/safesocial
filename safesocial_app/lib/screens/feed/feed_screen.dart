@@ -6,6 +6,7 @@ import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
+import '../../services/veilid_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_card.dart';
 
@@ -194,12 +195,18 @@ class _FeedScreenState extends State<FeedScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Spheres',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
-            fontSize: 24,
-          ),
+        title: Row(
+          children: [
+            Text(
+              'Spheres',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                fontSize: 24,
+              ),
+            ),
+            const SizedBox(width: 8),
+            _NetworkDot(),
+          ],
         ),
         actions: [
           IconButton(
@@ -447,6 +454,40 @@ class _CreatePostBar extends StatelessWidget {
           const SizedBox(width: 8),
           Icon(Icons.photo_library_outlined, color: Colors.green[600], size: 22),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Network status dot ──────────────────────────────────────────────────────
+
+class _NetworkDot extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final vs = context.watch<VeilidService>();
+    final isConnected = vs.isAttached;
+    final state = vs.attachmentState.toString().split('.').last;
+
+    return GestureDetector(
+      onTap: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isConnected
+                  ? 'P2P network: $state'
+                  : 'Not connected to P2P network${vs.error != null ? ": ${vs.error}" : ""}',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      },
+      child: Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isConnected ? Colors.green : Colors.orange,
+        ),
       ),
     );
   }

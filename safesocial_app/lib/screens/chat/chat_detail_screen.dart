@@ -7,6 +7,7 @@ import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
+import '../../services/veilid_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/message_bubble.dart';
 
@@ -127,8 +128,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    'Active now',
-                    style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                    context.watch<VeilidService>().isAttached
+                        ? 'P2P Connected'
+                        : 'Local mode (not connected)',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11,
+                      color: context.watch<VeilidService>().isAttached
+                          ? Colors.green
+                          : cs.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
