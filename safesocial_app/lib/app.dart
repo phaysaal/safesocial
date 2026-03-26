@@ -60,6 +60,10 @@ class SpheresApp extends StatelessWidget {
               path: '/profile',
               builder: (context, state) => const ProfileScreen(),
             ),
+            GoRoute(
+              path: '/console',
+              builder: (context, state) => const DebugConsoleScreen(),
+            ),
           ],
         ),
         GoRoute(
@@ -157,7 +161,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  static const _routes = ['/', '/chats', '/contacts', '/profile'];
+  static const _routes = ['/', '/chats', '/contacts', '/profile', '/console'];
 
   void _onTabTapped(int index) {
     if (index != _currentIndex) {
@@ -209,6 +213,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: 'Profile',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.terminal_outlined),
+            selectedIcon: Icon(Icons.terminal),
+            label: 'Console',
           ),
         ],
       ),
