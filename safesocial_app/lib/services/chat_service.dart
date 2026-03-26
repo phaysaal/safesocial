@@ -32,7 +32,8 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Create a new conversation DHT record for a contact.
-  Future<RecordKey?> createConversation(String contactPublicKey, KeyPair writerKeypair) async {
+  /// If writerKeypair is null, creates a local-only conversation.
+  Future<RecordKey?> createConversation(String contactPublicKey, [KeyPair? writerKeypair]) async {
     final rc = _veilidService?.routingContext;
     if (rc == null) {
       debugPrint('[ChatService] No routing context — creating local conversation');
@@ -200,6 +201,28 @@ class ChatService extends ChangeNotifier {
     } catch (e) {
       debugPrint('[ChatService] Value change handling failed: $e');
     }
+  }
+
+  /// Join an existing conversation using a string key (from QR payload).
+  Future<void> joinConversationByString(String contactPublicKey, String dhtKeyStr) async {
+    _conversations.putIfAbsent(contactPublicKey, () => []);
+
+    final rc = _veilidService?.routingContext;
+    if (rc != null) {
+      try {
+        final dhtKey = RecordKey.fromString(dhtKeyStr);
+        _conversationDhtKeys[contactPublicKey] = dhtKey;
+        await rc.openDHTRecord(dhtKey);
+        await rc.watchDHTValues(dhtKey);
+        await rc.closeDHTRecord(dhtKey);
+        debugPrint('[ChatService] Joined conversation: $dhtKeyStr');
+      } catch (e) {
+        debugPrint('[ChatService] Failed to join by string: $e');
+      }
+    }
+
+    await _persistConversationKeys();
+    notifyListeners();
   }
 
   /// Join an existing conversation by DHT key (from contact exchange).

@@ -7,10 +7,16 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/identity_service.dart';
 
-/// Screen for adding a new contact via QR code or manual key entry.
+/// Two-step contact exchange:
+/// 1. Person A shows their QR code
+/// 2. Person B scans it → B adds A + creates a conversation DHT record
+///    → B's QR code now includes the conversation key
+/// 3. A scans B's QR → A adds B + joins the conversation
+/// Both can now message each other through the shared DHT record.
 class AddContactScreen extends StatefulWidget {
   const AddContactScreen({super.key});
 
@@ -24,6 +30,11 @@ class _AddContactScreenState extends State<AddContactScreen>
   final _formKey = GlobalKey<FormState>();
   final _publicKeyController = TextEditingController();
   final _displayNameController = TextEditingController();
+
+  // After scanning someone, we store the conversation key to include
+  // in our own QR code so they can join the conversation.
+  String? _lastCreatedConversationKey;
+  String? _lastAddedContactName;
 
   @override
   void initState() {
@@ -42,38 +53,74 @@ class _AddContactScreenState extends State<AddContactScreen>
   Future<void> _addContact() async {
     if (!_formKey.currentState!.validate()) return;
 
-    await context.read<ContactService>().addContact(
-          _publicKeyController.text.trim(),
-          _displayNameController.text.trim(),
-        );
+    final publicKey = _publicKeyController.text.trim();
+    final displayName = _displayNameController.text.trim();
+
+    await _addContactAndCreateConversation(publicKey, displayName, null);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Contact added')),
+        SnackBar(content: Text('$displayName added! Now ask them to scan your QR code.')),
       );
-      context.pop();
     }
   }
 
+  /// Core logic: add contact + create/join conversation DHT record.
+  Future<void> _addContactAndCreateConversation(
+    String publicKey,
+    String displayName,
+    String? conversationDhtKey,
+  ) async {
+    final contactService = context.read<ContactService>();
+    final chatService = context.read<ChatService>();
+    final identityService = context.read<IdentityService>();
+
+    // Add as contact
+    await contactService.addContact(publicKey, displayName);
+
+    if (conversationDhtKey != null && conversationDhtKey.isNotEmpty) {
+      // They already created a conversation — join it
+      try {
+        await chatService.joinConversationByString(publicKey, conversationDhtKey);
+        debugPrint('[AddContact] Joined existing conversation: $conversationDhtKey');
+      } catch (e) {
+        debugPrint('[AddContact] Failed to join conversation: $e');
+      }
+    } else {
+      // We're the first to scan — create a new conversation
+      final keypair = identityService.keypair;
+      final key = await chatService.createConversation(publicKey, keypair);
+      if (key != null) {
+        _lastCreatedConversationKey = key.toString();
+        debugPrint('[AddContact] Created conversation: $_lastCreatedConversationKey');
+      }
+    }
+
+    setState(() {
+      _lastAddedContactName = displayName;
+    });
+  }
+
   void _handleQrScan(String data) {
-    // Try to parse as exchange payload (base64-encoded JSON)
     try {
       final decoded = utf8.decode(base64Decode(data));
       final payload = jsonDecode(decoded) as Map<String, dynamic>;
       final publicKey = payload['public_key'] as String?;
+      final conversationKey = payload['conversation_key'] as String?;
+
       if (publicKey != null && publicKey.isNotEmpty) {
-        _showAddFromQrDialog(publicKey);
+        _showAddFromQrDialog(publicKey, conversationKey);
         return;
       }
     } catch (_) {}
 
-    // Fallback: treat the raw string as a public key
+    // Fallback: treat raw string as public key
     if (data.length >= 10) {
-      _showAddFromQrDialog(data);
+      _showAddFromQrDialog(data, null);
     }
   }
 
-  void _showAddFromQrDialog(String publicKey) {
+  void _showAddFromQrDialog(String publicKey, String? conversationKey) {
     final nameController = TextEditingController();
     final theme = Theme.of(context);
 
@@ -96,6 +143,17 @@ class _AddContactScreenState extends State<AddContactScreen>
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (conversationKey != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.link, size: 14, color: Colors.green[600]),
+                  const SizedBox(width: 4),
+                  Text('Conversation link included',
+                      style: TextStyle(fontSize: 12, color: Colors.green[600])),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
             TextField(
               controller: nameController,
@@ -117,13 +175,31 @@ class _AddContactScreenState extends State<AddContactScreen>
             onPressed: () async {
               final name = nameController.text.trim();
               if (name.isEmpty) return;
-              await context.read<ContactService>().addContact(publicKey, name);
-              if (ctx.mounted) Navigator.pop(ctx);
+
+              Navigator.pop(ctx);
+
+              await _addContactAndCreateConversation(
+                publicKey, name, conversationKey,
+              );
+
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('$name added')),
-                );
-                context.pop();
+                if (conversationKey != null) {
+                  // Both sides connected — ready to chat
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Connected with $name! You can now chat.')),
+                  );
+                  context.pop(); // Go back to contacts
+                } else {
+                  // We scanned first — tell them to scan us back
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('$name added! Now show them YOUR QR code to complete the connection.'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                  // Switch to "My QR Code" tab
+                  _tabController.animateTo(0);
+                }
               }
             },
             child: const Text('Add'),
@@ -133,12 +209,28 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
   }
 
+  /// Build the exchange payload QR data.
+  /// Includes conversation key if we've already created one.
+  String _buildQrData() {
+    final identityService = context.read<IdentityService>();
+    final payload = <String, dynamic>{
+      'public_key': identityService.publicKey ?? '',
+      'profile_dht_key': identityService.profileDhtKey?.toString() ?? '',
+    };
+
+    // Include conversation key if we just created one
+    if (_lastCreatedConversationKey != null) {
+      payload['conversation_key'] = _lastCreatedConversationKey;
+    }
+
+    return base64Encode(utf8.encode(jsonEncode(payload)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final identityService = context.watch<IdentityService>();
-    final exchangePayload = identityService.generateExchangePayload();
     final myPublicKey = identityService.publicKey ?? '';
 
     return Scaffold(
@@ -164,17 +256,43 @@ class _AddContactScreenState extends State<AddContactScreen>
             child: Column(
               children: [
                 const SizedBox(height: 16),
-                Text(
-                  'Your QR Code',
-                  style: theme.textTheme.headlineMedium?.copyWith(fontSize: 20),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Let others scan this to add you as a contact.',
-                  style: theme.textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
+
+                // Step indicator
+                if (_lastAddedContactName != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'You added $_lastAddedContactName! Now ask them to scan this QR code to complete the connection.',
+                            style: TextStyle(fontSize: 13, color: Colors.green[800]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ] else ...[
+                  Text(
+                    'Your QR Code',
+                    style: theme.textTheme.headlineMedium?.copyWith(fontSize: 20),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Let others scan this to add you as a contact.',
+                    style: theme.textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                ],
 
                 // QR code
                 Container(
@@ -191,7 +309,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                     ],
                   ),
                   child: QrImageView(
-                    data: exchangePayload.isNotEmpty ? exchangePayload : myPublicKey,
+                    data: _buildQrData(),
                     version: QrVersions.auto,
                     size: 220,
                     eyeStyle: QrEyeStyle(
@@ -205,9 +323,29 @@ class _AddContactScreenState extends State<AddContactScreen>
                   ),
                 ),
 
+                const SizedBox(height: 16),
+
+                // How it works
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('How to connect:', style: theme.textTheme.labelLarge),
+                      const SizedBox(height: 8),
+                      _StepRow(step: '1', text: 'One person scans the other\'s QR code'),
+                      _StepRow(step: '2', text: 'Then the other person scans back'),
+                      _StepRow(step: '3', text: 'Both are connected and can chat!'),
+                    ],
+                  ),
+                ),
+
                 const SizedBox(height: 24),
 
-                // Copy key button
                 OutlinedButton.icon(
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: myPublicKey));
@@ -227,10 +365,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                 const SizedBox(height: 24),
 
                 // Manual add form
-                Text(
-                  'Or add manually',
-                  style: theme.textTheme.labelLarge,
-                ),
+                Text('Or add manually', style: theme.textTheme.labelLarge),
                 const SizedBox(height: 16),
                 Form(
                   key: _formKey,
@@ -295,6 +430,44 @@ class _AddContactScreenState extends State<AddContactScreen>
   }
 }
 
+// ─── Step row ────────────────────────────────────────────────────────────────
+
+class _StepRow extends StatelessWidget {
+  final String step;
+  final String text;
+
+  const _StepRow({required this.step, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: cs.primary,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(step,
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── QR Scanner Tab ──────────────────────────────────────────────────────────
 
 class _QrScannerTab extends StatefulWidget {
@@ -334,8 +507,6 @@ class _QrScannerTabState extends State<_QrScannerTab> {
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
-
-        // Scanner
         Expanded(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 32),
@@ -352,7 +523,6 @@ class _QrScannerTabState extends State<_QrScannerTab> {
                 if (barcode?.rawValue != null) {
                   _hasScanned = true;
                   widget.onScanned(barcode!.rawValue!);
-                  // Reset after a delay to allow re-scanning
                   Future.delayed(const Duration(seconds: 3), () {
                     if (mounted) setState(() => _hasScanned = false);
                   });
@@ -361,7 +531,6 @@ class _QrScannerTabState extends State<_QrScannerTab> {
             ),
           ),
         ),
-
         const SizedBox(height: 24),
       ],
     );
