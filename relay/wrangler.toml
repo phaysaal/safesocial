@@ -1,0 +1,18 @@
+name = "spheres-relay"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Durable Objects for room state
+[durable_objects]
+bindings = [
+  { name = "RELAY_ROOM", class_name = "RelayRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RelayRoom"]
+
+# Optional: custom domain
+# routes = [
+#   { pattern = "relay.spheres.dev", custom_domain = true }
+# ]

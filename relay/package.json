@@ -1,0 +1,13 @@
+{
+  "name": "spheres-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Spheres P2P relay — zero-knowledge WebSocket message relay",
+  "scripts": {
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
