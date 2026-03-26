@@ -97,10 +97,10 @@ def main():
     r = int(SIZE * 0.22)
     draw.rounded_rectangle([0, 0, SIZE - 1, SIZE - 1], radius=r, fill=(255, 255, 255, 255))
 
-    # Three cascading 3D spheres — darker, more saturated base colors
-    bg = draw_3d_sphere(bg, CX - 160, CY - 120, 230, (200, 50, 75), alpha=200)   # Deep coral
-    bg = draw_3d_sphere(bg, CX + 60, CY + 40, 270, (100, 40, 190), alpha=190)    # Deep purple
-    bg = draw_3d_sphere(bg, CX + 250, CY + 220, 155, (30, 140, 140), alpha=200)  # Deep teal
+    # Three cascading 3D spheres — enlarged, darker, saturated
+    bg = draw_3d_sphere(bg, CX - 150, CY - 110, 280, (200, 50, 75), alpha=200)   # Deep coral
+    bg = draw_3d_sphere(bg, CX + 70, CY + 50, 320, (100, 40, 190), alpha=190)    # Deep purple
+    bg = draw_3d_sphere(bg, CX + 270, CY + 240, 185, (30, 140, 140), alpha=200)  # Deep teal
 
     # Save
     os.makedirs(f"{BASE}/assets/images", exist_ok=True)
