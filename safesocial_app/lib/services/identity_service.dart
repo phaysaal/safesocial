@@ -131,6 +131,43 @@ class IdentityService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Import an existing identity from a keypair JSON string.
+  /// Used for multi-device restore or migration from backup.
+  Future<bool> importIdentity(String keypairJson, {String? displayName, String? bio}) async {
+    try {
+      final data = jsonDecode(keypairJson);
+
+      // Support both formats: raw keypair or full backup
+      Map<String, String> kp;
+      if (data is Map<String, dynamic>) {
+        kp = {
+          'public': data['public'] as String,
+          'secret': data['secret'] as String,
+        };
+      } else {
+        return false;
+      }
+
+      _keypair = kp;
+      _profileDhtKey = const Uuid().v4();
+
+      _currentIdentity = UserProfile(
+        publicKey: kp['public']!,
+        displayName: displayName ?? 'Restored User',
+        bio: bio ?? '',
+        updatedAt: DateTime.now(),
+      );
+
+      await _persistIdentity();
+      notifyListeners();
+      debugPrint('[IdentityService] Identity imported: ${kp['public']}');
+      return true;
+    } catch (e) {
+      debugPrint('[IdentityService] Import failed: $e');
+      return false;
+    }
+  }
+
   /// Export the keypair as a shareable string for backup.
   Future<String> exportIdentity() async {
     if (_keypair == null) return '';
