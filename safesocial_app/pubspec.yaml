@@ -26,6 +26,7 @@ dependencies:
   google_fonts: ^6.1.0
   qr_flutter: ^4.1.0
   mobile_scanner: ^6.0.2
+  flutter_svg: ^2.0.10
   web_socket_channel: ^3.0.1
 
 dev_dependencies:
@@ -38,3 +39,4 @@ flutter:
   assets:
     - assets/images/icon_1024.png
     - assets/images/logo.png
+    - assets/emoticons/

@@ -1,0 +1,27 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- #star# - Cute kawaii star -->
+  <defs>
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD93D"/>
+      <stop offset="100%" stop-color="#FFA726"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Star shape -->
+  <polygon points="60,5 72,42 112,42 80,65 90,102 60,80 30,102 40,65 8,42 48,42"
+    fill="url(#starGrad)" stroke="#F57F17" stroke-width="2"/>
+
+  <!-- Cute face -->
+  <!-- Eyes -->
+  <ellipse cx="47" cy="52" rx="5" ry="6" fill="#5D4037"/>
+  <ellipse cx="73" cy="52" rx="5" ry="6" fill="#5D4037"/>
+  <circle cx="49" cy="50" r="2" fill="white"/>
+  <circle cx="75" cy="50" r="2" fill="white"/>
+
+  <!-- Rosy cheeks -->
+  <circle cx="35" cy="60" r="6" fill="#FF9A9E" opacity="0.5"/>
+  <circle cx="85" cy="60" r="6" fill="#FF9A9E" opacity="0.5"/>
+
+  <!-- Cute smile -->
+  <path d="M 50 62 Q 60 72 70 62" fill="none" stroke="#5D4037" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

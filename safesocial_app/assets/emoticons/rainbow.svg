@@ -1,0 +1,26 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- #rainbow# - Cute rainbow with clouds -->
+
+  <!-- Rainbow arcs -->
+  <path d="M 10 85 A 50 50 0 0 1 110 85" fill="none" stroke="#FF1744" stroke-width="6"/>
+  <path d="M 16 85 A 44 44 0 0 1 104 85" fill="none" stroke="#FF9100" stroke-width="6"/>
+  <path d="M 22 85 A 38 38 0 0 1 98 85" fill="none" stroke="#FFD600" stroke-width="6"/>
+  <path d="M 28 85 A 32 32 0 0 1 92 85" fill="none" stroke="#00E676" stroke-width="6"/>
+  <path d="M 34 85 A 26 26 0 0 1 86 85" fill="none" stroke="#2979FF" stroke-width="6"/>
+  <path d="M 40 85 A 20 20 0 0 1 80 85" fill="none" stroke="#AA00FF" stroke-width="6"/>
+
+  <!-- Clouds -->
+  <ellipse cx="18" cy="88" rx="18" ry="12" fill="white" stroke="#E0E0E0" stroke-width="1"/>
+  <ellipse cx="10" cy="85" rx="10" ry="8" fill="white"/>
+  <ellipse cx="25" cy="83" rx="12" ry="9" fill="white"/>
+
+  <ellipse cx="102" cy="88" rx="18" ry="12" fill="white" stroke="#E0E0E0" stroke-width="1"/>
+  <ellipse cx="95" cy="83" rx="12" ry="9" fill="white"/>
+  <ellipse cx="110" cy="85" rx="10" ry="8" fill="white"/>
+
+  <!-- Stars -->
+  <polygon points="60,12 62,18 68,18 63,22 65,28 60,24 55,28 57,22 52,18 58,18" fill="#FFD700"/>
+  <circle cx="30" cy="25" r="2" fill="#FFD700"/>
+  <circle cx="90" cy="20" r="2.5" fill="#FFD700"/>
+  <circle cx="75" cy="15" r="1.5" fill="#FFD700"/>
+</svg>

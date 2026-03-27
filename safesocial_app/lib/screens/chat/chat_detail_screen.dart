@@ -9,6 +9,7 @@ import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
 import '../../services/veilid_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
 
 /// Messenger-style chat conversation detail view.
@@ -61,6 +62,35 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         );
       }
     });
+  }
+
+  void _showEmoticonPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => EmoticonPicker(
+        onSelected: (code) {
+          // Insert #code# at cursor position
+          final text = _messageController.text;
+          final selection = _messageController.selection;
+          final insert = '#$code#';
+
+          if (selection.isValid) {
+            final newText = text.replaceRange(selection.start, selection.end, insert);
+            _messageController.text = newText;
+            _messageController.selection = TextSelection.collapsed(
+              offset: selection.start + insert.length,
+            );
+          } else {
+            _messageController.text = '$text$insert';
+          }
+          Navigator.pop(ctx);
+        },
+      ),
+    );
   }
 
   Future<void> _attachMedia() async {
@@ -234,20 +264,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Attachment buttons
+                  // Emoticon picker
                   IconButton(
-                    icon: Icon(Icons.add_circle,
-                        color: cs.primary, size: 28),
-                    onPressed: _attachMedia,
+                    icon: Icon(Icons.emoji_emotions_outlined,
+                        color: cs.primary, size: 26),
+                    onPressed: () => _showEmoticonPicker(context),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(
                       minWidth: 36,
                       minHeight: 36,
                     ),
                   ),
+                  // Attachment buttons
                   IconButton(
-                    icon: Icon(Icons.camera_alt_outlined,
-                        color: cs.primary, size: 24),
+                    icon: Icon(Icons.add_circle,
+                        color: cs.primary, size: 28),
                     onPressed: _attachMedia,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(

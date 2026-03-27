@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/message.dart';
+import 'emoticon_picker.dart';
 import 'media_preview.dart';
 
 /// Chat message bubble.
@@ -69,13 +70,13 @@ class MessageBubble extends StatelessWidget {
                 const SizedBox(height: 6),
               ],
 
-              // Message text
+              // Message text (with emoticon support)
               if (message.content.isNotEmpty)
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: Text(
+                  child: buildEmoticonText(
                     message.content,
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    theme.textTheme.bodyMedium?.copyWith(
                       color: textColor,
                       fontSize: 15,
                     ),

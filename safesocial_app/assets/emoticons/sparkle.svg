@@ -1,0 +1,30 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- #sparkle# - Magical sparkles -->
+  <defs>
+    <linearGradient id="sparkGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#FFA000"/>
+    </linearGradient>
+    <linearGradient id="sparkGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF80AB"/>
+      <stop offset="100%" stop-color="#FF4081"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Big center sparkle -->
+  <polygon points="60,8 65,45 102,50 65,55 60,92 55,55 18,50 55,45" fill="url(#sparkGrad1)"/>
+
+  <!-- Medium sparkle top-right -->
+  <polygon points="95,10 97,25 112,27 97,29 95,44 93,29 78,27 93,25" fill="url(#sparkGrad2)"/>
+
+  <!-- Small sparkle bottom-left -->
+  <polygon points="25,75 27,85 37,87 27,89 25,99 23,89 13,87 23,85" fill="#AB47BC"/>
+
+  <!-- Tiny dots -->
+  <circle cx="20" cy="20" r="3" fill="#FFD700"/>
+  <circle cx="100" cy="70" r="2.5" fill="#FF80AB"/>
+  <circle cx="40" cy="105" r="2" fill="#FFD700"/>
+  <circle cx="85" cy="95" r="3" fill="#AB47BC"/>
+  <circle cx="15" cy="55" r="2" fill="#FF80AB"/>
+  <circle cx="105" cy="45" r="1.5" fill="#FFD700"/>
+</svg>
