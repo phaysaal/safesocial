@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/responsive_layout.dart';
+import 'chat_detail_screen.dart';
 
 /// Messenger-style chat list screen.
 class ChatListScreen extends StatefulWidget {
@@ -17,6 +19,7 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
+  String? _selectedConversationId;
 
   @override
   void dispose() {
@@ -41,7 +44,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             return name.toLowerCase().contains(_searchQuery.toLowerCase());
           }).toList();
 
-    return Scaffold(
+    final phoneScaffold = Scaffold(
       appBar: AppBar(
         title: Text(
           'Chats',
@@ -105,7 +108,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         displayName: displayName,
                         lastMessageText: lastMessage?.content,
                         timestamp: lastMessage?.timestamp,
-                        onTap: () => context.push('/chat/$recipientId'),
+                        selected: isTablet(context) && _selectedConversationId == recipientId,
+                        onTap: () {
+                          if (isTablet(context)) {
+                            setState(() => _selectedConversationId = recipientId);
+                          } else {
+                            context.push('/chat/$recipientId');
+                          }
+                        },
                       );
                     },
                   ),
@@ -118,6 +128,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
         child: const Icon(Icons.chat_outlined),
       ),
     );
+
+    // Tablet: master-detail layout
+    if (isTablet(context)) {
+      return MasterDetailLayout(
+        master: phoneScaffold,
+        detail: _selectedConversationId != null
+            ? ChatDetailScreen(conversationId: _selectedConversationId!)
+            : null,
+      );
+    }
+
+    return phoneScaffold;
   }
 
   Widget _buildEmptyState(ThemeData theme, bool noConversations) {
@@ -236,12 +258,14 @@ class _ConversationTile extends StatelessWidget {
   final String displayName;
   final String? lastMessageText;
   final DateTime? timestamp;
+  final bool selected;
   final VoidCallback onTap;
 
   const _ConversationTile({
     required this.displayName,
     this.lastMessageText,
     this.timestamp,
+    this.selected = false,
     required this.onTap,
   });
 
@@ -252,7 +276,8 @@ class _ConversationTile extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      child: Padding(
+      child: Container(
+        color: selected ? cs.primary.withValues(alpha: 0.1) : null,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [

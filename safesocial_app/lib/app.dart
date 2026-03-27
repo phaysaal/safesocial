@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'services/identity_service.dart';
 import 'services/theme_service.dart';
+import 'widgets/responsive_layout.dart';
 import 'theme/app_theme.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/chat/chat_list_screen.dart';
@@ -185,41 +186,70 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
+    final cs = Theme.of(context).colorScheme;
+    final tablet = isTablet(context);
+
+    final destinations = const [
+      NavigationDestination(
+        icon: Icon(Icons.home_outlined),
+        selectedIcon: Icon(Icons.home),
+        label: 'Home',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.chat_bubble_outline),
+        selectedIcon: Icon(Icons.chat_bubble),
+        label: 'Chat',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.people_outline),
+        selectedIcon: Icon(Icons.people),
+        label: 'Contacts',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.person_outline),
+        selectedIcon: Icon(Icons.person),
+        label: 'Profile',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.terminal_outlined),
+        selectedIcon: Icon(Icons.terminal),
+        label: 'Console',
+      ),
+    ];
+
+    // Tablet: side navigation rail
+    if (tablet) {
+      return Scaffold(
+        body: Row(
+          children: [
+            NavigationRail(
+              selectedIndex: _currentIndex,
+              onDestinationSelected: _onTabTapped,
+              labelType: NavigationRailLabelType.all,
+              backgroundColor: cs.surface,
+              indicatorColor: cs.primary.withValues(alpha: 0.15),
+              destinations: destinations.map((d) => NavigationRailDestination(
+                icon: d.icon,
+                selectedIcon: d.selectedIcon,
+                label: Text(d.label),
+              )).toList(),
+            ),
+            VerticalDivider(width: 1, color: cs.outline),
+            Expanded(child: widget.child),
+          ],
+        ),
+      );
+    }
+
+    // Phone: bottom navigation bar
     return Scaffold(
       body: widget.child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: _onTabTapped,
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        indicatorColor:
-            Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
-            label: 'Chat',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            selectedIcon: Icon(Icons.people),
-            label: 'Contacts',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.terminal_outlined),
-            selectedIcon: Icon(Icons.terminal),
-            label: 'Console',
-          ),
-        ],
+        backgroundColor: cs.surface,
+        indicatorColor: cs.primary.withValues(alpha: 0.15),
+        destinations: destinations,
       ),
     );
   }

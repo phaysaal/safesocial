@@ -7,6 +7,7 @@ import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
 import '../../services/veilid_service.dart';
+import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_card.dart';
 
@@ -238,10 +239,21 @@ class _FeedScreenState extends State<FeedScreen> {
                   SliverToBoxAdapter(
                     child: Container(height: 8, color: theme.scaffoldBackgroundColor),
                   ),
-                  // Posts
+                  // Posts — constrained width on tablet
                   SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (context, index) => PostCard(post: posts[index]),
+                      (context, index) {
+                        final card = PostCard(post: posts[index]);
+                        if (isTablet(context)) {
+                          return Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 600),
+                              child: card,
+                            ),
+                          );
+                        }
+                        return card;
+                      },
                       childCount: posts.length,
                     ),
                   ),

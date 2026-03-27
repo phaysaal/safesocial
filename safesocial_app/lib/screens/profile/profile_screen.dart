@@ -12,6 +12,7 @@ import '../../services/group_service.dart';
 import '../../services/theme_service.dart';
 import '../../models/post.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/responsive_layout.dart';
 
 /// Instagram-style profile screen.
 class ProfileScreen extends StatelessWidget {
@@ -233,8 +234,8 @@ class ProfileScreen extends StatelessWidget {
                   : GridView.builder(
                       padding: const EdgeInsets.all(1),
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
+                          SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: isTablet(context) ? 5 : 3,
                         mainAxisSpacing: 2,
                         crossAxisSpacing: 2,
                       ),
