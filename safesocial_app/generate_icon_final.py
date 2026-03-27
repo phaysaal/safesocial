@@ -100,10 +100,10 @@ def main():
     r = int(SIZE * 0.22)
     draw.rounded_rectangle([0, 0, SIZE - 1, SIZE - 1], radius=r, fill=(255, 255, 255, 255))
 
-    # Three cascading 3D spheres — 170% size
-    bg = draw_3d_sphere(bg, CX - 100, CY - 80, 476, (200, 50, 75), alpha=200)    # Deep coral
-    bg = draw_3d_sphere(bg, CX + 120, CY + 85, 544, (100, 40, 190), alpha=190)   # Deep purple
-    bg = draw_3d_sphere(bg, CX + 350, CY + 340, 314, (30, 140, 140), alpha=200)  # Deep teal
+    # Three cascading 3D spheres — 125% size, fits within rounded square
+    bg = draw_3d_sphere(bg, CX - 155, CY - 115, 350, (200, 50, 75), alpha=200)   # Deep coral
+    bg = draw_3d_sphere(bg, CX + 75, CY + 50, 400, (100, 40, 190), alpha=190)    # Deep purple
+    bg = draw_3d_sphere(bg, CX + 280, CY + 260, 230, (30, 140, 140), alpha=200)  # Deep teal
 
     # Save
     os.makedirs(f"{BASE}/assets/images", exist_ok=True)

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -40,36 +42,30 @@ void main() async {
   await groupService.loadGroups();
   await feedService.loadPosts();
 
-  // Set up relay for existing contacts (chat + feed sync)
-  if (identityService.publicKey != null) {
-    chatService.setMyPublicKey(identityService.publicKey!);
-    for (final contact in contactService.contacts) {
-      chatService.connectRelay(contact.publicKey);
-    }
-    feedService.initSync(identityService.publicKey!, contactService.contacts);
-    groupService.initSync(identityService.publicKey!);
-  }
+  // Set up relay for existing contacts — works WITHOUT Veilid
+  _connectRelay(identityService, chatService, feedService, groupService, contactService);
 
   // Start Veilid in the background AFTER the app is running
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     try {
       final appDir = await getApplicationDocumentsDirectory();
       final statePath = '${appDir.path}/veilid';
+
+      // Ensure Veilid state directories exist
+      await Directory(statePath).create(recursive: true);
+      await Directory('$statePath/protected_store').create(recursive: true);
+      await Directory('$statePath/table_store').create(recursive: true);
+      await Directory('$statePath/block_store').create(recursive: true);
+
       await veilidService.initialize(statePath);
       await identityService.loadIdentity();
       await chatService.loadConversations();
 
-      // Connect relay for any contacts loaded from Veilid
-      if (identityService.publicKey != null) {
-        chatService.setMyPublicKey(identityService.publicKey!);
-        for (final contact in contactService.contacts) {
-          chatService.connectRelay(contact.publicKey);
-        }
-        feedService.initSync(identityService.publicKey!, contactService.contacts);
-        groupService.initSync(identityService.publicKey!);
-      }
+      // Reconnect relay with any new identity from Veilid
+      _connectRelay(identityService, chatService, feedService, groupService, contactService);
     } catch (e) {
-      debugPrint('[main] Veilid startup failed (local mode): $e');
+      DebugLogService().error('Main', 'Veilid startup failed (relay-only mode): $e');
+      // Relay still works — Veilid is optional for messaging
     }
   });
 
@@ -89,4 +85,25 @@ void main() async {
       child: const SpheresApp(),
     ),
   );
+}
+
+/// Connect relay for all existing contacts. Works without Veilid.
+void _connectRelay(
+  IdentityService identityService,
+  ChatService chatService,
+  FeedService feedService,
+  GroupService groupService,
+  ContactService contactService,
+) {
+  final pubKey = identityService.publicKey;
+  if (pubKey == null || pubKey.isEmpty) return;
+
+  chatService.setMyPublicKey(pubKey);
+  for (final contact in contactService.contacts) {
+    chatService.connectRelay(contact.publicKey);
+  }
+  feedService.initSync(pubKey, contactService.contacts);
+  groupService.initSync(pubKey);
+
+  DebugLogService().success('Main', 'Relay connected for ${contactService.contacts.length} contacts');
 }
