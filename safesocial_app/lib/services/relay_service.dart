@@ -5,20 +5,13 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'debug_log_service.dart';
 
-/// WebSocket relay client for fallback messaging when Veilid DHT is slow.
-///
-/// Connects to a Cloudflare Worker relay that passes encrypted blobs
-/// between peers. The relay sees only opaque encrypted data.
-///
-/// Room ID = first 16 chars of SHA256(sorted(myPublicKey, theirPublicKey))
-/// This ensures both peers join the same room without coordination.
+/// WebSocket relay client for messaging.
 class RelayService extends ChangeNotifier {
   static const _defaultRelayUrl = 'wss://relay.spheres.dev';
 
   final Map<String, WebSocketChannel> _channels = {};
   final _log = DebugLogService();
 
-  /// Callback when a message is received from the relay.
   void Function(String contactPublicKey, String encryptedMessage)? onMessageReceived;
 
   /// Connect to a relay room for a specific contact.
@@ -28,64 +21,70 @@ class RelayService extends ChangeNotifier {
     final wsUrl = '$url/room/$roomId';
 
     if (_channels.containsKey(contactPublicKey)) {
-      _log.info('Relay', 'Already connected to room for $contactPublicKey');
       return;
     }
 
+    _log.info('Relay', 'Connecting to $wsUrl');
+
     try {
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+      // Wait for the connection to be ready
+      try {
+        await channel.ready;
+        _log.success('Relay', 'Connected to room $roomId');
+      } catch (e) {
+        _log.error('Relay', 'WebSocket handshake failed: $e');
+        return;
+      }
+
       _channels[contactPublicKey] = channel;
 
       channel.stream.listen(
         (data) {
-          _log.success('Relay', 'Received message via relay from $contactPublicKey');
+          _log.success('Relay', 'Received message via relay');
           onMessageReceived?.call(contactPublicKey, data as String);
         },
         onError: (e) {
-          _log.error('Relay', 'WebSocket error for $contactPublicKey: $e');
+          _log.error('Relay', 'WebSocket stream error: $e');
           _channels.remove(contactPublicKey);
         },
         onDone: () {
-          _log.info('Relay', 'WebSocket closed for $contactPublicKey');
+          _log.info('Relay', 'WebSocket closed, reconnecting in 5s...');
           _channels.remove(contactPublicKey);
-          // Auto-reconnect after 5 seconds
           Future.delayed(const Duration(seconds: 5), () {
             connect(myPublicKey, contactPublicKey, relayUrl: relayUrl);
           });
         },
       );
-
-      _log.success('Relay', 'Connected to relay room: $roomId');
     } catch (e) {
-      _log.error('Relay', 'Failed to connect to relay: $e');
+      _log.error('Relay', 'Failed to connect: $e');
     }
   }
 
-  /// Send an encrypted message through the relay.
+  /// Send a message via relay.
   Future<bool> sendViaRelay(String contactPublicKey, String encryptedMessage) async {
     final channel = _channels[contactPublicKey];
     if (channel == null) {
-      _log.warn('Relay', 'No relay connection for $contactPublicKey');
+      _log.warn('Relay', 'No connection for ${contactPublicKey.length > 12 ? '${contactPublicKey.substring(0, 8)}...' : contactPublicKey}');
       return false;
     }
 
     try {
       channel.sink.add(encryptedMessage);
-      _log.success('Relay', 'Message sent via relay to $contactPublicKey');
+      _log.success('Relay', 'Message sent via relay');
       return true;
     } catch (e) {
-      _log.error('Relay', 'Relay send failed: $e');
+      _log.error('Relay', 'Send failed: $e');
       return false;
     }
   }
 
-  /// Disconnect from a specific contact's relay room.
   void disconnect(String contactPublicKey) {
     final channel = _channels.remove(contactPublicKey);
     channel?.sink.close();
   }
 
-  /// Disconnect all relay connections.
   void disconnectAll() {
     for (final channel in _channels.values) {
       channel.sink.close();
@@ -93,12 +92,10 @@ class RelayService extends ChangeNotifier {
     _channels.clear();
   }
 
-  /// Compute a deterministic room ID from two public keys.
-  /// Both peers compute the same room ID regardless of who connects first.
+  /// Deterministic room ID from two keys — both peers get the same room.
   String _computeRoomId(String keyA, String keyB) {
     final sorted = [keyA, keyB]..sort();
     final combined = '${sorted[0]}:${sorted[1]}';
-    // Simple hash — in production use SHA256
     var hash = 0;
     for (var i = 0; i < combined.length; i++) {
       hash = ((hash << 5) - hash + combined.codeUnitAt(i)) & 0xFFFFFFFF;

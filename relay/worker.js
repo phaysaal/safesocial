@@ -1,16 +1,13 @@
 /**
  * Spheres Relay — Cloudflare Worker WebSocket relay
  *
- * A zero-knowledge message relay for Spheres P2P social network.
- * Passes encrypted blobs between peers. No auth, no logs, no storage.
+ * Zero-knowledge message relay. Passes encrypted blobs between peers.
+ * No auth, no logs, no storage.
  *
  * Protocol:
  *   1. Client connects: wss://relay.spheres.dev/room/<room_id>
- *   2. room_id = SHA256(sorted(publicKeyA, publicKeyB))[:16]
- *   3. Messages sent by one client are forwarded to all others in the room
- *   4. Undelivered messages held in memory for 5 minutes max
- *
- * Deploy: npx wrangler deploy
+ *   2. Messages from one client are forwarded to all others in the room
+ *   3. Undelivered messages held in memory for 5 minutes max
  */
 
 export default {
@@ -22,7 +19,7 @@ export default {
       return new Response(JSON.stringify({
         service: "Spheres Relay",
         status: "ok",
-        rooms: env.ROOMS ? "durable_objects" : "in_memory",
+        version: "2.0",
       }), {
         headers: { "Content-Type": "application/json" },
       });
@@ -40,8 +37,6 @@ export default {
     }
 
     const roomId = match[1];
-
-    // Use Durable Objects for room state
     const id = env.RELAY_ROOM.idFromName(roomId);
     const room = env.RELAY_ROOM.get(id);
     return room.fetch(request);
@@ -49,77 +44,72 @@ export default {
 };
 
 /**
- * Durable Object: one per room. Manages WebSocket connections
- * and message forwarding within a room.
+ * Durable Object: one per room.
+ * Uses the WebSocket Hibernation API so connections survive DO sleep cycles.
  */
 export class RelayRoom {
   constructor(state, env) {
     this.state = state;
-    this.connections = new Set();
-    this.pendingMessages = []; // Messages waiting for the other peer
-    this.lastActivity = Date.now();
-
-    // Clean up pending messages older than 5 minutes
-    this.cleanupInterval = setInterval(() => {
-      const cutoff = Date.now() - 5 * 60 * 1000;
-      this.pendingMessages = this.pendingMessages.filter(m => m.ts > cutoff);
-    }, 60000);
   }
 
   async fetch(request) {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
+    // Accept the WebSocket with hibernation support
     this.state.acceptWebSocket(server);
-    this.connections.add(server);
-    this.lastActivity = Date.now();
 
-    // Deliver any pending messages to the new connection
-    for (const msg of this.pendingMessages) {
+    // Deliver any pending messages from storage
+    const pending = await this.state.storage.get("pending") || [];
+    for (const msg of pending) {
       try {
         server.send(msg.data);
       } catch (_) {}
     }
-    this.pendingMessages = [];
+    // Clear pending after delivery
+    if (pending.length > 0) {
+      await this.state.storage.delete("pending");
+    }
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws, message) {
-    this.lastActivity = Date.now();
+    // Get all connected WebSockets via the hibernation API
+    const sockets = this.state.getWebSockets();
 
-    // Forward to all OTHER connections in the room
     let delivered = false;
-    for (const conn of this.connections) {
-      if (conn !== ws) {
+    for (const sock of sockets) {
+      if (sock !== ws) {
         try {
-          conn.send(message);
+          sock.send(message);
           delivered = true;
         } catch (_) {
-          this.connections.delete(conn);
+          // Dead socket — will be cleaned up by webSocketClose
         }
       }
     }
 
-    // If no one else is connected, queue the message (5 min TTL)
+    // If no one else is connected, queue the message (max 50, 5 min TTL)
     if (!delivered) {
-      this.pendingMessages.push({
+      const pending = await this.state.storage.get("pending") || [];
+      pending.push({
         data: message,
         ts: Date.now(),
       });
 
-      // Cap at 100 pending messages per room
-      if (this.pendingMessages.length > 100) {
-        this.pendingMessages.shift();
-      }
+      // Remove old messages (> 5 min) and cap at 50
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      const filtered = pending.filter(m => m.ts > cutoff).slice(-50);
+      await this.state.storage.put("pending", filtered);
     }
   }
 
-  async webSocketClose(ws, code, reason) {
-    this.connections.delete(ws);
+  async webSocketClose(ws, code, reason, wasClean) {
+    // Nothing to do — hibernation API handles cleanup
   }
 
   async webSocketError(ws, error) {
-    this.connections.delete(ws);
+    // Nothing to do
   }
 }
