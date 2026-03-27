@@ -32,6 +32,9 @@ def draw_3d_sphere(img, cx, cy, r, base_color, alpha=180):
             px = cx + x_off
             py = cy + y_off
 
+            if px < 0 or px >= SIZE or py < 0 or py >= SIZE:
+                continue
+
             # Distance from light source (normalized 0-1)
             dist_from_light = math.sqrt(
                 (px - light_x) ** 2 + (py - light_y) ** 2
@@ -97,10 +100,10 @@ def main():
     r = int(SIZE * 0.22)
     draw.rounded_rectangle([0, 0, SIZE - 1, SIZE - 1], radius=r, fill=(255, 255, 255, 255))
 
-    # Three cascading 3D spheres — enlarged, darker, saturated
-    bg = draw_3d_sphere(bg, CX - 150, CY - 110, 280, (200, 50, 75), alpha=200)   # Deep coral
-    bg = draw_3d_sphere(bg, CX + 70, CY + 50, 320, (100, 40, 190), alpha=190)    # Deep purple
-    bg = draw_3d_sphere(bg, CX + 270, CY + 240, 185, (30, 140, 140), alpha=200)  # Deep teal
+    # Three cascading 3D spheres — 170% size
+    bg = draw_3d_sphere(bg, CX - 100, CY - 80, 476, (200, 50, 75), alpha=200)    # Deep coral
+    bg = draw_3d_sphere(bg, CX + 120, CY + 85, 544, (100, 40, 190), alpha=190)   # Deep purple
+    bg = draw_3d_sphere(bg, CX + 350, CY + 340, 314, (30, 140, 140), alpha=200)  # Deep teal
 
     # Save
     os.makedirs(f"{BASE}/assets/images", exist_ok=True)
