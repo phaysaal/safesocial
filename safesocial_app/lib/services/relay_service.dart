@@ -13,7 +13,7 @@ import 'debug_log_service.dart';
 /// Room ID = first 16 chars of SHA256(sorted(myPublicKey, theirPublicKey))
 /// This ensures both peers join the same room without coordination.
 class RelayService extends ChangeNotifier {
-  static const _defaultRelayUrl = 'wss://spheres-relay.mahmudulfaisal.workers.dev';
+  static const _defaultRelayUrl = 'wss://relay.spheres.dev';
 
   final Map<String, WebSocketChannel> _channels = {};
   final _log = DebugLogService();
