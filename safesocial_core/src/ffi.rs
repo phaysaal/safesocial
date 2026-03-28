@@ -7,14 +7,14 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use veilid_core::*;
+use base64::Engine;
 
 use crate::SpheresCore;
 
 /// Opaque handle to the Spheres core instance.
 pub struct SpheresHandle {
-    core: SpheresCore,
-    runtime: Runtime,
+    pub core: SpheresCore,
+    pub runtime: Runtime,
 }
 
 #[no_mangle]
@@ -50,7 +50,7 @@ pub extern "C" fn spheres_free(handle: *mut SpheresHandle) {
 
 #[no_mangle]
 pub extern "C" fn spheres_create_identity(handle: *mut SpheresHandle) -> *mut c_char {
-    let handle = unsafe { &mut *handle };
+    let _handle = unsafe { &mut *handle };
     
     // In a real implementation, this would call identity::create_identity
     // For now, we return a success status
@@ -64,12 +64,41 @@ pub extern "C" fn spheres_create_identity(handle: *mut SpheresHandle) -> *mut c_
 }
 
 #[no_mangle]
+pub extern "C" fn spheres_initiate_session(
+    handle: *mut SpheresHandle,
+    contact_key: *const c_char,
+    shared_secret_base64: *const c_char,
+) -> *mut c_char {
+    let handle = unsafe { &mut *handle };
+    let contact_key_str = unsafe { CStr::from_ptr(contact_key).to_string_lossy().into_owned() };
+    let shared_secret_b64 = unsafe { CStr::from_ptr(shared_secret_base64).to_string_lossy() };
+
+    let mut secret = [0u8; 32];
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(shared_secret_b64.as_bytes()) {
+        let decoded_vec: Vec<u8> = decoded;
+        if decoded_vec.len() == 32 {
+            secret.copy_from_slice(&decoded_vec);
+        }
+    }
+
+    handle.core.session_manager().initiate_session(&contact_key_str, secret);
+
+    let result = serde_json::json!({
+        "status": "success",
+        "contact": contact_key_str
+    });
+
+    let s = CString::new(result.to_string()).unwrap();
+    s.into_raw()
+}
+
+#[no_mangle]
 pub extern "C" fn spheres_send_message(
     handle: *mut SpheresHandle,
     recipient_key: *const c_char,
     content: *const c_char,
 ) -> *mut c_char {
-    let handle = unsafe { &mut *handle };
+    let _handle = unsafe { &mut *handle };
     let recipient = unsafe { CStr::from_ptr(recipient_key).to_string_lossy() };
     let content = unsafe { CStr::from_ptr(content).to_string_lossy() };
 
@@ -89,6 +118,6 @@ pub extern "C" fn spheres_send_message(
 #[no_mangle]
 pub extern "C" fn spheres_string_free(s: *mut c_char) {
     if !s.is_null() {
-        unsafe { CString::from_raw(s) };
+        unsafe { let _ = CString::from_raw(s); };
     }
 }

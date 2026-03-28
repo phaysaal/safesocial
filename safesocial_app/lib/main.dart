@@ -15,6 +15,7 @@ import 'services/group_service.dart';
 import 'services/theme_service.dart';
 import 'services/call_service.dart';
 import 'services/debug_log_service.dart';
+import 'services/rust_core_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,6 +29,7 @@ void main() async {
   final mediaService = MediaService();
   final groupService = GroupService();
   final callService = CallService();
+  final rustCoreService = RustCoreService();
 
   // Load theme (no Veilid needed)
   await themeService.load();
@@ -47,12 +49,16 @@ void main() async {
   // Set up relay for existing contacts — works WITHOUT Veilid
   _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
 
-  // Start Veilid in the background AFTER the app is running
+  // Start Veilid and Rust Core in the background AFTER the app is running
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     try {
       final appDir = await getApplicationDocumentsDirectory();
-      final statePath = '${appDir.path}/veilid';
+      
+      // Initialize Rust Core (Double Ratchet brain)
+      await rustCoreService.init();
 
+      // Initialize Veilid
+      final statePath = '${appDir.path}/veilid';
       // Ensure Veilid state directories exist
       await Directory(statePath).create(recursive: true);
       await Directory('$statePath/protected_store').create(recursive: true);
@@ -66,8 +72,7 @@ void main() async {
       // Reconnect relay with any new identity from Veilid
       _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
     } catch (e) {
-      DebugLogService().error('Main', 'Veilid startup failed (relay-only mode): $e');
-      // Relay still works — Veilid is optional for messaging
+      DebugLogService().error('Main', 'Backend startup failed: $e');
     }
   });
 
@@ -83,6 +88,7 @@ void main() async {
         ChangeNotifierProvider.value(value: mediaService),
         ChangeNotifierProvider.value(value: groupService),
         ChangeNotifierProvider.value(value: callService),
+        ChangeNotifierProvider.value(value: rustCoreService),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),

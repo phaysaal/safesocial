@@ -32,6 +32,7 @@ dependencies:
   permission_handler: ^11.3.1
   crypto: ^3.0.3
   image: ^4.3.0
+  ffi: ^2.1.2
 
 dev_dependencies:
   flutter_test:
