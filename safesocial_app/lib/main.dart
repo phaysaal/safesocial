@@ -34,10 +34,12 @@ void main() async {
   // Load theme (no Veilid needed)
   await themeService.load();
 
-  // Wire ChatService ↔ VeilidService
+  // Wire ChatService & FeedService ↔ VeilidService
   chatService.attachVeilidService(veilidService);
+  feedService.attachVeilidService(veilidService);
   veilidService.onValueChange = (key, subkeys) {
     chatService.handleValueChange(key, subkeys);
+    feedService.handleValueChange(key, subkeys);
   };
 
   // Load local data (SharedPreferences — always available)
