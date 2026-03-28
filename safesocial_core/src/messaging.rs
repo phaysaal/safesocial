@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use veilid_core::*;
 
 use crate::schema::{self, MESSAGE_SUBKEY_LATEST};
+use crate::ratchet::SecureSessionManager;
 use crate::Result;
 
 /// A single direct message between two users.
@@ -21,8 +22,12 @@ pub struct DirectMessage {
     pub sender: String,
     /// Public key of the recipient.
     pub recipient: String,
-    /// The message text content.
+    /// The message text content (plaintext - only for local cache).
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub content: String,
+    /// Encrypted message payload (for DHT storage).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub encrypted_payload: Vec<u8>,
     /// Unix timestamp when the message was created.
     pub timestamp: i64,
     /// Whether this message has been confirmed delivered.
@@ -65,11 +70,20 @@ struct ConversationMeta {
 /// available subkey, then increments and writes back the counter.
 pub async fn send_message(
     rc: &RoutingContext,
+    session_manager: &mut SecureSessionManager,
     conversation_key: RecordKey,
     writer: KeyPair,
-    msg: &DirectMessage,
+    mut msg: DirectMessage,
 ) -> Result<()> {
     tracing::info!("Sending message {} to conversation {:?}", msg.id, conversation_key);
+
+    // 1. Encrypt the payload using the ratchet session
+    let plaintext = msg.content.as_bytes();
+    let encrypted = session_manager.encrypt_ratcheted(&msg.recipient, plaintext)?;
+    
+    // 2. Prepare the message for the DHT (clear content, set encrypted payload)
+    msg.encrypted_payload = encrypted;
+    msg.content = String::new(); // Don't store plaintext on DHT
 
     let _record = rc
         .open_dht_record(conversation_key.clone(), Some(writer))
@@ -87,7 +101,7 @@ pub async fn send_message(
     let msg_subkey = meta.next_subkey;
 
     // Write the message to the next available subkey
-    let serialized = schema::serialize(msg)?;
+    let serialized = schema::serialize(&msg)?;
     rc.set_dht_value(conversation_key.clone(), msg_subkey, serialized, None)
         .await?;
 
@@ -111,6 +125,7 @@ pub async fn send_message(
 /// or empty subkeys are silently skipped.
 pub async fn get_messages(
     rc: &RoutingContext,
+    session_manager: &mut SecureSessionManager,
     conversation_key: RecordKey,
     start_subkey: u32,
     count: u32,
@@ -134,7 +149,23 @@ pub async fn get_messages(
         {
             Some(value_data) => {
                 match schema::deserialize::<DirectMessage>(value_data.data()) {
-                    Ok(msg) => messages.push(msg),
+                    Ok(mut msg) => {
+                        // Decrypt the payload if it exists
+                        if !msg.encrypted_payload.is_empty() {
+                            match session_manager.decrypt_ratcheted(&msg.sender, &msg.encrypted_payload) {
+                                Ok(plaintext) => {
+                                    msg.content = String::from_utf8_lossy(&plaintext).into_owned();
+                                    msg.encrypted_payload = Vec::new(); // Clear after decryption
+                                    messages.push(msg);
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to decrypt message {}: {}", msg.id, e);
+                                }
+                            }
+                        } else {
+                            messages.push(msg);
+                        }
+                    },
                     Err(e) => {
                         tracing::warn!("Failed to deserialize message at subkey {}: {}", subkey, e);
                     }

@@ -15,9 +15,12 @@ pub mod groups;
 pub mod feed;
 pub mod media;
 pub mod privacy;
+pub mod ratchet;
+pub mod ffi;
 
 use std::sync::Arc;
 use veilid_core::*;
+use crate::ratchet::SecureSessionManager;
 
 /// Callback type for receiving Veilid network updates.
 pub type UpdateCallback = Arc<dyn Fn(VeilidUpdate) + Send + Sync>;
@@ -62,6 +65,7 @@ pub struct SpheresCore {
     api: VeilidAPI,
     routing_context: RoutingContext,
     identity: Option<KeyPair>,
+    session_manager: SecureSessionManager,
 }
 
 impl SpheresCore {
@@ -118,6 +122,7 @@ impl SpheresCore {
             api,
             routing_context,
             identity: None,
+            session_manager: SecureSessionManager::new(),
         })
     }
 
@@ -149,5 +154,10 @@ impl SpheresCore {
     /// Sets the local identity keypair.
     pub fn set_identity(&mut self, keypair: KeyPair) {
         self.identity = Some(keypair);
+    }
+
+    /// Returns a mutable reference to the secure session manager.
+    pub fn session_manager(&mut self) -> &mut SecureSessionManager {
+        &mut self.session_manager
     }
 }
