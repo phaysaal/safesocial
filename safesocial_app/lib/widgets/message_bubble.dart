@@ -128,15 +128,14 @@ class MessageBubble extends StatelessWidget {
                 // Copy is handled by Flutter's text selection
               },
             ),
-            if (isMine)
-              ListTile(
-                leading: Icon(Icons.delete_outline, color: cs.error),
-                title: Text('Delete', style: TextStyle(color: cs.error)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  onDelete?.call(message);
-                },
-              ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: cs.error),
+              title: Text('Delete', style: TextStyle(color: cs.error)),
+              onTap: () {
+                Navigator.pop(ctx);
+                onDelete?.call(message);
+              },
+            ),
           ],
         ),
       ),

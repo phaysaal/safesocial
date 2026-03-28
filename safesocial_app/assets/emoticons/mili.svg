@@ -1,0 +1,50 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- #mili# - Cute pink cat -->
+
+  <!-- Ears -->
+  <polygon points="25,48 32,12 52,42" fill="#F48FB1" stroke="#EC407A" stroke-width="2"/>
+  <polygon points="95,48 88,12 68,42" fill="#F48FB1" stroke="#EC407A" stroke-width="2"/>
+  <!-- Inner ears -->
+  <polygon points="30,45 35,22 48,42" fill="#FCE4EC"/>
+  <polygon points="90,45 85,22 72,42" fill="#FCE4EC"/>
+
+  <!-- Head -->
+  <ellipse cx="60" cy="62" rx="40" ry="38" fill="#F48FB1" stroke="#EC407A" stroke-width="2"/>
+
+  <!-- Eyes - big cute cat eyes -->
+  <ellipse cx="42" cy="58" rx="11" ry="13" fill="white"/>
+  <ellipse cx="78" cy="58" rx="11" ry="13" fill="white"/>
+  <!-- Pupils - cat slit style -->
+  <ellipse cx="44" cy="58" rx="5" ry="9" fill="#880E4F"/>
+  <ellipse cx="80" cy="58" rx="5" ry="9" fill="#880E4F"/>
+  <!-- Sparkle -->
+  <circle cx="46" cy="54" r="3" fill="white"/>
+  <circle cx="82" cy="54" r="3" fill="white"/>
+  <circle cx="42" cy="61" r="1.5" fill="white"/>
+  <circle cx="78" cy="61" r="1.5" fill="white"/>
+
+  <!-- Cute pink nose -->
+  <ellipse cx="60" cy="70" rx="5" ry="3.5" fill="#EC407A"/>
+
+  <!-- Mouth - cat smile with fang -->
+  <path d="M 50 74 Q 55 80 60 74" fill="none" stroke="#AD1457" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 60 74 Q 65 80 70 74" fill="none" stroke="#AD1457" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Whiskers -->
+  <line x1="8" y1="62" x2="30" y2="65" stroke="#EC407A" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="8" y1="72" x2="30" y2="72" stroke="#EC407A" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="90" y1="65" x2="112" y2="62" stroke="#EC407A" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="90" y1="72" x2="112" y2="72" stroke="#EC407A" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Blush -->
+  <circle cx="30" cy="72" r="7" fill="#FF80AB" opacity="0.4"/>
+  <circle cx="90" cy="72" r="7" fill="#FF80AB" opacity="0.4"/>
+
+  <!-- Tiny bow on ear -->
+  <path d="M 75 25 Q 80 18 85 25 Q 80 28 75 25" fill="#E91E63"/>
+  <path d="M 75 25 Q 80 32 85 25" fill="#EC407A"/>
+  <circle cx="80" cy="25" r="2" fill="#AD1457"/>
+
+  <!-- Sparkle -->
+  <polygon points="15,20 16.5,24 21,24 17.5,27 19,31 15,28 11,31 12.5,27 9,24 13.5,24" fill="#FFD700"/>
+</svg>

@@ -17,7 +17,8 @@ class Emoticon {
 /// All available custom emoticons.
 const emoticons = [
   Emoticon(code: 'carlita', name: 'Carlita', svgAsset: 'assets/emoticons/carlita.svg'),
-  Emoticon(code: 'lemy', name: 'Lemy', svgAsset: 'assets/emoticons/lemy.svg'),
+  Emoticon(code: 'lami', name: 'Lami', svgAsset: 'assets/emoticons/lami.svg'),
+  Emoticon(code: 'mili', name: 'Mili', svgAsset: 'assets/emoticons/mili.svg'),
   Emoticon(code: 'love', name: 'Love', svgAsset: 'assets/emoticons/love.svg'),
   Emoticon(code: 'happy', name: 'Happy', svgAsset: 'assets/emoticons/happy.svg'),
   Emoticon(code: 'sad', name: 'Sad', svgAsset: 'assets/emoticons/sad.svg'),
