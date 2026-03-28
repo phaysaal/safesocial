@@ -155,11 +155,17 @@ pub async fn get_messages(
 /// Create a new two-party conversation DHT record.
 ///
 /// Returns the `RecordKey` that both parties use to read and write messages.
-pub async fn create_conversation(rc: &RoutingContext) -> Result<RecordKey> {
-    tracing::info!("Creating new conversation record");
+pub async fn create_conversation(
+    api: &VeilidAPI,
+    rc: &RoutingContext,
+    contact_public_key: &PublicKey,
+) -> Result<RecordKey> {
+    tracing::info!("Creating new conversation record for contact {}", contact_public_key);
 
+    let member_id = api.generate_member_id(contact_public_key)?;
+    
     let kind = VALID_CRYPTO_KINDS[0];
-    let dht_schema = schema::conversation_schema(2)?;
+    let dht_schema = schema::conversation_schema(256, member_id, 256)?;
     let record = rc.create_dht_record(kind, dht_schema, None).await?;
     let key = record.key().clone();
 

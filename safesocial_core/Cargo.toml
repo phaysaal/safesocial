@@ -19,6 +19,7 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 prost = "0.13"
 uuid = { version = "1", features = ["v4", "serde"] }
+double-ratchet = "0.1.0"
 
 [build-dependencies]
 prost-build = "0.13"

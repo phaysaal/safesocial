@@ -24,7 +24,7 @@ pub const PROFILE_SUBKEY_STATUS: u32 = 2;
 // Message subkey indices
 // ---------------------------------------------------------------------------
 
-/// Conversation subkey: latest message counter / metadata.
+/// Conversation subkey: latest message counter / metadata (Owner only).
 pub const MESSAGE_SUBKEY_LATEST: u32 = 0;
 
 // ---------------------------------------------------------------------------
@@ -54,12 +54,17 @@ pub fn profile_schema() -> VeilidAPIResult<DHTSchema> {
     DHTSchema::dflt(3)
 }
 
-/// Creates a DHT schema for a conversation between `member_count` participants.
+/// Creates a DHT schema for a two-party conversation.
 ///
-/// Each member gets 256 subkeys for their message history, providing ample
-/// room for scrollback without record rotation.
-pub fn conversation_schema(member_count: u16) -> VeilidAPIResult<DHTSchema> {
-    DHTSchema::dflt(member_count * 256)
+/// Uses a multi-writer layout where the owner gets `owner_cnt` subkeys
+/// and the member gets `member_cnt` subkeys.
+pub fn conversation_schema(
+    owner_cnt: u16,
+    member_id: MemberId,
+    member_cnt: u16,
+) -> VeilidAPIResult<DHTSchema> {
+    // Note: Veilid 0.5 uses Smpl for this
+    DHTSchema::smpl(owner_cnt, vec![DHTSchemaSMPLMember { m_key: member_id.value().clone(), m_cnt: member_cnt }])
 }
 
 /// Creates a DHT schema for a single post (2 subkeys: content, reactions).
@@ -68,11 +73,12 @@ pub fn post_schema() -> VeilidAPIResult<DHTSchema> {
 }
 
 /// Creates a DHT schema for a group chat.
-///
-/// Reserves `max_members + 2` subkeys: one for metadata, one for the member
-/// list, and one per member for writing messages.
-pub fn group_schema(max_members: u16) -> VeilidAPIResult<DHTSchema> {
-    DHTSchema::dflt(max_members + 2)
+pub fn group_schema(members: Vec<(MemberId, u16)>) -> VeilidAPIResult<DHTSchema> {
+    let mut dht_members = Vec::with_capacity(members.len());
+    for (id, cnt) in members {
+        dht_members.push(DHTSchemaSMPLMember { m_key: id.value().clone(), m_cnt: cnt });
+    }
+    DHTSchema::smpl(10, dht_members) // 10 subkeys for owner/meta
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'crypto_service.dart';
 import 'debug_log_service.dart';
 
 /// WebSocket relay client for messaging.
@@ -16,7 +17,7 @@ class RelayService extends ChangeNotifier {
 
   /// Connect to a relay room for a specific contact.
   Future<void> connect(String myPublicKey, String contactPublicKey, {String? relayUrl}) async {
-    final roomId = _computeRoomId(myPublicKey, contactPublicKey);
+    final roomId = CryptoService.deriveRelayRoomId(myPublicKey, contactPublicKey);
     final url = relayUrl ?? _defaultRelayUrl;
     final wsUrl = '$url/room/$roomId';
 
@@ -90,17 +91,6 @@ class RelayService extends ChangeNotifier {
       channel.sink.close();
     }
     _channels.clear();
-  }
-
-  /// Deterministic room ID from two keys — both peers get the same room.
-  String _computeRoomId(String keyA, String keyB) {
-    final sorted = [keyA, keyB]..sort();
-    final combined = '${sorted[0]}:${sorted[1]}';
-    var hash = 0;
-    for (var i = 0; i < combined.length; i++) {
-      hash = ((hash << 5) - hash + combined.codeUnitAt(i)) & 0xFFFFFFFF;
-    }
-    return hash.toRadixString(36).padLeft(12, '0');
   }
 
   bool isConnected(String contactPublicKey) => _channels.containsKey(contactPublicKey);

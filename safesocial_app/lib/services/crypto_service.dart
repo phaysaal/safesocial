@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
 
 /// Simple content encryption service.
 ///
@@ -8,6 +9,8 @@ import 'dart:typed_data';
 /// When Veilid is fully active, this will be replaced with
 /// XChaCha20-Poly1305 from the Veilid crypto system.
 class CryptoService {
+  static const _roomSalt = 'spheres-relay-v2-salt-secret-';
+
   /// Encrypt a plaintext message with a shared key.
   /// Returns base64-encoded ciphertext with embedded nonce.
   static String encrypt(String plaintext, String sharedKey) {
@@ -61,6 +64,27 @@ class CryptoService {
   /// Both parties compute the same key regardless of order.
   static String deriveSharedKey(String keyA, String keyB) {
     final sorted = [keyA, keyB]..sort();
-    return '${sorted[0]}:${sorted[1]}';
+    final combined = '${sorted[0]}:${sorted[1]}';
+    // Use a hash to make it non-obvious
+    return sha256.convert(utf8.encode(combined)).toString();
+  }
+
+  /// Derive a deterministic room ID from two public keys.
+  /// Uses a secret salt to prevent pre-calculation by observers.
+  static String deriveRelayRoomId(String keyA, String keyB) {
+    final sorted = [keyA, keyB]..sort();
+    final combined = '$_roomSalt${sorted[0]}:${sorted[1]}';
+    
+    // Use SHA256 for the room ID
+    final digest = sha256.convert(utf8.encode(combined));
+    
+    // Return a base36-like representation of a portion of the hash for the URL
+    // (similar to the previous implementation but salted and hashed)
+    final hashStr = digest.toString();
+    var hashVal = 0;
+    for (var i = 0; i < hashStr.length; i++) {
+      hashVal = ((hashVal << 5) - hashVal + hashStr.codeUnitAt(i)) & 0xFFFFFFFF;
+    }
+    return hashVal.toRadixString(36).padLeft(12, '0');
   }
 }

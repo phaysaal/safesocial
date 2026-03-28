@@ -3,6 +3,7 @@
 //! A group is a DHT record with subkeys for metadata, members, and per-member
 //! message slots. The group creator is automatically assigned the Admin role.
 
+use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use veilid_core::*;
 
@@ -51,15 +52,19 @@ pub enum GroupRole {
 /// The `creator` is automatically included in the member list. Returns
 /// the DHT key for the group record.
 pub async fn create_group(
+    api: &VeilidAPI,
     rc: &RoutingContext,
     meta: &GroupMeta,
     creator: &GroupMember,
-    max_members: u16,
 ) -> Result<RecordKey> {
     tracing::info!("Creating group '{}'", meta.name);
 
+    let creator_key = PublicKey::from_str(&creator.public_key)
+        .map_err(|e| crate::SpheresError::CryptoError(e.to_string()))?;
+    let member_id = api.generate_member_id(&creator_key)?;
+
     let kind = VALID_CRYPTO_KINDS[0];
-    let dht_schema = schema::group_schema(max_members)?;
+    let dht_schema = schema::group_schema(vec![(member_id, 256u16)])?;
     let record = rc.create_dht_record(kind, dht_schema, None).await?;
     let key = record.key().clone();
 

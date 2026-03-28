@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -23,10 +24,44 @@ class MediaService extends ChangeNotifier {
         maxHeight: 1920,
         imageQuality: 85,
       );
-      return image?.path;
+      if (image == null) return null;
+
+      // Privacy: Strip metadata (EXIF/GPS) before storage
+      final strippedPath = await _stripMetadata(image.path);
+      return strippedPath;
     } catch (e) {
       DebugLogService().error('Media', 'Error picking image: $e');
       return null;
+    }
+  }
+
+  /// Strip all metadata from an image by re-encoding it.
+  Future<String?> _stripMetadata(String filePath) async {
+    try {
+      final bytes = await File(filePath).readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) return filePath;
+
+      // Re-encoding as JPEG or PNG without EXIF
+      final ext = filePath.split('.').last.toLowerCase();
+      Uint8List strippedBytes;
+      if (ext == 'png') {
+        strippedBytes = Uint8List.fromList(img.encodePng(image));
+      } else {
+        strippedBytes = Uint8List.fromList(img.encodeJpg(image, quality: 85));
+      }
+
+      // Overwrite or create new temp file
+      final dir = await getTemporaryDirectory();
+      final fileName = 'stripped_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final strippedFile = File('${dir.path}/$fileName');
+      await strippedFile.writeAsBytes(strippedBytes);
+      
+      DebugLogService().success('Media', 'Image metadata stripped successfully');
+      return strippedFile.path;
+    } catch (e) {
+      DebugLogService().error('Media', 'Failed to strip metadata: $e');
+      return filePath; // Fallback to original if stripping fails
     }
   }
 
