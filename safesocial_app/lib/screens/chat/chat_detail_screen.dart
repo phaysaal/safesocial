@@ -159,17 +159,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  Text(
-                    context.watch<VeilidService>().isAttached
-                        ? 'P2P Connected'
-                        : 'Local mode (not connected)',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontSize: 11,
-                      color: context.watch<VeilidService>().isAttached
-                          ? Colors.green
-                          : cs.onSurfaceVariant,
-                    ),
-                  ),
+                  Builder(builder: (ctx) {
+                    final veilidOk = ctx.watch<VeilidService>().isAttached;
+                    final relayOk = chatService.isRelayConnected(widget.conversationId);
+                    final connected = veilidOk || relayOk;
+                    return Text(
+                      connected
+                          ? (veilidOk ? 'P2P Connected' : 'Relay Connected')
+                          : 'Not connected',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: 11,
+                        color: connected ? Colors.green : cs.onSurfaceVariant,
+                      ),
+                    );
+                  }),
                 ],
               ),
             ),

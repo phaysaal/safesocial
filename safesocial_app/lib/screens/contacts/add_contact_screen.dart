@@ -7,6 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../services/call_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/identity_service.dart';
@@ -86,6 +87,15 @@ class _AddContactScreenState extends State<AddContactScreen>
 
     // Connect relay for instant messaging fallback
     chatService.connectRelay(publicKey);
+
+    // Connect call signaling
+    try {
+      final callService = context.read<CallService>();
+      if (myKey != null) {
+        callService.setMyPublicKey(myKey);
+      }
+      callService.connectSignaling(publicKey);
+    } catch (_) {}
 
     if (conversationDhtKey != null && conversationDhtKey.isNotEmpty) {
       // They already created a conversation — join it with our writer keypair

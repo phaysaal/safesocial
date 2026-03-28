@@ -373,6 +373,10 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Check if relay is connected for a contact.
+  bool isRelayConnected(String contactPublicKey) =>
+      _relayService.isConnected(contactPublicKey);
+
   /// Delete a message locally.
   Future<void> deleteMessage(String conversationId, String messageId) async {
     final msgs = _conversations[conversationId];
