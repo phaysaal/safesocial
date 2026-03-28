@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'package:veilid/veilid.dart';
 
 import '../models/user_profile.dart';
@@ -26,7 +27,7 @@ class IdentityService extends ChangeNotifier {
   IdentityService({required this.veilidService});
 
   UserProfile? get currentIdentity => _currentIdentity;
-  String? get publicKey => _keypair?.key.toString();
+  String? get publicKey => _keypair?.key.toString() ?? _currentIdentity?.publicKey;
   KeyPair? get keypair => _keypair;
   RecordKey? get profileDhtKey => _profileDhtKey;
   bool get isOnboarded => _currentIdentity != null;
@@ -62,7 +63,8 @@ class IdentityService extends ChangeNotifier {
       }
     }
 
-    final pubKey = _keypair?.key.toString() ?? 'offline-${DateTime.now().millisecondsSinceEpoch}';
+    // Use real key, or generate a stable UUID-based key (persisted, so same across restarts)
+    final pubKey = _keypair?.key.toString() ?? 'VLD0:${const Uuid().v5(Uuid.NAMESPACE_URL, displayName + bio)}';
 
     _currentIdentity = UserProfile(
       publicKey: pubKey,

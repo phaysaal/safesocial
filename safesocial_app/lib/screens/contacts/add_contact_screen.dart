@@ -78,6 +78,12 @@ class _AddContactScreenState extends State<AddContactScreen>
     // Add as contact
     await contactService.addContact(publicKey, displayName);
 
+    // Ensure relay has our public key (critical for fresh installs)
+    final myKey = identityService.publicKey;
+    if (myKey != null && myKey.isNotEmpty) {
+      chatService.setMyPublicKey(myKey);
+    }
+
     // Connect relay for instant messaging fallback
     chatService.connectRelay(publicKey);
 

@@ -32,9 +32,10 @@ class GroupService extends ChangeNotifier {
       _handleGroupMessage(groupKey, data);
     };
 
-    // Connect to relay rooms for all groups
+    // Connect to relay rooms for all groups — ALL members use the same room
+    // (roomId derived from group key only, not user key)
     for (final group in _groups) {
-      _groupRelay.connect('grp:$myPublicKey', 'grp:${group.dhtKey}');
+      _groupRelay.connect('grp:${group.dhtKey}', 'grp:${group.dhtKey}');
     }
   }
 
@@ -95,10 +96,8 @@ class GroupService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    // Connect to group relay room
-    if (_myPublicKey != null) {
-      _groupRelay.connect('grp:$_myPublicKey', 'grp:$dhtKey');
-    }
+    // Connect to group relay room (same room for all members)
+    _groupRelay.connect('grp:$dhtKey', 'grp:$dhtKey');
   }
 
   Future<void> deleteGroup(String dhtKey) async {

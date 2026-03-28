@@ -172,11 +172,11 @@ class FeedService extends ChangeNotifier {
     if (index == -1) return;
 
     final post = _posts[index];
-    final liked = post.likes.contains('self');
     final userId = _myPublicKey ?? 'self';
+    final liked = post.likes.contains('self') || post.likes.contains(userId);
     final newLikes = liked
         ? post.likes.where((id) => id != 'self' && id != userId).toList()
-        : [...post.likes, userId];
+        : [...post.likes, 'self']; // Store as 'self' locally, send real key via relay
 
     _posts[index] = post.copyWith(likes: newLikes);
     await _persistPosts();

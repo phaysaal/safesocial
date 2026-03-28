@@ -116,7 +116,7 @@ class ChatService extends ChangeNotifier {
       {List<String>? mediaRefs}) async {
     final message = Message(
       id: const Uuid().v4(),
-      senderId: 'self',
+      senderId: _myPublicKey ?? 'self',
       recipientId: recipientId,
       content: content,
       timestamp: DateTime.now(),
@@ -137,16 +137,24 @@ class ChatService extends ChangeNotifier {
 
         // Determine which subkey range to use based on our role
         final role = _conversationRoles[recipientId] ?? 'member';
-        final metaField = role == 'owner' ? 'owner_next' : 'member_next';
 
-        // Read current counter
-        final metaData = await rc.getDHTValue(dhtKey, 0);
+        // Track write position locally (members can't write to metadata subkey 0)
+        final localCounterKey = '${_prefsMsgPrefix}counter_${recipientId}';
+        final prefs = await SharedPreferences.getInstance();
         int nextSubkey;
-        if (metaData != null) {
-          final meta = jsonDecode(utf8.decode(metaData.data)) as Map<String, dynamic>;
-          nextSubkey = meta[metaField] as int? ?? (role == 'owner' ? 1 : 256);
+
+        if (role == 'owner') {
+          // Owner reads from DHT metadata
+          final metaData = await rc.getDHTValue(dhtKey, 0);
+          if (metaData != null) {
+            final meta = jsonDecode(utf8.decode(metaData.data)) as Map<String, dynamic>;
+            nextSubkey = meta['owner_next'] as int? ?? 1;
+          } else {
+            nextSubkey = 1;
+          }
         } else {
-          nextSubkey = role == 'owner' ? 1 : 256;
+          // Member tracks position locally
+          nextSubkey = prefs.getInt(localCounterKey) ?? 256;
         }
 
         // Write message to our subkey range
@@ -163,9 +171,11 @@ class ChatService extends ChangeNotifier {
           Uint8List.fromList(utf8.encode(jsonEncode(msgJson))),
         );
 
-        // Update our counter in metadata (only if we're the owner who can write subkey 0)
+        // Update counter
         if (role == 'owner') {
+          // Owner writes to DHT metadata
           try {
+            final metaData = await rc.getDHTValue(dhtKey, 0);
             final currentMeta = metaData != null
                 ? jsonDecode(utf8.decode(metaData.data)) as Map<String, dynamic>
                 : <String, dynamic>{};
@@ -175,6 +185,9 @@ class ChatService extends ChangeNotifier {
               Uint8List.fromList(utf8.encode(jsonEncode(currentMeta))),
             );
           } catch (_) {}
+        } else {
+          // Member saves position locally
+          await prefs.setInt(localCounterKey, nextSubkey + 1);
         }
 
         await rc.closeDHTRecord(dhtKey);
@@ -416,6 +429,13 @@ class ChatService extends ChangeNotifier {
         for (final entry in keysMap.entries) {
           _conversations.putIfAbsent(entry.key, () => []);
         }
+      }
+
+      // Load conversation roles
+      final rolesJson = prefs.getString('${_prefsConversationsKey}_roles');
+      if (rolesJson != null) {
+        final rolesMap = jsonDecode(rolesJson) as Map<String, dynamic>;
+        rolesMap.forEach((k, v) => _conversationRoles[k] = v as String);
       }
 
       // Load cached messages
