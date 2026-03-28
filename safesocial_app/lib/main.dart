@@ -16,6 +16,7 @@ import 'services/theme_service.dart';
 import 'services/call_service.dart';
 import 'services/debug_log_service.dart';
 import 'services/rust_core_service.dart';
+import 'services/sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,13 +31,16 @@ void main() async {
   final groupService = GroupService();
   final callService = CallService();
   final rustCoreService = RustCoreService();
+  final syncService = SyncService();
 
   // Load theme (no Veilid needed)
   await themeService.load();
 
-  // Wire ChatService & FeedService ↔ VeilidService
+  // Wire services
   chatService.attachVeilidService(veilidService);
   feedService.attachVeilidService(veilidService);
+  syncService.attachServices(identityService, veilidService);
+  
   veilidService.onValueChange = (key, subkeys) {
     chatService.handleValueChange(key, subkeys);
     feedService.handleValueChange(key, subkeys);
@@ -91,6 +95,7 @@ void main() async {
         ChangeNotifierProvider.value(value: groupService),
         ChangeNotifierProvider.value(value: callService),
         ChangeNotifierProvider.value(value: rustCoreService),
+        ChangeNotifierProvider.value(value: syncService),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),

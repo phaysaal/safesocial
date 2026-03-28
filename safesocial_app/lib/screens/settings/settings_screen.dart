@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../services/backup_service.dart';
 import '../../services/identity_service.dart';
+import '../../services/sync_service.dart';
 import '../../services/theme_service.dart';
 
 /// Settings screen — privacy, appearance, identity, backup.
@@ -17,6 +19,7 @@ class SettingsScreen extends StatelessWidget {
     final cs = theme.colorScheme;
     final themeService = context.watch<ThemeService>();
     final identityService = context.watch<IdentityService>();
+    final syncService = context.watch<SyncService>();
     final backupService = BackupService();
 
     return Scaffold(
@@ -44,7 +47,21 @@ class SettingsScreen extends StatelessWidget {
           const Divider(indent: 56),
 
           // ── Identity ──────────────────────────────────
-          _SectionHeader(title: 'Identity'),
+          _SectionHeader(title: 'Identity & Multi-Device'),
+          ListTile(
+            leading: Icon(Icons.devices, color: cs.primary),
+            title: const Text('Link New Device'),
+            subtitle: const Text('Clone identity to a tablet or computer'),
+            onTap: () => _showLinkDeviceDialog(context, syncService),
+          ),
+          const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.qr_code_scanner, color: cs.primary),
+            title: const Text('Clone Identity from Device'),
+            subtitle: const Text('Set up this device as a secondary'),
+            onTap: () => _showCloneIdentityDialog(context, syncService),
+          ),
+          const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.key, color: cs.primary),
             title: const Text('Export Private Key'),
@@ -145,11 +162,102 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  void _showLinkDeviceDialog(BuildContext context, SyncService syncService) {
+    final pairingCode = syncService.startPrimaryLinking();
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Link New Device'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Scan this code with your secondary device to clone your identity.'),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: 200,
+              height: 200,
+              child: QrImageView(
+                data: 'spheres-sync:$pairingCode',
+                version: QrVersions.auto,
+                eyeStyle: QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                dataModuleStyle: QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 12),
+            const Text('Waiting for connection...', style: TextStyle(fontSize: 12)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              syncService.stopLinking();
+              Navigator.pop(ctx);
+            },
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCloneIdentityDialog(BuildContext context, SyncService syncService) {
+    final controller = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clone Identity'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Enter the pairing code shown on your primary device.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Pairing Code',
+                hintText: 'Enter code from primary device',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final code = controller.text.trim();
+              if (code.isNotEmpty) {
+                syncService.startSecondaryLinking(code);
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Linking started...')),
+                );
+              }
+            },
+            child: const Text('Start Linking'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showImportKeyDialog(BuildContext context) {
     final controller = TextEditingController();
     final nameController = TextEditingController();
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
 
     showDialog(
       context: context,
@@ -218,7 +326,6 @@ class SettingsScreen extends StatelessWidget {
 
   Future<void> _createBackup(BuildContext context, BackupService backupService) async {
     final passphraseController = TextEditingController();
-    final theme = Theme.of(context);
 
     final passphrase = await showDialog<String>(
       context: context,
@@ -227,9 +334,9 @@ class SettingsScreen extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
+            const Text(
               'Set a passphrase to encrypt your backup. Leave empty for unencrypted.',
-              style: theme.textTheme.bodySmall,
+              style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 16),
             TextField(
