@@ -22,6 +22,7 @@ import 'screens/groups/group_settings_screen.dart';
 import 'screens/groups/add_group_member_screen.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/settings/settings_screen.dart';
+import 'screens/settings/social_recovery_screen.dart';
 import 'screens/settings/debug_console_screen.dart';
 import 'screens/search/search_screen.dart';
 import 'screens/feed/post_detail_screen.dart';
@@ -120,6 +121,10 @@ class SpheresApp extends StatelessWidget {
         GoRoute(
           path: '/settings',
           builder: (context, state) => const SettingsScreen(),
+        ),
+        GoRoute(
+          path: '/settings/recovery',
+          builder: (context, state) => const SocialRecoveryScreen(),
         ),
         GoRoute(
           path: '/search',

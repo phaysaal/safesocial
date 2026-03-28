@@ -63,6 +63,13 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(indent: 56),
           ListTile(
+            leading: Icon(Icons.people_alt, color: cs.primary),
+            title: const Text('Social Recovery'),
+            subtitle: const Text('Trust friends to help recover your account'),
+            onTap: () => context.push('/settings/recovery'),
+          ),
+          const Divider(indent: 56),
+          ListTile(
             leading: Icon(Icons.key, color: cs.primary),
             title: const Text('Export Private Key'),
             subtitle: const Text('Copy for backup or multi-device use'),
