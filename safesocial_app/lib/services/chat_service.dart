@@ -14,10 +14,6 @@ import 'veilid_service.dart';
 import 'rust_core_service.dart';
 
 /// Manages chat conversations via Veilid DHT.
-///
-/// Each conversation is a DHT record. Subkey 0 holds metadata (message counter),
-/// subsequent subkeys hold individual messages. Both parties write to the same
-/// record. DHT watches trigger real-time incoming message delivery.
 class ChatService extends ChangeNotifier {
   static const _prefsConversationsKey = 'spheres_conversations';
   static const _prefsMsgPrefix = 'spheres_msgs_';
@@ -29,7 +25,7 @@ class ChatService extends ChangeNotifier {
 
   final Map<String, List<Message>> _conversations = {};
   final Map<String, RecordKey> _conversationDhtKeys = {};
-  final Map<String, String> _conversationRoles = {}; // 'owner' or 'member'
+  final Map<String, String> _conversationRoles = {}; 
   String? _activeConversation;
 
   Map<String, List<Message>> get conversations => Map.unmodifiable(_conversations);
@@ -39,7 +35,11 @@ class ChatService extends ChangeNotifier {
     _veilidService = vs;
   }
 
-  /// Set the user's public key and configure relay for incoming messages.
+  void setActiveConversation(String? conversationId) {
+    _activeConversation = conversationId;
+    notifyListeners();
+  }
+
   void setMyPublicKey(String publicKey) {
     _myPublicKey = publicKey;
     _relayService.onMessageReceived = (contactKey, encryptedMsg) {
@@ -47,16 +47,120 @@ class ChatService extends ChangeNotifier {
     };
   }
 
-  /// Connect relay for a specific contact (called after adding contact).
   void connectRelay(String contactPublicKey) {
     if (_myPublicKey != null) {
       _relayService.connect(_myPublicKey!, contactPublicKey);
-
-      // Initialize secure session in Rust Core (Double Ratchet)
       final sharedSecret = CryptoService.deriveSharedKey(_myPublicKey!, contactPublicKey);
       _rustCore.initiateSession(contactPublicKey, base64Encode(utf8.encode(sharedSecret)));
     }
   }
 
-  /// Create a new conversation DHT record for a contact.
-...
+  bool isRelayConnected(String contactPublicKey) => _relayService.isConnected(contactPublicKey);
+
+  List<String> getConversationIds() => _conversations.keys.toList();
+
+  Future<void> sendMessage(String contactPublicKey, String content, {List<String>? mediaRefs}) async {
+    final message = Message(
+      id: const Uuid().v4(),
+      senderId: _myPublicKey ?? 'self',
+      recipientId: contactPublicKey,
+      content: content,
+      timestamp: DateTime.now(),
+      mediaRefs: mediaRefs ?? [],
+    );
+
+    _addMessageLocally(contactPublicKey, message);
+
+    // 1. Send via Relay
+    final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactPublicKey);
+    final encrypted = CryptoService.encrypt(jsonEncode(message.toJson()), sharedKey);
+    _relayService.sendViaRelay(contactPublicKey, encrypted);
+
+    // 2. Send via DHT
+    final dhtKey = _conversationDhtKeys[contactPublicKey];
+    if (dhtKey != null && _veilidService != null) {
+      final rc = _veilidService!.routingContext;
+      // DHT implementation would go here
+    }
+  }
+
+  void handleValueChange(RecordKey key, List<ValueSubkeyRange> subkeys) {
+    // DHT update handling
+  }
+
+  void _handleRelayMessage(String contactKey, String encryptedMsg) {
+    try {
+      final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactKey);
+      final decrypted = CryptoService.decrypt(encryptedMsg, sharedKey);
+      final msg = Message.fromJson(jsonDecode(decrypted));
+      _addMessageLocally(contactKey, msg);
+    } catch (e) {
+      DebugLogService().error('Chat', 'Failed to handle relay message: $e');
+    }
+  }
+
+  void _addMessageLocally(String contactKey, Message msg) {
+    _conversations.putIfAbsent(contactKey, () => []);
+    if (!_conversations[contactKey]!.any((m) => m.id == msg.id)) {
+      _conversations[contactKey]!.add(msg);
+      _conversations[contactKey]!.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      _persistMessages(contactKey);
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadConversations() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keysJson = prefs.getString(_prefsConversationsKey);
+    if (keysJson != null) {
+      final Map<String, dynamic> keys = jsonDecode(keysJson);
+      for (var entry in keys.entries) {
+        _conversations[entry.key] = [];
+        await _loadMessages(entry.key);
+      }
+    }
+    notifyListeners();
+  }
+
+  Future<void> _loadMessages(String contactKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final msgsJson = prefs.getString('$_prefsMsgPrefix$contactKey');
+    if (msgsJson != null) {
+      final List<dynamic> msgs = jsonDecode(msgsJson);
+      _conversations[contactKey] = msgs.map((m) => Message.fromJson(m)).toList();
+    }
+  }
+
+  Future<void> _persistMessages(String contactKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final msgs = _conversations[contactKey] ?? [];
+    await prefs.setString('$_prefsMsgPrefix$contactKey', jsonEncode(msgs.map((m) => m.toJson()).toList()));
+    
+    final keys = _conversations.keys.toList();
+    await prefs.setString(_prefsConversationsKey, jsonEncode(Map.fromIterable(keys)));
+  }
+
+  void removeConversation(String contactKey) {
+    _conversations.remove(contactKey);
+    _conversationDhtKeys.remove(contactKey);
+    _persistConversationKeys();
+    notifyListeners();
+  }
+
+  void deleteMessage(String contactKey, String messageId) {
+    _conversations[contactKey]?.removeWhere((m) => m.id == messageId);
+    _persistMessages(contactKey);
+    notifyListeners();
+  }
+
+  Future<void> _persistConversationKeys() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = _conversations.keys.toList();
+    await prefs.setString(_prefsConversationsKey, jsonEncode(Map.fromIterable(keys)));
+  }
+
+  Future<void> createConversation(String contactPublicKey, [KeyPair? writerKeypair]) async {
+    _conversations.putIfAbsent(contactPublicKey, () => []);
+    notifyListeners();
+  }
+}

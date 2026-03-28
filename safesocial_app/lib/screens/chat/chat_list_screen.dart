@@ -5,27 +5,10 @@ import 'package:provider/provider.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../widgets/avatar.dart';
-import '../../widgets/responsive_layout.dart';
-import 'chat_detail_screen.dart';
 
-/// Messenger-style chat list screen.
-class ChatListScreen extends StatefulWidget {
+/// Screen displaying a list of active chat conversations.
+class ChatListScreen extends StatelessWidget {
   const ChatListScreen({super.key});
-
-  @override
-  State<ChatListScreen> createState() => _ChatListScreenState();
-}
-
-class _ChatListScreenState extends State<ChatListScreen> {
-  final _searchController = TextEditingController();
-  String _searchQuery = '';
-  String? _selectedConversationId;
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,326 +16,85 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final cs = theme.colorScheme;
     final chatService = context.watch<ChatService>();
     final contactService = context.watch<ContactService>();
+
+    final conversations = chatService.conversations;
     final conversationIds = chatService.getConversationIds();
 
-    // Filter by search
-    final filtered = _searchQuery.isEmpty
-        ? conversationIds
-        : conversationIds.where((id) {
-            final contact = contactService.getContact(id);
-            final name = contact?.displayName ?? id;
-            return name.toLowerCase().contains(_searchQuery.toLowerCase());
-          }).toList();
-
-    final phoneScaffold = Scaffold(
+    return Scaffold(
       appBar: AppBar(
         title: Text(
           'Chats',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
-            fontSize: 24,
-          ),
+          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.edit_square),
+            icon: const Icon(Icons.add_comment_outlined),
             onPressed: () => context.push('/contacts'),
-            tooltip: 'New message',
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // ── Search bar ──────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (v) => setState(() => _searchQuery = v),
-              decoration: InputDecoration(
-                hintText: 'Search',
-                prefixIcon: Icon(Icons.search, color: cs.onSurfaceVariant),
-                filled: true,
-                fillColor: cs.surfaceContainerHighest,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-              ),
-            ),
-          ),
+      body: conversationIds.isEmpty
+          ? _buildEmptyState(theme)
+          : ListView.builder(
+              itemCount: conversationIds.length,
+              itemBuilder: (context, index) {
+                final contactKey = conversationIds[index];
+                final messages = conversations[contactKey]!;
+                final contact = contactService.getContact(contactKey);
+                
+                final displayName = contact?.displayName ?? contactKey;
+                final lastMessage = messages.isNotEmpty ? messages.last : null;
 
-          // ── Active contacts row ─────────────────────────
-          _ActiveContactsRow(),
-
-          // ── Conversation list ───────────────────────────
-          Expanded(
-            child: filtered.isEmpty
-                ? _buildEmptyState(theme, conversationIds.isEmpty)
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 80),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
-                      final recipientId = filtered[index];
-                      final messages =
-                          chatService.conversations[recipientId] ?? [];
-                      final lastMessage =
-                          messages.isNotEmpty ? messages.last : null;
-                      final contact =
-                          contactService.getContact(recipientId);
-                      final displayName =
-                          contact?.displayName ?? _truncateKey(recipientId);
-
-                      return _ConversationTile(
-                        displayName: displayName,
-                        lastMessageText: lastMessage?.content,
-                        timestamp: lastMessage?.timestamp,
-                        selected: isTablet(context) && _selectedConversationId == recipientId,
-                        onTap: () {
-                          if (isTablet(context)) {
-                            setState(() => _selectedConversationId = recipientId);
-                          } else {
-                            context.push('/chat/$recipientId');
-                          }
-                        },
-                      );
-                    },
+                return ListTile(
+                  leading: UserAvatar(
+                    displayName: displayName,
+                    size: AvatarSize.medium,
                   ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/contacts/add'),
-        tooltip: 'New conversation',
-        child: const Icon(Icons.chat_outlined),
-      ),
-    );
-
-    // Tablet: master-detail layout
-    if (isTablet(context)) {
-      return MasterDetailLayout(
-        master: phoneScaffold,
-        detail: _selectedConversationId != null
-            ? ChatDetailScreen(conversationId: _selectedConversationId!)
-            : null,
-      );
-    }
-
-    return phoneScaffold;
-  }
-
-  Widget _buildEmptyState(ThemeData theme, bool noConversations) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              noConversations
-                  ? Icons.chat_bubble_outline
-                  : Icons.search_off,
-              size: 64,
-              color: theme.colorScheme.primary.withValues(alpha: 0.3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              noConversations ? 'No conversations yet' : 'No results',
-              style: theme.textTheme.headlineMedium?.copyWith(fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              noConversations
-                  ? 'Add a contact to start chatting.'
-                  : 'Try a different search.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _truncateKey(String key) {
-    if (key.length <= 12) return key;
-    return '${key.substring(0, 6)}...${key.substring(key.length - 4)}';
-  }
-}
-
-// ─── Active contacts row (Messenger style) ───────────────────────────────────
-
-class _ActiveContactsRow extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final contacts = context.watch<ContactService>().contacts;
-    final active = contacts.where((c) => !c.blocked).toList();
-
-    if (active.isEmpty) return const SizedBox.shrink();
-
-    return SizedBox(
-      height: 90,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        itemCount: active.length,
-        itemBuilder: (context, index) {
-          final c = active[index];
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: GestureDetector(
-              onTap: () => context.push('/chat/${c.publicKey}'),
-              child: Column(
-                children: [
-                  Stack(
-                    children: [
-                      UserAvatar(
-                        displayName: c.displayName,
-                        size: AvatarSize.medium,
-                      ),
-                      // Online indicator
-                      Positioned(
-                        right: 0,
-                        bottom: 0,
-                        child: Container(
-                          width: 14,
-                          height: 14,
-                          decoration: BoxDecoration(
-                            color: cs.secondary,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: cs.surface, width: 2),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  SizedBox(
-                    width: 56,
-                    child: Text(
-                      c.displayName.split(' ').first,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(fontSize: 11),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ─── Conversation tile ───────────────────────────────────────────────────────
-
-class _ConversationTile extends StatelessWidget {
-  final String displayName;
-  final String? lastMessageText;
-  final DateTime? timestamp;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _ConversationTile({
-    required this.displayName,
-    this.lastMessageText,
-    this.timestamp,
-    this.selected = false,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        color: selected ? cs.primary.withValues(alpha: 0.1) : null,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            // Avatar with online dot
-            Stack(
-              children: [
-                UserAvatar(
-                  displayName: displayName,
-                  size: AvatarSize.medium,
-                ),
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: cs.secondary,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: cs.surface, width: 2),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 12),
-            // Name + last message
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+                  title: Text(
                     displayName,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    lastMessage?.content ?? 'No messages yet',
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (lastMessageText != null) ...[
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            lastMessageText!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ),
-                        if (timestamp != null) ...[
-                          Text(' · ', style: theme.textTheme.bodySmall),
-                          Text(
-                            _timeAgo(timestamp!),
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ],
-              ),
+                  trailing: lastMessage != null
+                      ? Text(
+                          _formatTime(lastMessage.timestamp),
+                          style: theme.textTheme.bodySmall,
+                        )
+                      : null,
+                  onTap: () => context.push('/chat/$contactKey'),
+                );
+              },
             ),
-          ],
-        ),
+    );
+  }
+
+  Widget _buildEmptyState(ThemeData theme) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.chat_bubble_outline, size: 64, color: theme.colorScheme.outline),
+          const SizedBox(height: 16),
+          const Text('No conversations yet'),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () {}, // Handled by App Router or FAB
+            child: const Text('Start a new chat'),
+          ),
+        ],
       ),
     );
   }
 
-  String _timeAgo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m';
-    if (diff.inDays < 1) return '${diff.inHours}h';
-    if (diff.inDays < 7) return '${diff.inDays}d';
-    return '${dt.month}/${dt.day}';
+  String _formatTime(DateTime dt) {
+    final now = DateTime.now();
+    if (now.difference(dt).inDays == 0) {
+      return '${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+    }
+    return '${dt.day}/${dt.month}';
   }
 }

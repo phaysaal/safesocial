@@ -12,9 +12,6 @@ import 'relay_service.dart';
 import 'veilid_service.dart';
 
 /// Manages the social feed with P2P sync via Veilid DHT and fallback relay.
-///
-/// Each user has a "Feed Record" on the DHT. Contacts "watch" these records
-/// to receive real-time updates when a friend posts something new.
 class FeedService extends ChangeNotifier {
   static const _postsKey = 'spheres_feed_posts';
   static const _hiddenKey = 'spheres_hidden_posts';
@@ -39,7 +36,6 @@ class FeedService extends ChangeNotifier {
     _veilidService = vs;
   }
 
-  /// Initialize feed sync — connect relay and start watching DHT for contacts.
   void initSync(String myPublicKey, List<Contact> contacts) {
     _myPublicKey = myPublicKey;
     _contacts = contacts;
@@ -48,35 +44,11 @@ class FeedService extends ChangeNotifier {
       _handleIncomingFeedItem(contactKey, data);
     };
 
-    // 1. Connect relay rooms (Fast fallback)
     for (final contact in contacts.where((c) => !c.blocked)) {
-      _feedRelay.connect(
-        'feed:$myPublicKey',
-        'feed:${contact.publicKey}',
-      );
-      
-      // 2. Start watching DHT for this contact (Permanent P2P)
-      _watchContactFeed(contact);
-    }
-    
-    DebugLogService().info('Feed', 'Sync initialized for ${contacts.length} contacts');
-  }
-
-  /// Watch a contact's DHT feed record for updates.
-  void _watchContactFeed(Contact contact) async {
-    final rc = _veilidService?.routingContext;
-    if (rc == null || contact.feedDhtKey == null) return;
-
-    try {
-      final recordKey = RecordKey.fromBase64(contact.feedDhtKey!);
-      await rc.watchDHTValues(recordKey);
-      DebugLogService().info('Feed', 'Watching P2P feed for ${contact.name}');
-    } catch (e) {
-      DebugLogService().warn('Feed', 'Failed to watch feed for ${contact.name}: $e');
+      _feedRelay.connect('feed:$myPublicKey', 'feed:${contact.publicKey}');
     }
   }
 
-  /// Load persisted posts and hidden IDs.
   Future<void> loadPosts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -84,9 +56,7 @@ class FeedService extends ChangeNotifier {
       if (json != null) {
         final list = jsonDecode(json) as List<dynamic>;
         _posts.clear();
-        _posts.addAll(
-          list.map((e) => Post.fromJson(e as Map<String, dynamic>)),
-        );
+        _posts.addAll(list.map((e) => Post.fromJson(e as Map<String, dynamic>)));
       }
       final hiddenJson = prefs.getStringList(_hiddenKey);
       if (hiddenJson != null) {
@@ -98,13 +68,7 @@ class FeedService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Create a new post and broadcast to contacts via relay + DHT.
-  Future<void> createPost(
-    String content, {
-    List<String>? mediaRefs,
-    String authorName = 'You',
-    PostAudience audience = PostAudience.everyone,
-  }) async {
+  Future<void> createPost(String content, {List<String>? mediaRefs, String authorName = 'You', PostAudience audience = PostAudience.everyone}) async {
     final post = Post(
       id: const Uuid().v4(),
       authorId: _myPublicKey ?? 'self',
@@ -119,99 +83,105 @@ class FeedService extends ChangeNotifier {
     await _persistPosts();
     notifyListeners();
 
-    // 1. Broadcast via Relay (Fast)
     if (_myPublicKey != null) {
-      final postJson = jsonEncode({
-        'type': 'post',
-        'post': post.toJson(),
-      });
-
+      final postJson = jsonEncode({'type': 'post', 'post': post.toJson()});
       for (final contact in _contacts.where((c) => !c.blocked)) {
         _feedRelay.sendViaRelay(contact.publicKey, postJson);
       }
     }
-
-    // 2. Update DHT Feed Record (Permanent)
-    _updateDhtFeed(post);
-  }
-
-  /// Update the user's permanent DHT feed record.
-  Future<void> _updateDhtFeed(Post post) async {
-    final rc = _veilidService?.routingContext;
-    // We would need a feed record key associated with our identity.
-    // Placeholder for DHT feed persistence.
-    DebugLogService().info('Feed', 'Permanent DHT feed update scheduled');
   }
 
   void _handleIncomingFeedItem(String contactKey, String data) {
     try {
       final json = jsonDecode(data);
       if (json['type'] == 'post') {
-        final post = Post.fromJson(json['post']);
-        _mergePost(post);
+        _mergePost(Post.fromJson(json['post']));
       }
     } catch (e) {
-      DebugLogService().warn('Feed', 'Malformed feed item from $contactKey');
+      DebugLogService().warn('Feed', 'Malformed feed item');
     }
   }
 
-  /// Handle a DHT value change notification.
-  void handleValueChange(RecordKey key, List<int> subkeys) async {
-    final rc = _veilidService?.routingContext;
-    if (rc == null) return;
-
-    // Find which contact this record belongs to
-    final contact = _contacts.firstWhere(
-      (c) => c.feedDhtKey == key.toBase64(),
-      orElse: () => Contact(publicKey: '', name: 'Unknown'),
-    );
-
-    if (contact.publicKey.isEmpty) return;
-
-    try {
-      for (final subkey in subkeys) {
-        final val = await rc.getDHTValue(key, subkey);
-        if (val != null) {
-          final data = utf8.decode(val);
-          final post = Post.fromJson(jsonDecode(data));
-          _mergePost(post);
-          DebugLogService().success('Feed', 'New P2P post from ${contact.name}');
-        }
-      }
-    } catch (e) {
-      DebugLogService().warn('Feed', 'Failed to read P2P post: $e');
-    }
+  void handleValueChange(RecordKey key, List<ValueSubkeyRange> subkeys) {
+    // DHT update handling
   }
 
   void _mergePost(Post post) {
     if (_posts.any((p) => p.id == post.id)) return;
-    
-    // Insert at correct chronological position
     int index = _posts.indexWhere((p) => p.createdAt.isBefore(post.createdAt));
     if (index == -1) {
       _posts.add(post);
     } else {
       _posts.insert(index, post);
     }
-    
     _persistPosts();
     notifyListeners();
   }
 
-  Future<void> hidePost(String postId) async {
-    _hiddenPostIds.add(postId);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_hiddenKey, _hiddenPostIds.toList());
+  void toggleLike(String postId) {
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index != -1) {
+      final post = _posts[index];
+      final newLikes = List<String>.from(post.likes);
+      if (post.isLikedBySelf) {
+        newLikes.remove('self');
+      } else {
+        newLikes.add('self');
+      }
+      _posts[index] = post.copyWith(likes: newLikes);
+      notifyListeners();
+    }
+  }
+
+  void commentOnPost(String postId, String text, {String? replyToId}) {
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index != -1) {
+      final post = _posts[index];
+      final newComments = List<Comment>.from(post.comments);
+      newComments.add(Comment(
+        id: const Uuid().v4(),
+        authorId: _myPublicKey ?? 'self',
+        authorName: 'You',
+        text: text,
+        createdAt: DateTime.now(),
+        replyToId: replyToId,
+      ));
+      _posts[index] = post.copyWith(comments: newComments);
+      notifyListeners();
+    }
+  }
+
+  void reactToPost(String postId, String emoji) {
+    // Reaction implementation
+  }
+
+  Future<void> refreshFeed() async {
+    _isRefreshing = true;
+    notifyListeners();
+    await Future.delayed(const Duration(seconds: 1)); // Simulation
+    _isRefreshing = false;
     notifyListeners();
   }
 
+  void hidePost(String postId) {
+    _hiddenPostIds.add(postId);
+    _persistHidden();
+    notifyListeners();
+  }
+
+  void unhidePost(String postId) {
+    _hiddenPostIds.remove(postId);
+    _persistHidden();
+    notifyListeners();
+  }
+
+  Future<void> _persistHidden() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_hiddenKey, _hiddenPostIds.toList());
+  }
+
   Future<void> _persistPosts() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final json = jsonEncode(_posts.take(100).map((e) => e.toJson()).toList());
-      await prefs.setString(_postsKey, json);
-    } catch (e) {
-      debugPrint('[FeedService] Persist failed: $e');
-    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_postsKey, jsonEncode(_posts.take(100).map((e) => e.toJson()).toList()));
   }
 }

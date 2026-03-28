@@ -86,7 +86,7 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
         else
           ...trustedContacts.map((contact) => CheckboxListTile(
                 value: _selectedGuardians.contains(contact.publicKey),
-                title: Text(contact.name),
+                title: Text(contact.displayName),
                 onChanged: (val) {
                   setState(() {
                     if (val == true) {
