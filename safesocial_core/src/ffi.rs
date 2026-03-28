@@ -169,6 +169,63 @@ pub extern "C" fn spheres_import_identity(
 }
 
 #[no_mangle]
+pub extern "C" fn spheres_generate_recovery_shards(
+    _handle: *mut SpheresHandle,
+    secret_base64: *const c_char,
+    count: u8,
+    threshold: u8,
+) -> *mut c_char {
+    let secret_b64 = unsafe { CStr::from_ptr(secret_base64).to_string_lossy() };
+    
+    let secret = match base64::engine::general_purpose::STANDARD.decode(secret_b64.as_bytes()) {
+        Ok(d) => d,
+        Err(_) => return CString::new(serde_json::json!({"status": "error", "message": "Invalid base64 secret"}).to_string()).unwrap().into_raw(),
+    };
+
+    match crate::recovery::generate_shards(&secret, count, threshold) {
+        Ok(shards) => {
+            let shards_b64: Vec<String> = shards.iter().map(|s| base64::engine::general_purpose::STANDARD.encode(s)).collect();
+            let result = serde_json::json!({
+                "status": "success",
+                "shards": shards_b64
+            });
+            CString::new(result.to_string()).unwrap().into_raw()
+        },
+        Err(e) => CString::new(serde_json::json!({"status": "error", "message": e.to_string()}).to_string()).unwrap().into_raw(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn spheres_reconstruct_identity(
+    _handle: *mut SpheresHandle,
+    shards_json: *const c_char,
+) -> *mut c_char {
+    let shards_json_str = unsafe { CStr::from_ptr(shards_json).to_string_lossy() };
+    let shards_b64: Vec<String> = match serde_json::from_str(&shards_json_str) {
+        Ok(s) => s,
+        Err(_) => return CString::new(serde_json::json!({"status": "error", "message": "Invalid JSON input"}).to_string()).unwrap().into_raw(),
+    };
+
+    let mut shards = Vec::new();
+    for s_b64 in shards_b64 {
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(s_b64) {
+            shards.push(decoded);
+        }
+    }
+
+    match crate::recovery::reconstruct_secret(shards) {
+        Ok(secret) => {
+            let result = serde_json::json!({
+                "status": "success",
+                "secret": base64::engine::general_purpose::STANDARD.encode(secret)
+            });
+            CString::new(result.to_string()).unwrap().into_raw()
+        },
+        Err(e) => CString::new(serde_json::json!({"status": "error", "message": e.to_string()}).to_string()).unwrap().into_raw(),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn spheres_string_free(s: *mut c_char) {
     if !s.is_null() {
         unsafe { let _ = CString::from_raw(s); };

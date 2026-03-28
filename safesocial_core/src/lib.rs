@@ -16,6 +16,7 @@ pub mod feed;
 pub mod media;
 pub mod privacy;
 pub mod ratchet;
+pub mod recovery;
 pub mod ffi;
 
 use std::sync::Arc;
