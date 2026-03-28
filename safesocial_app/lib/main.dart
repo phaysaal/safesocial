@@ -13,6 +13,7 @@ import 'services/contact_service.dart';
 import 'services/media_service.dart';
 import 'services/group_service.dart';
 import 'services/theme_service.dart';
+import 'services/call_service.dart';
 import 'services/debug_log_service.dart';
 
 void main() async {
@@ -26,6 +27,7 @@ void main() async {
   final contactService = ContactService();
   final mediaService = MediaService();
   final groupService = GroupService();
+  final callService = CallService();
 
   // Load theme (no Veilid needed)
   await themeService.load();
@@ -43,7 +45,7 @@ void main() async {
   await feedService.loadPosts();
 
   // Set up relay for existing contacts — works WITHOUT Veilid
-  _connectRelay(identityService, chatService, feedService, groupService, contactService);
+  _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
 
   // Start Veilid in the background AFTER the app is running
   WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -62,7 +64,7 @@ void main() async {
       await chatService.loadConversations();
 
       // Reconnect relay with any new identity from Veilid
-      _connectRelay(identityService, chatService, feedService, groupService, contactService);
+      _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
     } catch (e) {
       DebugLogService().error('Main', 'Veilid startup failed (relay-only mode): $e');
       // Relay still works — Veilid is optional for messaging
@@ -80,6 +82,7 @@ void main() async {
         ChangeNotifierProvider.value(value: contactService),
         ChangeNotifierProvider.value(value: mediaService),
         ChangeNotifierProvider.value(value: groupService),
+        ChangeNotifierProvider.value(value: callService),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),
@@ -94,13 +97,16 @@ void _connectRelay(
   FeedService feedService,
   GroupService groupService,
   ContactService contactService,
+  CallService callService,
 ) {
   final pubKey = identityService.publicKey;
   if (pubKey == null || pubKey.isEmpty) return;
 
   chatService.setMyPublicKey(pubKey);
+  callService.setMyPublicKey(pubKey);
   for (final contact in contactService.contacts) {
     chatService.connectRelay(contact.publicKey);
+    callService.connectSignaling(contact.publicKey);
   }
   feedService.initSync(pubKey, contactService.contacts);
   groupService.initSync(pubKey);

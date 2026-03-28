@@ -6,9 +6,11 @@ import '../../models/message.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/identity_service.dart';
+import '../../services/call_service.dart';
 import '../../services/media_service.dart';
 import '../../services/veilid_service.dart';
 import '../../widgets/avatar.dart';
+import '../call/call_screen.dart';
 import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
 
@@ -176,7 +178,29 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         actions: [
           IconButton(
             icon: Icon(Icons.call, color: cs.primary),
-            onPressed: () {},
+            onPressed: () {
+              final callService = context.read<CallService>();
+              callService.startCall(
+                widget.conversationId,
+                displayName,
+                CallType.audio,
+              );
+              Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CallScreen()));
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.videocam, color: cs.primary),
+            onPressed: () {
+              final callService = context.read<CallService>();
+              callService.startCall(
+                widget.conversationId,
+                displayName,
+                CallType.video,
+              );
+              Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CallScreen()));
+            },
           ),
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: cs.onSurfaceVariant),
