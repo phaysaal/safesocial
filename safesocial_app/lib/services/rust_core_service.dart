@@ -18,6 +18,8 @@ class RustCoreService extends ChangeNotifier {
   late _SpheresFreeFunc _spheresFree;
   late _SpheresInitiateSessionFunc _spheresInitiateSession;
   late _SpheresSendMessageFunc _spheresSendMessage;
+  late _SpheresExportIdentityFunc _spheresExportIdentity;
+  late _SpheresImportIdentityFunc _spheresImportIdentity;
   late _SpheresStringFreeFunc _spheresStringFree;
 
   bool _isInitialized = false;
@@ -46,6 +48,12 @@ class RustCoreService extends ChangeNotifier {
           .asFunction();
       _spheresSendMessage = _lib
           .lookup<ffi.NativeFunction<_SpheresSendMessageNative>>('spheres_send_message')
+          .asFunction();
+      _spheresExportIdentity = _lib
+          .lookup<ffi.NativeFunction<_SpheresExportIdentityNative>>('spheres_export_identity')
+          .asFunction();
+      _spheresImportIdentity = _lib
+          .lookup<ffi.NativeFunction<_SpheresImportIdentityNative>>('spheres_import_identity')
           .asFunction();
       _spheresStringFree = _lib
           .lookup<ffi.NativeFunction<_SpheresStringFreeNative>>('spheres_string_free')
@@ -82,6 +90,34 @@ class RustCoreService extends ChangeNotifier {
     malloc.free(contactPtr);
     malloc.free(secretPtr);
 
+    _spheresStringFree(resultPtr);
+  }
+
+  String? exportIdentity(String sessionSecretBase64) {
+    if (!_isInitialized || _handle == null) return null;
+
+    final secretPtr = sessionSecretBase64.toNativeUtf8();
+    final resultPtr = _spheresExportIdentity(_handle!, secretPtr.cast<ffi.Char>());
+    malloc.free(secretPtr);
+
+    final result = resultPtr.cast<Utf8>().toDartString();
+    _spheresStringFree(resultPtr);
+    return result;
+  }
+
+  void importIdentity(String encryptedBlob, String sessionSecretBase64) {
+    if (!_isInitialized || _handle == null) return;
+
+    final blobPtr = encryptedBlob.toNativeUtf8();
+    final secretPtr = sessionSecretBase64.toNativeUtf8();
+    final resultPtr = _spheresImportIdentity(
+      _handle!, 
+      blobPtr.cast<ffi.Char>(), 
+      secretPtr.cast<ffi.Char>()
+    );
+    
+    malloc.free(blobPtr);
+    malloc.free(secretPtr);
     _spheresStringFree(resultPtr);
   }
 
@@ -133,6 +169,16 @@ typedef _SpheresSendMessageNative = ffi.Pointer<ffi.Char> Function(
     ffi.Pointer handle, ffi.Pointer<ffi.Char> recipientKey, ffi.Pointer<ffi.Char> content);
 typedef _SpheresSendMessageFunc = ffi.Pointer<ffi.Char> Function(
     ffi.Pointer handle, ffi.Pointer<ffi.Char> recipientKey, ffi.Pointer<ffi.Char> content);
+
+typedef _SpheresExportIdentityNative = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> sessionSecretBase64);
+typedef _SpheresExportIdentityFunc = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> sessionSecretBase64);
+
+typedef _SpheresImportIdentityNative = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> encryptedIdentityB64, ffi.Pointer<ffi.Char> sessionSecretBase64);
+typedef _SpheresImportIdentityFunc = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> encryptedIdentityB64, ffi.Pointer<ffi.Char> sessionSecretBase64);
 
 typedef _SpheresStringFreeNative = ffi.Void Function(ffi.Pointer<ffi.Char> s);
 typedef _SpheresStringFreeFunc = void Function(ffi.Pointer<ffi.Char> s);
