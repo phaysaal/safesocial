@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
 
@@ -258,16 +259,30 @@ class CallService extends ChangeNotifier {
   }
 
   void _sendSignal(String contactKey, Map<String, dynamic> data) {
-    _signaling.sendViaRelay(
-      'call:$contactKey',
-      jsonEncode(data),
-    );
+    // Encrypt signaling with pairwise shared key
+    final plaintext = jsonEncode(data);
+    final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactKey);
+    final encrypted = CryptoService.encrypt(plaintext, sharedKey);
+    _signaling.sendViaRelay('call:$contactKey', encrypted);
+    DebugLogService().info('Call', 'Sent encrypted signaling: ${data['type']}');
   }
 
   void _handleSignaling(String contactKey, String rawData) {
     try {
-      final data = jsonDecode(rawData) as Map<String, dynamic>;
+      // Decrypt signaling
+      final senderKey = contactKey.replaceFirst('call:', '');
+      final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', senderKey);
+      String decrypted;
+      try {
+        decrypted = CryptoService.decrypt(rawData, sharedKey);
+      } catch (_) {
+        // Fallback: try as plaintext (backward compat)
+        decrypted = rawData;
+      }
+
+      final data = jsonDecode(decrypted) as Map<String, dynamic>;
       final type = data['type'] as String?;
+      DebugLogService().info('Call', 'Received encrypted signaling: $type');
 
       switch (type) {
         case 'call_offer':

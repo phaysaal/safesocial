@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import 'package:veilid/veilid.dart';
 
 import '../models/message.dart';
+import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
 import 'veilid_service.dart';
@@ -205,7 +206,7 @@ class ChatService extends ChangeNotifier {
       }
     }
 
-    // Also send via relay as parallel/fallback path
+    // Also send via relay as parallel/fallback path (encrypted)
     final msgPayload = jsonEncode({
       'id': message.id,
       'sender': message.senderId,
@@ -214,15 +215,27 @@ class ChatService extends ChangeNotifier {
       'timestamp': message.timestamp.millisecondsSinceEpoch,
       'media_refs': message.mediaRefs,
     });
-    _relayService.sendViaRelay(recipientId, msgPayload);
+    final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', recipientId);
+    final encrypted = CryptoService.encrypt(msgPayload, sharedKey);
+    _relayService.sendViaRelay(recipientId, encrypted);
 
     await _cacheMessages(recipientId);
   }
 
-  /// Handle a message received via the relay fallback.
+  /// Handle a message received via the relay fallback (encrypted).
   void _handleRelayMessage(String contactKey, String rawMessage) {
     try {
-      final msgJson = jsonDecode(rawMessage) as Map<String, dynamic>;
+      // Decrypt the relay message
+      String decrypted;
+      try {
+        final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactKey);
+        decrypted = CryptoService.decrypt(rawMessage, sharedKey);
+      } catch (_) {
+        // Fallback: try as plaintext (backward compat)
+        decrypted = rawMessage;
+      }
+
+      final msgJson = jsonDecode(decrypted) as Map<String, dynamic>;
       final msgId = msgJson['id'] as String;
 
       // Skip duplicates (may already have it via DHT)
