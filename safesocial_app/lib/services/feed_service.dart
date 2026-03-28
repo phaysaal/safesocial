@@ -26,7 +26,23 @@ class FeedService extends ChangeNotifier {
   List<Contact> _contacts = [];
 
   List<Post> get posts =>
-      _posts.where((p) => !_hiddenPostIds.contains(p.id)).toList();
+      _posts.where((p) => !_hiddenPostIds.contains(p.id) && !p.isStory).toList();
+
+  /// Returns unexpired stories grouped by authorId
+  Map<String, List<Post>> get storiesByAuthor {
+    final now = DateTime.now();
+    final activeStories = _posts.where((p) => 
+      p.isStory && 
+      !_hiddenPostIds.contains(p.id) && 
+      (p.expiresAt == null || p.expiresAt!.isAfter(now))
+    ).toList();
+
+    final map = <String, List<Post>>{};
+    for (var story in activeStories) {
+      map.putIfAbsent(story.authorId, () => []).add(story);
+    }
+    return map;
+  }
 
   List<Post> get allPosts => List.unmodifiable(_posts);
   bool get isRefreshing => _isRefreshing;
@@ -56,7 +72,16 @@ class FeedService extends ChangeNotifier {
       if (json != null) {
         final list = jsonDecode(json) as List<dynamic>;
         _posts.clear();
-        _posts.addAll(list.map((e) => Post.fromJson(e as Map<String, dynamic>)));
+        final now = DateTime.now();
+        
+        for (var e in list) {
+          final p = Post.fromJson(e as Map<String, dynamic>);
+          // Clean up expired stories
+          if (p.isStory && p.expiresAt != null && p.expiresAt!.isBefore(now)) {
+            continue;
+          }
+          _posts.add(p);
+        }
       }
       final hiddenJson = prefs.getStringList(_hiddenKey);
       if (hiddenJson != null) {
@@ -68,7 +93,14 @@ class FeedService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> createPost(String content, {List<String>? mediaRefs, String authorName = 'You', PostAudience audience = PostAudience.everyone}) async {
+  Future<void> createPost(
+    String content, {
+    List<String>? mediaRefs, 
+    String authorName = 'You', 
+    PostAudience audience = PostAudience.everyone,
+    bool isStory = false,
+    DateTime? expiresAt,
+  }) async {
     final post = Post(
       id: const Uuid().v4(),
       authorId: _myPublicKey ?? 'self',
@@ -77,6 +109,8 @@ class FeedService extends ChangeNotifier {
       mediaRefs: mediaRefs ?? [],
       createdAt: DateTime.now(),
       audience: audience,
+      isStory: isStory,
+      expiresAt: expiresAt,
     );
 
     _posts.insert(0, post);
@@ -89,6 +123,19 @@ class FeedService extends ChangeNotifier {
         _feedRelay.sendViaRelay(contact.publicKey, postJson);
       }
     }
+  }
+
+  /// Convenience method to create a 24-hour ephemeral story
+  Future<void> createStory(String content, {List<String>? mediaRefs, String authorName = 'You'}) async {
+    final expiresAt = DateTime.now().add(const Duration(hours: 24));
+    await createPost(
+      content,
+      mediaRefs: mediaRefs,
+      authorName: authorName,
+      audience: PostAudience.closeFriends, // Stories default to close friends
+      isStory: true,
+      expiresAt: expiresAt,
+    );
   }
 
   void _handleIncomingFeedItem(String contactKey, String data) {
@@ -108,6 +155,12 @@ class FeedService extends ChangeNotifier {
 
   void _mergePost(Post post) {
     if (_posts.any((p) => p.id == post.id)) return;
+    
+    // Don't merge if it's already an expired story
+    if (post.isStory && post.expiresAt != null && post.expiresAt!.isBefore(DateTime.now())) {
+      return;
+    }
+
     int index = _posts.indexWhere((p) => p.createdAt.isBefore(post.createdAt));
     if (index == -1) {
       _posts.add(post);
@@ -158,6 +211,22 @@ class FeedService extends ChangeNotifier {
   Future<void> refreshFeed() async {
     _isRefreshing = true;
     notifyListeners();
+    
+    // Clean up expired stories dynamically during refresh
+    final now = DateTime.now();
+    bool changed = false;
+    _posts.removeWhere((p) {
+      if (p.isStory && p.expiresAt != null && p.expiresAt!.isBefore(now)) {
+        changed = true;
+        return true;
+      }
+      return false;
+    });
+
+    if (changed) {
+      await _persistPosts();
+    }
+
     await Future.delayed(const Duration(seconds: 1)); // Simulation
     _isRefreshing = false;
     notifyListeners();
@@ -182,6 +251,9 @@ class FeedService extends ChangeNotifier {
 
   Future<void> _persistPosts() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_postsKey, jsonEncode(_posts.take(100).map((e) => e.toJson()).toList()));
+    // Only persist non-expired stories
+    final now = DateTime.now();
+    final validPosts = _posts.where((p) => !(p.isStory && p.expiresAt != null && p.expiresAt!.isBefore(now)));
+    await prefs.setString(_postsKey, jsonEncode(validPosts.take(100).map((e) => e.toJson()).toList()));
   }
 }

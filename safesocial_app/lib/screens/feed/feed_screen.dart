@@ -10,6 +10,7 @@ import '../../services/veilid_service.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_card.dart';
+import 'story_viewer_screen.dart';
 
 void _showCreatePostSheet(BuildContext context) {
   final theme = Theme.of(context);
@@ -146,7 +147,7 @@ void _showCreatePostSheet(BuildContext context) {
                     ElevatedButton(
                       onPressed: () {
                         final text = controller.text.trim();
-                        if (text.isEmpty) return;
+                        if (text.isEmpty && mediaRefs.isEmpty) return;
                         context.read<FeedService>().createPost(
                               text,
                               mediaRefs: mediaRefs.isNotEmpty ? mediaRefs : null,
@@ -310,7 +311,6 @@ class _FeedScreenState extends State<FeedScreen> {
       ],
     );
   }
-
 }
 
 // ─── Stories row ──────────────────────────────────────────────────────────────
@@ -320,9 +320,18 @@ class _StoriesRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final contacts = context.watch<ContactService>().contacts;
     final identity = context.watch<IdentityService>();
+    final feedService = context.watch<FeedService>();
     final myName = identity.currentIdentity?.displayName ?? 'You';
+    final myPubKey = identity.publicKey ?? 'self';
+
+    final storiesMap = feedService.storiesByAuthor;
+    
+    // Check if we have our own active story
+    final myStories = storiesMap[myPubKey] ?? [];
+    
+    // Get other people's stories
+    final otherAuthors = storiesMap.keys.where((k) => k != myPubKey).toList();
 
     return Container(
       color: cs.surface,
@@ -335,14 +344,56 @@ class _StoriesRow extends StatelessWidget {
           _StoryItem(
             label: 'Your story',
             displayName: myName,
-            isAddStory: true,
+            isAddStory: myStories.isEmpty,
+            hasActiveStory: myStories.isNotEmpty,
+            onTap: () async {
+              if (myStories.isNotEmpty) {
+                // View my own story
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => StoryViewerScreen(
+                      stories: myStories,
+                      authorName: 'You',
+                    ),
+                  ),
+                );
+              } else {
+                // Create a new story
+                final path = await context.read<MediaService>().pickAndStoreImage();
+                if (path != null && context.mounted) {
+                  await context.read<FeedService>().createStory('', mediaRefs: [path], authorName: myName);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Story added!')));
+                }
+              }
+            },
           ),
           // Contact stories
-          for (final c in contacts.where((c) => !c.blocked))
-            _StoryItem(
-              label: c.displayName.split(' ').first,
-              displayName: c.displayName,
-            ),
+          for (final authorId in otherAuthors) ...[
+            Builder(
+              builder: (ctx) {
+                final authorStories = storiesMap[authorId]!;
+                final authorName = authorStories.first.authorName.isNotEmpty 
+                    ? authorStories.first.authorName 
+                    : 'Contact';
+                
+                return _StoryItem(
+                  label: authorName.split(' ').first,
+                  displayName: authorName,
+                  hasActiveStory: true,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => StoryViewerScreen(
+                          stories: authorStories,
+                          authorName: authorName,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              }
+            )
+          ]
         ],
       ),
     );
@@ -353,77 +404,84 @@ class _StoryItem extends StatelessWidget {
   final String label;
   final String displayName;
   final bool isAddStory;
+  final bool hasActiveStory;
+  final VoidCallback? onTap;
 
   const _StoryItem({
     required this.label,
     required this.displayName,
     this.isAddStory = false,
+    this.hasActiveStory = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Column(
-        children: [
-          Stack(
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: isAddStory
-                      ? null
-                      : LinearGradient(
-                          colors: [cs.primary, cs.secondary],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                  border: isAddStory
-                      ? Border.all(color: cs.outline, width: 1)
-                      : null,
-                ),
-                padding: const EdgeInsets.all(2.5),
-                child: CircleAvatar(
-                  backgroundColor: cs.surface,
-                  child: UserAvatar(
-                    displayName: displayName,
-                    size: AvatarSize.medium,
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Column(
+          children: [
+            Stack(
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: hasActiveStory
+                        ? LinearGradient(
+                            colors: [cs.primary, cs.secondary],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    border: !hasActiveStory
+                        ? Border.all(color: cs.outline, width: 1)
+                        : null,
                   ),
-                ),
-              ),
-              if (isAddStory)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: cs.primary,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: cs.surface, width: 2),
+                  padding: const EdgeInsets.all(2.5),
+                  child: CircleAvatar(
+                    backgroundColor: cs.surface,
+                    child: UserAvatar(
+                      displayName: displayName,
+                      size: AvatarSize.medium,
                     ),
-                    child: const Icon(Icons.add, size: 14, color: Colors.white),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          SizedBox(
-            width: 64,
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+                if (isAddStory)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: cs.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cs.surface, width: 2),
+                      ),
+                      child: const Icon(Icons.add, size: 14, color: Colors.white),
+                    ),
+                  ),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            SizedBox(
+              width: 64,
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

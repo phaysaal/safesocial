@@ -16,6 +16,8 @@ class Post with EquatableMixin {
   final List<String> likes;
   final List<Comment> comments;
   final PostAudience audience;
+  final bool isStory;
+  final DateTime? expiresAt;
 
   const Post({
     required this.id,
@@ -29,6 +31,8 @@ class Post with EquatableMixin {
     this.likes = const [],
     this.comments = const [],
     this.audience = PostAudience.everyone,
+    this.isStory = false,
+    this.expiresAt,
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -60,6 +64,10 @@ class Post with EquatableMixin {
       audience: json['audience'] == 'closeFriends'
           ? PostAudience.closeFriends
           : PostAudience.everyone,
+      isStory: json['isStory'] as bool? ?? false,
+      expiresAt: json['expiresAt'] != null
+          ? DateTime.parse(json['expiresAt'] as String)
+          : null,
     );
   }
 
@@ -76,6 +84,8 @@ class Post with EquatableMixin {
       'likes': likes,
       'comments': comments.map((c) => c.toJson()).toList(),
       'audience': audience == PostAudience.closeFriends ? 'closeFriends' : 'everyone',
+      'isStory': isStory,
+      'expiresAt': expiresAt?.toIso8601String(),
     };
   }
 
@@ -93,6 +103,8 @@ class Post with EquatableMixin {
     List<String>? likes,
     List<Comment>? comments,
     PostAudience? audience,
+    bool? isStory,
+    DateTime? expiresAt,
   }) {
     return Post(
       id: id ?? this.id,
@@ -106,6 +118,8 @@ class Post with EquatableMixin {
       likes: likes ?? this.likes,
       comments: comments ?? this.comments,
       audience: audience ?? this.audience,
+      isStory: isStory ?? this.isStory,
+      expiresAt: expiresAt ?? this.expiresAt,
     );
   }
 
@@ -122,6 +136,8 @@ class Post with EquatableMixin {
         likes,
         comments,
         audience,
+        isStory,
+        expiresAt,
       ];
 }
 
