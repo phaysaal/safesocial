@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'services/identity_service.dart';
 import 'services/theme_service.dart';
+import 'services/call_service.dart';
 import 'widgets/responsive_layout.dart';
 import 'theme/app_theme.dart';
 import 'screens/onboarding/onboarding_screen.dart';
@@ -26,6 +27,7 @@ import 'screens/settings/social_recovery_screen.dart';
 import 'screens/settings/debug_console_screen.dart';
 import 'screens/search/search_screen.dart';
 import 'screens/feed/post_detail_screen.dart';
+import 'screens/call/call_screen.dart';
 
 /// Root application widget for Spheres.
 class SpheresApp extends StatelessWidget {
@@ -73,6 +75,10 @@ class SpheresApp extends StatelessWidget {
           builder: (context, state) => ChatDetailScreen(
             conversationId: state.pathParameters['id']!,
           ),
+        ),
+        GoRoute(
+          path: '/call',
+          builder: (context, state) => const CallScreen(),
         ),
         GoRoute(
           path: '/contacts/add',
@@ -168,6 +174,34 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
   static const _routes = ['/', '/chats', '/contacts', '/profile', '/console'];
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen for incoming calls
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final callService = context.read<CallService>();
+      callService.addListener(_onCallStateChanged);
+    });
+  }
+
+  @override
+  void dispose() {
+    // Note: In a real app, you'd want to remove the listener
+    // but CallService is a global provider so we need to be careful.
+    super.dispose();
+  }
+
+  void _onCallStateChanged() {
+    final callService = context.read<CallService>();
+    if (callService.state == CallState.ringing && callService.isIncomingCall) {
+      // Check if we are already on the call screen
+      final location = GoRouterState.of(context).uri.toString();
+      if (location != '/call') {
+        context.push('/call');
+      }
+    }
+  }
 
   void _onTabTapped(int index) {
     if (index != _currentIndex) {

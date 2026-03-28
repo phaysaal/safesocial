@@ -10,7 +10,6 @@ import '../../services/call_service.dart';
 import '../../services/media_service.dart';
 import '../../services/veilid_service.dart';
 import '../../widgets/avatar.dart';
-import '../call/call_screen.dart';
 import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
 
@@ -188,8 +187,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 displayName,
                 CallType.audio,
               );
-              Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const CallScreen()));
+              context.push('/call');
             },
           ),
           IconButton(
@@ -201,8 +199,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 displayName,
                 CallType.video,
               );
-              Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const CallScreen()));
+              context.push('/call');
             },
           ),
           PopupMenuButton<String>(
@@ -270,12 +267,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     },
                   ),
           ),
-
-          // ── Typing indicator placeholder ────────────────
-          // Padding(
-          //   padding: const EdgeInsets.only(left: 16, bottom: 4),
-          //   child: _TypingIndicator(),
-          // ),
 
           // ── Input bar ───────────────────────────────────
           Container(
