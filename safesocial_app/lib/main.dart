@@ -17,6 +17,7 @@ import 'services/call_service.dart';
 import 'services/debug_log_service.dart';
 import 'services/rust_core_service.dart';
 import 'services/sync_service.dart';
+import 'services/ring_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +33,7 @@ void main() async {
   final callService = CallService();
   final rustCoreService = RustCoreService();
   final syncService = SyncService();
+  final ringService = RingService();
 
   // Load theme (no Veilid needed)
   await themeService.load();
@@ -51,6 +53,12 @@ void main() async {
   await contactService.loadContacts();
   await groupService.loadGroups();
   await feedService.loadPosts();
+  await ringService.loadRings();
+
+  // Set my info for contact handshakes
+  if (identityService.publicKey != null) {
+    contactService.setMyInfo(identityService.publicKey!, identityService.currentIdentity?.displayName ?? 'User');
+  }
 
   // Set up relay for existing contacts — works WITHOUT Veilid
   _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
@@ -75,6 +83,11 @@ void main() async {
       await identityService.loadIdentity();
       await chatService.loadConversations();
 
+      // Refresh contact service info if identity changed
+      if (identityService.publicKey != null) {
+        contactService.setMyInfo(identityService.publicKey!, identityService.currentIdentity?.displayName ?? 'User');
+      }
+
       // Reconnect relay with any new identity from Veilid
       _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
     } catch (e) {
@@ -96,6 +109,7 @@ void main() async {
         ChangeNotifierProvider.value(value: callService),
         ChangeNotifierProvider.value(value: rustCoreService),
         ChangeNotifierProvider.value(value: syncService),
+        ChangeNotifierProvider.value(value: ringService),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),

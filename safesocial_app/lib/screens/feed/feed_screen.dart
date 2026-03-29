@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../models/post.dart';
+import '../../models/ring.dart';
 import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
+import '../../services/ring_service.dart';
 import '../../services/veilid_service.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
@@ -18,7 +21,9 @@ void _showCreatePostSheet(BuildContext context) {
   final controller = TextEditingController();
   final mediaRefs = <String>[];
   final identity = context.read<IdentityService>();
-  PostAudience audience = PostAudience.everyone;
+  final ringService = context.read<RingService>();
+  
+  List<String> selectedRingIds = []; // Empty means "Everyone"
 
   showModalBottomSheet(
     context: context,
@@ -56,41 +61,37 @@ void _showCreatePostSheet(BuildContext context) {
                             'Create Post',
                             style: theme.textTheme.titleLarge?.copyWith(fontSize: 18),
                           ),
-                          // Audience selector
+                          // Ring Selector
                           GestureDetector(
-                            onTap: () {
-                              setSheetState(() {
-                                audience = audience == PostAudience.everyone
-                                    ? PostAudience.closeFriends
-                                    : PostAudience.everyone;
-                              });
+                            onTap: () async {
+                              final result = await _showRingSelectorDialog(context, ringService, selectedRingIds);
+                              if (result != null) {
+                                setSheetState(() {
+                                  selectedRingIds = result;
+                                });
+                              }
                             },
                             child: Row(
                               children: [
                                 Icon(
-                                  audience == PostAudience.closeFriends
-                                      ? Icons.star
-                                      : Icons.public,
+                                  selectedRingIds.isEmpty ? Icons.public : Icons.blur_circular,
                                   size: 14,
-                                  color: audience == PostAudience.closeFriends
-                                      ? Colors.green
-                                      : cs.onSurfaceVariant,
+                                  color: selectedRingIds.isEmpty ? cs.onSurfaceVariant : cs.primary,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  audience == PostAudience.closeFriends
-                                      ? 'Close Friends'
-                                      : 'Everyone',
+                                  selectedRingIds.isEmpty 
+                                    ? 'Everyone' 
+                                    : selectedRingIds.length == 1 
+                                      ? ringService.rings.firstWhere((r) => r.id == selectedRingIds.first).name
+                                      : '${selectedRingIds.length} Rings',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: audience == PostAudience.closeFriends
-                                        ? Colors.green
-                                        : cs.onSurfaceVariant,
+                                    color: selectedRingIds.isEmpty ? cs.onSurfaceVariant : cs.primary,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                                Icon(Icons.arrow_drop_down,
-                                    size: 16, color: cs.onSurfaceVariant),
+                                Icon(Icons.arrow_drop_down, size: 16, color: cs.onSurfaceVariant),
                               ],
                             ),
                           ),
@@ -126,35 +127,29 @@ void _showCreatePostSheet(BuildContext context) {
                     IconButton(
                       icon: Icon(Icons.photo_library_outlined, color: Colors.green[600]),
                       onPressed: () async {
-                        final path =
-                            await context.read<MediaService>().pickAndStoreImage();
+                        final path = await context.read<MediaService>().pickAndStoreImage();
                         if (path != null) mediaRefs.add(path);
                       },
                     ),
                     IconButton(
                       icon: Icon(Icons.videocam_outlined, color: Colors.red[400]),
                       onPressed: () async {
-                        final path =
-                            await context.read<MediaService>().pickAndStoreVideo();
+                        final path = await context.read<MediaService>().pickAndStoreVideo();
                         if (path != null) mediaRefs.add(path);
                       },
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.location_on_outlined, color: Colors.orange[600]),
-                      onPressed: () {},
                     ),
                     const Spacer(),
                     ElevatedButton(
                       onPressed: () {
                         final text = controller.text.trim();
                         if (text.isEmpty && mediaRefs.isEmpty) return;
+                        
                         context.read<FeedService>().createPost(
-                              text,
-                              mediaRefs: mediaRefs.isNotEmpty ? mediaRefs : null,
-                              authorName:
-                                  identity.currentIdentity?.displayName ?? 'You',
-                              audience: audience,
-                            );
+                          text,
+                          mediaRefs: mediaRefs.isNotEmpty ? mediaRefs : null,
+                          authorName: identity.currentIdentity?.displayName ?? 'You',
+                          audience: selectedRingIds.isEmpty ? PostAudience.everyone : PostAudience.closeFriends,
+                        );
                         Navigator.pop(ctx);
                       },
                       child: const Text('Post'),
@@ -170,6 +165,53 @@ void _showCreatePostSheet(BuildContext context) {
   );
 }
 
+Future<List<String>?> _showRingSelectorDialog(BuildContext context, RingService service, List<String> current) async {
+  List<String> selected = List.from(current);
+  return showDialog<List<String>>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        title: const Text('Select Audience'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CheckboxListTile(
+                value: selected.isEmpty,
+                title: const Text('Everyone'),
+                subtitle: const Text('All your contacts'),
+                onChanged: (val) {
+                  if (val == true) setState(() => selected.clear());
+                },
+              ),
+              const Divider(),
+              ...service.rings.map((ring) => CheckboxListTile(
+                value: selected.contains(ring.id),
+                title: Text(ring.name),
+                secondary: CircleAvatar(backgroundColor: ring.color, radius: 8),
+                onChanged: (val) {
+                  setState(() {
+                    if (val == true) {
+                      selected.add(ring.id);
+                    } else {
+                      selected.remove(ring.id);
+                    }
+                  });
+                },
+              )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, selected), child: const Text('Done')),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Instagram / Facebook style social feed.
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
@@ -182,7 +224,6 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
-    // Auto-refresh feed when screen opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FeedService>().refreshFeed();
     });
@@ -221,7 +262,7 @@ class _FeedScreenState extends State<FeedScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.chat_bubble_outline),
-            onPressed: () {},
+            onPressed: () => context.go('/chats'),
           ),
         ],
       ),
@@ -313,8 +354,6 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 }
 
-// ─── Stories row ──────────────────────────────────────────────────────────────
-
 class _StoriesRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -326,11 +365,7 @@ class _StoriesRow extends StatelessWidget {
     final myPubKey = identity.publicKey ?? 'self';
 
     final storiesMap = feedService.storiesByAuthor;
-    
-    // Check if we have our own active story
     final myStories = storiesMap[myPubKey] ?? [];
-    
-    // Get other people's stories
     final otherAuthors = storiesMap.keys.where((k) => k != myPubKey).toList();
 
     return Container(
@@ -340,7 +375,6 @@ class _StoriesRow extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         children: [
-          // "Your story" item
           _StoryItem(
             label: 'Your story',
             displayName: myName,
@@ -348,7 +382,6 @@ class _StoriesRow extends StatelessWidget {
             hasActiveStory: myStories.isNotEmpty,
             onTap: () async {
               if (myStories.isNotEmpty) {
-                // View my own story
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => StoryViewerScreen(
@@ -358,7 +391,6 @@ class _StoriesRow extends StatelessWidget {
                   ),
                 );
               } else {
-                // Create a new story
                 final path = await context.read<MediaService>().pickAndStoreImage();
                 if (path != null && context.mounted) {
                   await context.read<FeedService>().createStory('', mediaRefs: [path], authorName: myName);
@@ -367,7 +399,6 @@ class _StoriesRow extends StatelessWidget {
               }
             },
           ),
-          // Contact stories
           for (final authorId in otherAuthors) ...[
             Builder(
               builder: (ctx) {
@@ -487,8 +518,6 @@ class _StoryItem extends StatelessWidget {
   }
 }
 
-// ─── "What's on your mind?" bar ──────────────────────────────────────────────
-
 class _CreatePostBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -528,8 +557,6 @@ class _CreatePostBar extends StatelessWidget {
     );
   }
 }
-
-// ─── Network status dot ──────────────────────────────────────────────────────
 
 class _NetworkDot extends StatelessWidget {
   @override

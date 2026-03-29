@@ -10,6 +10,8 @@ class Contact with EquatableMixin {
   final bool muted;
   final bool following;
   final bool closeFriend;
+  final bool isPending;
+  final String? feedDhtKey;
 
   const Contact({
     required this.publicKey,
@@ -20,6 +22,8 @@ class Contact with EquatableMixin {
     this.muted = false,
     this.following = true,
     this.closeFriend = false,
+    this.isPending = false,
+    this.feedDhtKey,
   });
 
   factory Contact.fromJson(Map<String, dynamic> json) {
@@ -32,6 +36,8 @@ class Contact with EquatableMixin {
       muted: json['muted'] as bool? ?? false,
       following: json['following'] as bool? ?? true,
       closeFriend: json['closeFriend'] as bool? ?? false,
+      isPending: json['isPending'] as bool? ?? false,
+      feedDhtKey: json['feedDhtKey'] as String?,
     );
   }
 
@@ -45,6 +51,8 @@ class Contact with EquatableMixin {
       'muted': muted,
       'following': following,
       'closeFriend': closeFriend,
+      'isPending': isPending,
+      'feedDhtKey': feedDhtKey,
     };
   }
 
@@ -57,6 +65,8 @@ class Contact with EquatableMixin {
     bool? muted,
     bool? following,
     bool? closeFriend,
+    bool? isPending,
+    String? feedDhtKey,
   }) {
     return Contact(
       publicKey: publicKey ?? this.publicKey,
@@ -67,6 +77,8 @@ class Contact with EquatableMixin {
       muted: muted ?? this.muted,
       following: following ?? this.following,
       closeFriend: closeFriend ?? this.closeFriend,
+      isPending: isPending ?? this.isPending,
+      feedDhtKey: feedDhtKey ?? this.feedDhtKey,
     );
   }
 
@@ -80,5 +92,7 @@ class Contact with EquatableMixin {
         muted,
         following,
         closeFriend,
+        isPending,
+        feedDhtKey,
       ];
 }

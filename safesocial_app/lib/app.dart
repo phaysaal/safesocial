@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:app_links/app_links.dart';
 
 import 'services/identity_service.dart';
 import 'services/theme_service.dart';
@@ -13,6 +15,7 @@ import 'screens/chat/chat_detail_screen.dart';
 import 'screens/feed/feed_screen.dart';
 import 'screens/contacts/contact_list_screen.dart';
 import 'screens/contacts/add_contact_screen.dart';
+import 'screens/contacts/manage_rings_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
@@ -30,8 +33,42 @@ import 'screens/feed/post_detail_screen.dart';
 import 'screens/call/call_screen.dart';
 
 /// Root application widget for Spheres.
-class SpheresApp extends StatelessWidget {
+class SpheresApp extends StatefulWidget {
   const SpheresApp({super.key});
+
+  @override
+  State<SpheresApp> createState() => _SpheresAppState();
+}
+
+class _SpheresAppState extends State<SpheresApp> {
+  late AppLinks _appLinks;
+  StreamSubscription<Uri>? _linkSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinking();
+  }
+
+  @override
+  void dispose() {
+    _linkSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _initDeepLinking() {
+    _appLinks = AppLinks();
+    _linkSubscription = _appLinks.uriLinkStream.listen((uri) {
+      debugPrint('[DeepLink] Received URI: $uri');
+      _handleDeepLink(uri);
+    });
+  }
+
+  void _handleDeepLink(Uri uri) {
+    if (uri.scheme == 'spheres' && uri.host == 'add') {
+      // Future: Navigate to add contact with pre-filled info
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,6 +120,10 @@ class SpheresApp extends StatelessWidget {
         GoRoute(
           path: '/contacts/add',
           builder: (context, state) => const AddContactScreen(),
+        ),
+        GoRoute(
+          path: '/contacts/rings',
+          builder: (context, state) => const ManageRingsScreen(),
         ),
         GoRoute(
           path: '/profile/edit',
