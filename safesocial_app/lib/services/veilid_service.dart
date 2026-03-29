@@ -130,6 +130,9 @@ class VeilidService extends ChangeNotifier {
       _isFailed = true;
       _error = e.toString();
       DebugLogService().error('Veilid', 'Initialization failed: $e');
+      if (isProtectedStoreError) {
+        DebugLogService().warn('Veilid', 'Hint: tap "Clear Corrupted Data & Retry" to fix this');
+      }
       notifyListeners();
       rethrow;
     }
@@ -138,12 +141,14 @@ class VeilidService extends ChangeNotifier {
   /// Retry initialization after a failure — called from the UI retry button.
   Future<void> retryInitialize() async {
     if (_isInitialized || _statePath == null) return;
+    await _shutdownCore();
     await initialize(_statePath!);
   }
 
   /// Wipe Veilid state directories and retry — use when ProtectedStore is corrupted.
   Future<void> clearStateAndRetry() async {
     if (_isInitialized || _statePath == null) return;
+    await _shutdownCore();
     DebugLogService().warn('Veilid', 'Clearing corrupted state at $_statePath…');
     try {
       final dir = Directory(_statePath!);
@@ -161,11 +166,33 @@ class VeilidService extends ChangeNotifier {
     await initialize(_statePath!);
   }
 
-  /// Returns true if the error looks like a ProtectedStore corruption.
+  /// Shut down the Veilid core even if initialization never fully completed.
+  /// Safe to call at any point — ignores errors from a partially started core.
+  Future<void> _shutdownCore() async {
+    _routingContext?.close();
+    _routingContext = null;
+    await _updateSubscription?.cancel();
+    _updateSubscription = null;
+    _isInitialized = false;
+    _isInitializing = false;
+    _isAttached = false;
+    _attachmentState = AttachmentState.detached;
+    try {
+      await Veilid.instance.shutdownVeilidCore();
+      DebugLogService().info('Veilid', 'Core shut down before retry');
+    } catch (e) {
+      // Core may not have started — that's fine
+      DebugLogService().info('Veilid', 'Shutdown skipped (core not running): $e');
+    }
+  }
+
+  /// Returns true if the error looks like a ProtectedStore or keystore failure.
   bool get isProtectedStoreError =>
       _error != null &&
       (_error!.toLowerCase().contains('protected store') ||
-       _error!.toLowerCase().contains('protectedstore'));
+       _error!.toLowerCase().contains('protectedstore') ||
+       _error!.toLowerCase().contains('keystore') ||
+       _error!.toLowerCase().contains('could not initialize'));
 
   /// Shut down the Veilid node and release resources.
   Future<void> shutdown() async {
