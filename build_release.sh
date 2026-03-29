@@ -1,24 +1,61 @@
 #!/bin/bash
 
-# Spheres v0.3.0 Automated Build Script
+# Spheres Automated Release Script
+# Usage: ./build_release.sh <version>
+# Example: ./build_release.sh 0.3.4
 set -e
 
-echo "🚀 Starting Spheres v0.3.0 Release Build..."
+VERSION=${1:?Usage: ./build_release.sh <version>  e.g. 0.3.4}
 
-# 1. Build Rust Core (Standard Release)
-echo "🦀 Building Rust Core..."
-cd safesocial_core
-cargo build --release
-cd ..
+echo "Starting Spheres v$VERSION release..."
 
-# 2. Prepare Flutter
-echo "🐦 Building Flutter APK..."
+# 1. Build Flutter APKs
+echo "Building Flutter APKs..."
 cd safesocial_app
-# Ensure Android SDK is found (Environment specific)
 export ANDROID_HOME=$HOME/Android/Sdk
 flutter build apk --release --split-per-abi
 cd ..
 
-echo "✨ Build Complete!"
-echo "📦 APKs available in: safesocial_app/build/app/outputs/flutter-apk/"
-echo "🔗 Next steps: Upload to GitHub and run 'gh release create 0.3.0'"
+APK_DIR="safesocial_app/build/app/outputs/flutter-apk"
+
+# 2. Create GitHub release and upload APKs
+echo "Creating GitHub release v$VERSION..."
+gh release create "$VERSION" \
+  "$APK_DIR/app-arm64-v8a-release.apk" \
+  "$APK_DIR/app-armeabi-v7a-release.apk" \
+  "$APK_DIR/app-x86_64-release.apk" \
+  --repo phaysaal/safesocial \
+  --title "v$VERSION" \
+  --generate-notes
+
+# 3. Update landing page version references
+echo "Updating landing page to v$VERSION..."
+PREV=$(grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' landing/index.html | head -1)
+sed -i "s/${PREV}/v${VERSION}/g" landing/index.html
+sed -i "s|releases/download/[0-9.]\+/app|releases/download/${VERSION}/app|g" landing/index.html
+
+# 4. Deploy to Cloudflare Pages
+echo "Deploying to Cloudflare Pages..."
+npx wrangler pages deploy landing --project-name spheres-landing
+
+# 5. Push landing page to gh-pages
+echo "Pushing to gh-pages..."
+git add landing/index.html
+git commit -m "Update landing page to v$VERSION"
+git worktree add /tmp/gh-pages-deploy origin/gh-pages
+cp landing/index.html /tmp/gh-pages-deploy/index.html
+cd /tmp/gh-pages-deploy
+git add index.html
+git commit -m "Update landing page to v$VERSION"
+git push origin HEAD:gh-pages
+cd -
+git worktree remove /tmp/gh-pages-deploy --force
+
+# 6. Push main
+git push origin main
+
+echo ""
+echo "Release v$VERSION complete!"
+echo "GitHub:     https://github.com/phaysaal/safesocial/releases/tag/$VERSION"
+echo "Cloudflare: https://spheres-landing.pages.dev"
+echo "Live site:  https://spheres.dev"
