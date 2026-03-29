@@ -235,6 +235,7 @@ class _FeedScreenState extends State<FeedScreen> {
     final cs = theme.colorScheme;
     final feedService = context.watch<FeedService>();
     final posts = feedService.posts;
+    final memories = feedService.memories;
 
     return Scaffold(
       appBar: AppBar(
@@ -269,12 +270,15 @@ class _FeedScreenState extends State<FeedScreen> {
       body: RefreshIndicator(
         color: cs.primary,
         onRefresh: () => feedService.refreshFeed(),
-        child: posts.isEmpty
+        child: posts.isEmpty && memories.isEmpty
             ? _buildEmptyFeed(context, theme)
             : CustomScrollView(
                 slivers: [
                   // Stories row
                   SliverToBoxAdapter(child: _StoriesRow()),
+                  // Memories Banner
+                  if (memories.isNotEmpty)
+                    SliverToBoxAdapter(child: _MemoriesBanner(count: memories.length)),
                   // Create-post bar
                   SliverToBoxAdapter(child: _CreatePostBar()),
                   // Divider
@@ -353,6 +357,66 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 }
+
+// ─── Memories Banner ─────────────────────────────────────────────────────────
+
+class _MemoriesBanner extends StatelessWidget {
+  final int count;
+  const _MemoriesBanner({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return GestureDetector(
+      onTap: () => context.push('/memories'),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [cs.primary.withValues(alpha: 0.8), cs.secondary.withValues(alpha: 0.8)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: cs.primary.withValues(alpha: 0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.auto_awesome, color: Colors.white, size: 28),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'On This Day',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  Text(
+                    'You have $count ${count == 1 ? 'memory' : 'memories'} to relive today.',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Stories row ──────────────────────────────────────────────────────────────
 
 class _StoriesRow extends StatelessWidget {
   @override

@@ -13,6 +13,7 @@ import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/chat/chat_list_screen.dart';
 import 'screens/chat/chat_detail_screen.dart';
 import 'screens/feed/feed_screen.dart';
+import 'screens/feed/memories_screen.dart';
 import 'screens/contacts/contact_list_screen.dart';
 import 'screens/contacts/add_contact_screen.dart';
 import 'screens/contacts/manage_rings_screen.dart';
@@ -128,6 +129,10 @@ class _SpheresAppState extends State<SpheresApp> {
           builder: (context, state) => AlbumDetailScreen(
             albumId: state.pathParameters['id']!,
           ),
+        ),
+        GoRoute(
+          path: '/memories',
+          builder: (context, state) => const MemoriesScreen(),
         ),
         GoRoute(
           path: '/contacts/add',

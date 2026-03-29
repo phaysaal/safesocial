@@ -28,6 +28,17 @@ class FeedService extends ChangeNotifier {
   List<Post> get posts =>
       _posts.where((p) => !_hiddenPostIds.contains(p.id) && !p.isStory).toList();
 
+  /// Returns posts from previous years on the same month and day.
+  List<Post> get memories {
+    final now = DateTime.now();
+    return _posts.where((p) =>
+      !p.isStory &&
+      p.createdAt.month == now.month &&
+      p.createdAt.day == now.day &&
+      p.createdAt.year < now.year
+    ).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
   /// Returns unexpired stories grouped by authorId
   Map<String, List<Post>> get storiesByAuthor {
     final now = DateTime.now();
