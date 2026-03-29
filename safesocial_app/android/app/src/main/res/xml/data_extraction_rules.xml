@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="sharedpref" path="."/>
+        <!-- Allow SharedPreferences for identity and contacts -->
+        <include domain="sharedpref" path="."/>
+        
+        <!-- Exclude large/sensitive data from cloud -->
         <exclude domain="database" path="."/>
         <exclude domain="file" path="."/>
         <exclude domain="root" path="."/>
     </cloud-backup>
     <device-transfer>
-        <exclude domain="sharedpref" path="."/>
-        <exclude domain="database" path="."/>
-        <exclude domain="file" path="."/>
+        <include domain="sharedpref" path="."/>
+        <include domain="database" path="."/>
+        <include domain="file" path="."/>
         <exclude domain="root" path="."/>
     </device-transfer>
 </data-extraction-rules>

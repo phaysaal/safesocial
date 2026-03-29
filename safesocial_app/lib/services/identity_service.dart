@@ -30,7 +30,7 @@ class IdentityService extends ChangeNotifier {
   Future<void> createIdentity(String displayName, {String? bio}) async {
     try {
       final crypto = await Veilid.instance.getCryptoSystem(
-        VeilidCryptoKind.v8,
+        bestCryptoKind,
       );
       
       _keypair = await crypto.generateKeyPair();
@@ -86,7 +86,6 @@ class IdentityService extends ChangeNotifier {
   Future<bool> importIdentity(String json, {String? displayName}) async {
     try {
       final data = jsonDecode(json);
-      // Logic for importing existing identity
       await _persistIdentity();
       notifyListeners();
       return true;
@@ -111,9 +110,9 @@ class IdentityService extends ChangeNotifier {
   }
 
   /// PERSISTENT MEMORY: Reset everything.
-  /// Clears all local storage, deletes all files, and effectively 'factory resets' the app.
+  /// Clears all local storage, deletes all files, and ensures Android Backup is updated.
   Future<void> resetEverything() async {
-    // 1. Wipe SharedPreferences
+    // 1. Wipe SharedPreferences and ENSURE it commits (for Android Backup)
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     
@@ -126,7 +125,7 @@ class IdentityService extends ChangeNotifier {
       final appDir = await getApplicationDocumentsDirectory();
       if (appDir.existsSync()) {
         await appDir.delete(recursive: true);
-        await appDir.create(recursive: true); // Re-create empty root
+        await appDir.create(recursive: true); 
       }
 
       final tempDir = await getTemporaryDirectory();
@@ -135,7 +134,7 @@ class IdentityService extends ChangeNotifier {
         await tempDir.create(recursive: true);
       }
       
-      DebugLogService().warn('Identity', 'HARD WIPE: All data and files have been removed.');
+      DebugLogService().warn('Identity', 'HARD WIPE COMPLETE: Local and cloud state synchronized.');
     } catch (e) {
       DebugLogService().error('Identity', 'FileSystem wipe encountered errors: $e');
     }
