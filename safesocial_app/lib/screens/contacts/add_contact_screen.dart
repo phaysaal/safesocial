@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
@@ -10,6 +12,7 @@ import '../../services/call_service.dart';
 import '../../services/debug_log_service.dart';
 
 /// Screen to add a new contact via QR code scan or public key input.
+/// Also displays the user's own QR code for others to scan.
 class AddContactScreen extends StatefulWidget {
   const AddContactScreen({super.key});
 
@@ -17,14 +20,22 @@ class AddContactScreen extends StatefulWidget {
   State<AddContactScreen> createState() => _AddContactScreenState();
 }
 
-class _AddContactScreenState extends State<AddContactScreen> {
+class _AddContactScreenState extends State<AddContactScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   final _keyController = TextEditingController();
   final _nameController = TextEditingController();
   bool _isScanning = false;
   bool _isProcessing = false;
 
   @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
   void dispose() {
+    _tabController.dispose();
     _keyController.dispose();
     _nameController.dispose();
     super.dispose();
@@ -88,8 +99,21 @@ class _AddContactScreenState extends State<AddContactScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Add Contact'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Scan or Add'),
+            Tab(text: 'My QR Code'),
+          ],
+        ),
       ),
-      body: _isScanning ? _buildScanner() : _buildForm(theme, cs),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _isScanning ? _buildScanner() : _buildForm(theme, cs),
+          _buildMyQRCode(context),
+        ],
+      ),
     );
   }
 
@@ -145,6 +169,76 @@ class _AddContactScreenState extends State<AddContactScreen> {
     );
   }
 
+  Widget _buildMyQRCode(BuildContext context) {
+    final identity = context.watch<IdentityService>();
+    final pubKey = identity.publicKey ?? '';
+    final name = identity.currentIdentity?.displayName ?? 'User';
+    final cs = Theme.of(context).colorScheme;
+
+    final inviteLink = 'spheres://add?key=$pubKey&name=${Uri.encodeComponent(name)}';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        children: [
+          const Text(
+            'Show this code to a friend or share your invite link to connect.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 32),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 20,
+                  spreadRadius: 5,
+                ),
+              ],
+            ),
+            child: QrImageView(
+              data: inviteLink,
+              version: QrVersions.auto,
+              size: 240.0,
+              eyeStyle: QrEyeStyle(
+                eyeShape: QrEyeShape.square,
+                color: cs.primary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
+          Text(
+            name,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          if (pubKey.isNotEmpty)
+            Text(
+              pubKey.length > 20 ? pubKey.substring(0, 20) + '...' : pubKey,
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12, fontFamily: 'monospace'),
+            ),
+          const SizedBox(height: 40),
+          OutlinedButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: inviteLink));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Invite link copied to clipboard')),
+              );
+            },
+            icon: const Icon(Icons.share_outlined),
+            label: const Text('Share Invite Link'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 50),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildScanner() {
     return Stack(
       children: [
@@ -154,6 +248,21 @@ class _AddContactScreenState extends State<AddContactScreen> {
             for (final barcode in barcodes) {
               final rawValue = barcode.rawValue;
               if (rawValue != null) {
+                // Check if it's a spheres link
+                if (rawValue.startsWith('spheres://add')) {
+                  final uri = Uri.parse(rawValue);
+                  final key = uri.queryParameters['key'];
+                  final name = uri.queryParameters['name'];
+                  if (key != null) {
+                    setState(() {
+                      _keyController.text = key;
+                      if (name != null) _nameController.text = name;
+                      _isScanning = false;
+                    });
+                    break;
+                  }
+                }
+                
                 setState(() {
                   _keyController.text = rawValue;
                   _isScanning = false;
