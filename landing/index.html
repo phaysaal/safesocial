@@ -156,6 +156,34 @@
     .security-item h4 { font-size: 18px; margin-bottom: 8px; color: #667eea; }
     .security-item p { font-size: 14px; line-height: 1.6; color: #d1d1e0; }
 
+    /* ── Comparison Table ────────────────────────── */
+    .comparison-wrapper {
+      overflow-x: auto;
+      margin-top: 40px;
+      background: white;
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 20px;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+    }
+
+    th { background: #fafafa; font-weight: 700; color: var(--text-main); }
+    .feature-col { width: 25%; font-weight: 600; }
+    .highlight { background: rgba(232, 69, 90, 0.05); font-weight: 700; color: var(--primary); }
+    
+    .check { color: #28a745; font-weight: bold; }
+    .cross { color: #dc3545; font-weight: bold; }
+
     /* ── Download Section ───────────────────────── */
     .download-section { text-align: center; }
     .apk-card {
@@ -181,7 +209,7 @@
 
     .footer-links {
       display: flex;
-      justify(content: center);
+      justify-content: center;
       gap: 30px;
       margin-bottom: 20px;
     }
@@ -192,6 +220,7 @@
     @media (max-width: 768px) {
       .hero h1 { font-size: 40px; }
       .security-grid { grid-template-columns: 1fr; }
+      th, td { padding: 12px 10px; font-size: 12px; }
     }
   </style>
 </head>
@@ -222,23 +251,73 @@
   <section class="section">
     <div class="container">
       <div class="section-title">
-        <h2>Built for your Close Circle</h2>
-        <p>Most social networks want your time. We want your trust. Spheres replaces the "noise" with high-fidelity connections.</p>
+        <h2>How We Compare</h2>
+        <p>Most "private" apps still own your metadata. Spheres is built differently.</p>
       </div>
-      
-      <div class="goals-grid">
-        <div class="card">
-          <h3>NEW: Voice Notes</h3>
-          <p>Express yourself with secure voice messages featuring real-time waveform visualization. Perfect for quick, personal updates.</p>
-        </div>
-        <div class="card">
-          <h3>NEW: Shared Albums</h3>
-          <p>Collaborate on photo collections with your circle. Every contribution is synced P2P and encrypted end-to-end.</p>
-        </div>
-        <div class="card">
-          <h3>NEW: On This Day</h3>
-          <p>Relive your favorite moments. Our local-first memory engine surfaces past posts from this day in previous years.</p>
-        </div>
+
+      <div class="comparison-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th class="feature-col">Feature</th>
+              <th>Facebook / IG</th>
+              <th>WhatsApp</th>
+              <th>Session / SimpleX</th>
+              <th class="highlight">Spheres v0.3.0</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="feature-col">Storage Location</td>
+              <td>Company Servers</td>
+              <td>Company Servers</td>
+              <td>Decentralized Nodes</td>
+              <td class="highlight">Your Device (P2P)</td>
+            </tr>
+            <tr>
+              <td class="feature-col">Metadata Privacy</td>
+              <td class="cross">None (Tracked)</td>
+              <td class="cross">Poor (Leaks graph)</td>
+              <td class="check">High (Onion)</td>
+              <td class="highlight check">Maximum (Onion + P2P)</td>
+            </tr>
+            <tr>
+              <td class="feature-col">Onion Routing</td>
+              <td class="cross">❌</td>
+              <td class="cross">❌</td>
+              <td class="check">✅</td>
+              <td class="highlight check">✅ (Veilid)</td>
+            </tr>
+            <tr>
+              <td class="feature-col">Phone / Email Req.</td>
+              <td>Required</td>
+              <td>Required</td>
+              <td>Optional</td>
+              <td class="highlight check">Not Required</td>
+            </tr>
+            <tr>
+              <td class="feature-col">Forward Secrecy</td>
+              <td class="cross">❌</td>
+              <td class="check">✅</td>
+              <td class="check">✅</td>
+              <td class="highlight check">✅ (Double Ratchet)</td>
+            </tr>
+            <tr>
+              <td class="feature-col">Audience Rings</td>
+              <td class="cross">❌ (Centralized)</td>
+              <td class="cross">❌</td>
+              <td class="cross">❌</td>
+              <td class="highlight check">✅ (Local-only)</td>
+            </tr>
+            <tr>
+              <td class="feature-col">Business Model</td>
+              <td>Ads / Data Mining</td>
+              <td>Data Mining</td>
+              <td>Donations / Crypto</td>
+              <td class="highlight">None (Self-hosted)</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </section>
