@@ -29,7 +29,7 @@ android {
 
     defaultConfig {
         applicationId = "com.spheres.spheres_app"
-        minSdk = flutter.minSdkVersion
+        minSdk = 21 // Veilid requires API 21 (Android 5.0) minimum
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

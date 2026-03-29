@@ -14,11 +14,15 @@ class VeilidService extends ChangeNotifier {
   StreamSubscription<VeilidUpdate>? _updateSubscription;
 
   bool _isInitialized = false;
+  bool _isInitializing = false;
+  bool _isFailed = false;
   bool _isAttached = false;
   AttachmentState _attachmentState = AttachmentState.detached;
   String? _error;
+  String? _statePath;
 
   bool get isInitialized => _isInitialized;
+  bool get isFailed => _isFailed;
   bool get isAttached => _isAttached;
   AttachmentState get attachmentState => _attachmentState;
   VeilidRoutingContext? get routingContext => _routingContext;
@@ -29,27 +33,45 @@ class VeilidService extends ChangeNotifier {
 
   /// Initialize the Veilid node and attach to the network.
   Future<void> initialize(String statePath) async {
-    if (_isInitialized) return;
+    if (_isInitialized || _isInitializing) return;
+
+    _statePath = statePath;
+    _isInitializing = true;
+    _isFailed = false;
+    _error = null;
 
     try {
-      _error = null;
-
-      // Fix: Ensure FFI bridge is initialized before attempting to start the core.
+      // Step 1: Initialize the FFI bridge (native library must be loaded first).
+      // On web this is not needed.
       if (!kIsWeb) {
         const platformConfig = VeilidFFIConfig(
-            logging: VeilidFFIConfigLogging(
-          terminal: VeilidFFIConfigLoggingTerminal(
-              enabled: false, level: VeilidConfigLogLevel.debug),
-          api: VeilidFFIConfigLoggingApi(
-              enabled: true, level: VeilidConfigLogLevel.info),
-        ));
+          logging: VeilidFFIConfigLogging(
+            terminal: VeilidFFIConfigLoggingTerminal(
+                enabled: false, level: VeilidConfigLogLevel.debug),
+            otlp: VeilidFFIConfigLoggingOtlp(
+                enabled: false,
+                level: VeilidConfigLogLevel.debug,
+                grpcEndpoint: '',
+                serviceName: 'spheres'),
+            api: VeilidFFIConfigLoggingApi(
+                enabled: true, level: VeilidConfigLogLevel.info),
+            flame: VeilidFFIConfigLoggingFlame(
+                enabled: false, path: ''),
+          ),
+        );
         try {
           Veilid.instance.initializeVeilidCore(platformConfig.toJson());
-        } catch (_) {
-          // May throw if already initialized in this isolate, which is safe to ignore
+          DebugLogService().info('Veilid', 'FFI bridge initialized');
+        } catch (e) {
+          // Only safe to ignore if already initialized — log everything else.
+          final msg = e.toString();
+          if (!msg.contains('already')) {
+            DebugLogService().warn('Veilid', 'initializeVeilidCore: $msg');
+          }
         }
       }
 
+      // Step 2: Build config with our storage paths.
       final config = await getDefaultVeilidConfig(
         isWeb: kIsWeb,
         programName: 'spheres',
@@ -61,7 +83,13 @@ class VeilidService extends ChangeNotifier {
         protectedStore: c.protectedStore.copyWith(directory: '$statePath/protected_store'),
       ));
 
-      final updateStream = await Veilid.instance.startupVeilidCore(config);
+      // Step 3: Start the core — with a hard timeout so we never hang forever.
+      DebugLogService().info('Veilid', 'Starting core…');
+      final updateStream = await Future.any([
+        Veilid.instance.startupVeilidCore(config),
+        Future.delayed(const Duration(seconds: 20))
+            .then((_) => throw TimeoutException('startupVeilidCore timed out after 20s')),
+      ]);
 
       _updateSubscription = updateStream.listen(
         _handleUpdate,
@@ -72,21 +100,39 @@ class VeilidService extends ChangeNotifier {
         },
       );
 
+      // Step 4: Attach to the network (non-blocking — attachment state comes via updates).
       await Veilid.instance.attach();
 
-      _routingContext = await Veilid.instance.safeRoutingContext(
-        sequencing: Sequencing.preferOrdered,
-      );
+      // Step 5: Create a basic routing context.
+      // Avoid safeRoutingContext() — its internal cast (as SafetySelectionSafe)
+      // throws TypeError if the node's default safety isn't what it expects.
+      _routingContext = await Veilid.instance.routingContext();
 
       _isInitialized = true;
-      DebugLogService().success('Veilid', 'Initialized and attaching...');
+      _isInitializing = false;
+      DebugLogService().success('Veilid', 'Core started — attaching to network…');
       notifyListeners();
+    } on TimeoutException catch (e) {
+      _isInitializing = false;
+      _isFailed = true;
+      _error = e.message ?? 'Startup timed out';
+      DebugLogService().error('Veilid', _error!);
+      notifyListeners();
+      rethrow;
     } catch (e) {
+      _isInitializing = false;
+      _isFailed = true;
       _error = e.toString();
       DebugLogService().error('Veilid', 'Initialization failed: $e');
       notifyListeners();
       rethrow;
     }
+  }
+
+  /// Retry initialization after a failure — called from the UI retry button.
+  Future<void> retryInitialize() async {
+    if (_isInitialized || _statePath == null) return;
+    await initialize(_statePath!);
   }
 
   /// Shut down the Veilid node and release resources.
@@ -104,6 +150,8 @@ class VeilidService extends ChangeNotifier {
 
       _isAttached = false;
       _isInitialized = false;
+      _isInitializing = false;
+      _isFailed = false;
       _attachmentState = AttachmentState.detached;
       notifyListeners();
     } catch (e) {
@@ -136,7 +184,7 @@ class VeilidService extends ChangeNotifier {
       return await completer.future;
     } finally {
       removeListener(listener);
-      timer?.cancel();
+      timer.cancel();
     }
   }
 

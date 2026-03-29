@@ -124,15 +124,42 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
                 const SizedBox(height: 24),
                 
-                // Fix Issue #5: Disable button while initializing
                 ListenableBuilder(
                   listenable: context.watch<IdentityService>().veilidService,
                   builder: (context, _) {
                     final vs = context.read<IdentityService>().veilidService;
-                    final isReady = vs.isInitialized;
-                    
+
+                    if (vs.isFailed) {
+                      return Column(
+                        children: [
+                          Text(
+                            'Backend failed to start',
+                            style: TextStyle(color: cs.error, fontSize: 14),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: () async {
+                              final main = context.read<IdentityService>().veilidService;
+                              await main.retryInitialize();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.all(18),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: const Text(
+                              'Retry',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+
                     return ElevatedButton(
-                      onPressed: (_isCreating || !isReady) ? null : _handleOnboarding,
+                      onPressed: (_isCreating || !vs.isInitialized) ? null : _handleOnboarding,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.all(18),
                         shape: RoundedRectangleBorder(
@@ -146,7 +173,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2.5),
                             )
                           : Text(
-                              isReady ? 'Start Networking' : 'Initializing Backend...',
+                              vs.isInitialized ? 'Start Networking' : 'Initializing Backend…',
                               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                             ),
                     );

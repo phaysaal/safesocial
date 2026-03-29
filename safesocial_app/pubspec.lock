@@ -1121,11 +1121,11 @@ packages:
     dependency: "direct main"
     description:
       path: veilid-flutter
-      ref: HEAD
-      resolved-ref: df7254aea1f0345c57a03cbb905babe87b0e936a
+      ref: "v0.5.2"
+      resolved-ref: c7fdbc43326da464ccb9c814682053be48def195
       url: "https://gitlab.com/veilid/veilid.git"
     source: git
-    version: "0.5.3"
+    version: "0.5.2"
   vm_service:
     dependency: transitive
     description:
