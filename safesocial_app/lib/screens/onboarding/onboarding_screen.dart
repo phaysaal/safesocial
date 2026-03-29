@@ -122,9 +122,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         height: 24,
                         child: CircularProgressIndicator(strokeWidth: 2.5),
                       )
-                    : const Text(
-                        'Start Networking',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    : ListenableBuilder(
+                        listenable: context.watch<IdentityService>().veilidService,
+                        builder: (context, _) {
+                          final vs = context.read<IdentityService>().veilidService;
+                          if (!vs.isInitialized) {
+                            return const Text('Initializing Backend...', style: TextStyle(fontSize: 16));
+                          }
+                          return const Text(
+                            'Start Networking',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          );
+                        },
                       ),
               ),
               const SizedBox(height: 16),

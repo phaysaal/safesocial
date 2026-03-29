@@ -95,6 +95,35 @@ class VeilidService extends ChangeNotifier {
     }
   }
 
+  /// Wait until the node is initialized (safe to use Veilid.instance).
+  Future<bool> waitForInit({Duration timeout = const Duration(seconds: 15)}) async {
+    if (_isInitialized) return true;
+
+    final completer = Completer<bool>();
+    Timer? timer;
+
+    void listener() {
+      if (_isInitialized && !completer.isCompleted) {
+        timer?.cancel();
+        completer.complete(true);
+      }
+    }
+
+    addListener(listener);
+    timer = Timer(timeout, () {
+      if (!completer.isCompleted) {
+        completer.complete(false);
+      }
+    });
+
+    try {
+      return await completer.future;
+    } finally {
+      removeListener(listener);
+      timer?.cancel();
+    }
+  }
+
   /// Wait until the node is attached to the network (or timeout).
   Future<bool> waitForAttach(
       {Duration timeout = const Duration(seconds: 30)}) async {

@@ -29,6 +29,10 @@ class IdentityService extends ChangeNotifier {
   /// Generate a new identity keypair and profile.
   Future<void> createIdentity(String displayName, {String? bio}) async {
     try {
+      // Ensure backend is ready
+      final ok = await veilidService.waitForInit();
+      if (!ok) throw Exception('Veilid backend failed to initialize in time');
+
       final crypto = await Veilid.instance.getCryptoSystem(
         bestCryptoKind,
       );
