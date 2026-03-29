@@ -34,6 +34,22 @@ class VeilidService extends ChangeNotifier {
     try {
       _error = null;
 
+      // Fix: Ensure FFI bridge is initialized before attempting to start the core.
+      if (!kIsWeb) {
+        const platformConfig = VeilidFFIConfig(
+            logging: VeilidFFIConfigLogging(
+          terminal: VeilidFFIConfigLoggingTerminal(
+              enabled: false, level: VeilidConfigLogLevel.debug),
+          api: VeilidFFIConfigLoggingApi(
+              enabled: true, level: VeilidConfigLogLevel.info),
+        ));
+        try {
+          Veilid.instance.initializeVeilidCore(platformConfig.toJson());
+        } catch (_) {
+          // May throw if already initialized in this isolate, which is safe to ignore
+        }
+      }
+
       final config = await getDefaultVeilidConfig(
         isWeb: kIsWeb,
         programName: 'spheres',
