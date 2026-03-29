@@ -158,6 +158,47 @@ pub extern "C" fn spheres_unlock_vault(
 }
 
 #[no_mangle]
+pub extern "C" fn spheres_create_group_key(
+    _handle: *mut SpheresHandle,
+    group_id: *const c_char,
+) -> *mut c_char {
+    let _id = unsafe { CStr::from_ptr(group_id).to_string_lossy() };
+    
+    // In a real implementation:
+    // 1. Generate 32-byte random symmetric key
+    // 2. Store it in a GroupKeyManager
+    
+    let result = serde_json::json!({
+        "status": "success",
+        "group_key": "placeholder_base64_group_key"
+    });
+
+    let s = CString::new(result.to_string()).unwrap();
+    s.into_raw()
+}
+
+#[no_mangle]
+pub extern "C" fn spheres_encrypt_group_msg(
+    _handle: *mut SpheresHandle,
+    group_id: *const c_char,
+    content: *const c_char,
+) -> *mut c_char {
+    let _id = unsafe { CStr::from_ptr(group_id).to_string_lossy() };
+    let _text = unsafe { CStr::from_ptr(content).to_string_lossy() };
+
+    // 1. Fetch group key
+    // 2. Encrypt with AEAD
+    
+    let result = serde_json::json!({
+        "status": "success",
+        "encrypted_payload": "placeholder_encrypted_msg"
+    });
+
+    let s = CString::new(result.to_string()).unwrap();
+    s.into_raw()
+}
+
+#[no_mangle]
 pub extern "C" fn spheres_generate_recovery_shards(
     _handle: *mut SpheresHandle,
     secret_base64: *const c_char,

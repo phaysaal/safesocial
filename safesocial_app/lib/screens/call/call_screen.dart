@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../../services/call_service.dart';
 import '../../widgets/avatar.dart';
 
-/// Full-screen call UI — audio or video.
+/// Full-screen call UI — supports 1:1 and Group calls via a Mesh grid.
 class CallScreen extends StatefulWidget {
   const CallScreen({super.key});
 
@@ -15,24 +15,43 @@ class CallScreen extends StatefulWidget {
 
 class _CallScreenState extends State<CallScreen> {
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
-  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
+  final Map<String, RTCVideoRenderer> _remoteRenderers = {};
 
   @override
   void initState() {
     super.initState();
-    _initRenderers();
-  }
-
-  Future<void> _initRenderers() async {
-    await _localRenderer.initialize();
-    await _remoteRenderer.initialize();
+    _localRenderer.initialize();
   }
 
   @override
   void dispose() {
     _localRenderer.dispose();
-    _remoteRenderer.dispose();
+    for (var r in _remoteRenderers.values) {
+      r.dispose();
+    }
     super.dispose();
+  }
+
+  Future<void> _updateRemoteRenderers(Map<String, MediaStream> streams) async {
+    // Add new renderers
+    for (var entry in streams.entries) {
+      if (!_remoteRenderers.containsKey(entry.key)) {
+        final renderer = RTCVideoRenderer();
+        await renderer.initialize();
+        renderer.srcObject = entry.value;
+        setState(() {
+          _remoteRenderers[entry.key] = renderer;
+        });
+      }
+    }
+    // Remove old renderers
+    _remoteRenderers.removeWhere((key, renderer) {
+      if (!streams.containsKey(key)) {
+        renderer.dispose();
+        return true;
+      }
+      return false;
+    });
   }
 
   @override
@@ -40,30 +59,22 @@ class _CallScreenState extends State<CallScreen> {
     final callService = context.watch<CallService>();
     final isVideo = callService.callType == CallType.video;
 
-    // Update renderers
     _localRenderer.srcObject = callService.localStream;
-    _remoteRenderer.srcObject = callService.remoteStream;
+    _updateRemoteRenderers(callService.remoteStreams);
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
-            // ── Background / remote video ─────────────────────
-            if (isVideo && callService.state == CallState.connected)
-              Positioned.fill(
-                child: RTCVideoView(
-                  _remoteRenderer,
-                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                ),
-              )
+            // ── Video Grid (Remotes) ──────────────────────────
+            if (isVideo && _remoteRenderers.isNotEmpty)
+              _buildVideoGrid()
             else
-              // Audio call or connecting — show avatar
-              Positioned.fill(
-                child: _buildAudioBackground(callService),
-              ),
+              // Audio call or connecting — show avatars
+              _buildAudioBackground(callService),
 
-            // ── Local video (small, top-right) ────────────────
+            // ── Local video (small, floating) ────────────────
             if (isVideo && callService.localStream != null)
               Positioned(
                 top: 20,
@@ -71,8 +82,8 @@ class _CallScreenState extends State<CallScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: SizedBox(
-                    width: 120,
-                    height: 160,
+                    width: 100,
+                    height: 140,
                     child: RTCVideoView(
                       _localRenderer,
                       mirror: true,
@@ -82,209 +93,110 @@ class _CallScreenState extends State<CallScreen> {
                 ),
               ),
 
-            // ── Call info (top) ───────────────────────────────
-            Positioned(
-              top: 40,
-              left: 0,
-              right: 0,
-              child: Column(
-                children: [
-                  Text(
-                    callService.remoteContactName ?? 'Unknown',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _stateText(callService.state),
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.7),
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Incoming call buttons ─────────────────────────
-            if (callService.isIncomingCall &&
-                callService.state == CallState.ringing)
-              Positioned(
-                bottom: 60,
-                left: 0,
-                right: 0,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _CallButton(
-                      icon: Icons.call_end,
-                      color: Colors.red,
-                      label: 'Decline',
-                      onTap: () => callService.rejectCall(),
-                    ),
-                    _CallButton(
-                      icon: Icons.call,
-                      color: Colors.green,
-                      label: 'Accept',
-                      size: 72,
-                      onTap: () => callService.acceptCall(),
-                    ),
-                  ],
-                ),
-              ),
-
-            // ── In-call controls ──────────────────────────────
-            if (callService.state == CallState.connected ||
-                (callService.state == CallState.ringing &&
-                    !callService.isIncomingCall) ||
-                callService.state == CallState.connecting)
-              Positioned(
-                bottom: 40,
-                left: 0,
-                right: 0,
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _CallButton(
-                          icon: callService.isMuted
-                              ? Icons.mic_off
-                              : Icons.mic,
-                          color: callService.isMuted
-                              ? Colors.red
-                              : Colors.white24,
-                          label: 'Mute',
-                          onTap: () => callService.toggleMute(),
-                        ),
-                        if (isVideo)
-                          _CallButton(
-                            icon: callService.isCameraOff
-                                ? Icons.videocam_off
-                                : Icons.videocam,
-                            color: callService.isCameraOff
-                                ? Colors.red
-                                : Colors.white24,
-                            label: 'Camera',
-                            onTap: () => callService.toggleCamera(),
-                          ),
-                        _CallButton(
-                          icon: callService.isSpeakerOn
-                              ? Icons.volume_up
-                              : Icons.volume_down,
-                          color: callService.isSpeakerOn
-                              ? Colors.blue
-                              : Colors.white24,
-                          label: 'Speaker',
-                          onTap: () => callService.toggleSpeaker(),
-                        ),
-                        if (isVideo)
-                          _CallButton(
-                            icon: Icons.cameraswitch,
-                            color: Colors.white24,
-                            label: 'Flip',
-                            onTap: () => callService.switchCamera(),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    _CallButton(
-                      icon: Icons.call_end,
-                      color: Colors.red,
-                      label: 'End',
-                      size: 64,
-                      onTap: () {
-                        callService.endCall();
-                        Navigator.of(context).pop();
-                      },
-                    ),
-                  ],
-                ),
-              ),
+            // ── Controls ────────────────────────────────────
+            _buildControls(context, callService),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoGrid() {
+    final renderers = _remoteRenderers.values.toList();
+    return GridView.builder(
+      padding: const EdgeInsets.all(4),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: renderers.length > 2 ? 2 : 1,
+        mainAxisSpacing: 4,
+        crossAxisSpacing: 4,
+      ),
+      itemCount: renderers.length,
+      itemBuilder: (ctx, i) => ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: RTCVideoView(
+          renderers[i],
+          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
         ),
       ),
     );
   }
 
   Widget _buildAudioBackground(CallService callService) {
-    return Container(
-      color: const Color(0xFF1A1A2E),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            UserAvatar(
-              displayName: callService.remoteContactName ?? '?',
-              size: AvatarSize.large,
-            ),
-            const SizedBox(height: 24),
-            if (callService.state == CallState.ringing &&
-                callService.isIncomingCall)
-              Text(
-                'Incoming ${callService.callType.name} call...',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  fontSize: 16,
-                ),
-              ),
-          ],
-        ),
+    return Center(
+      child: Wrap(
+        spacing: 20,
+        runSpacing: 20,
+        alignment: WrapAlignment.center,
+        children: [
+          if (callService.remoteStreams.isEmpty)
+            UserAvatar(displayName: callService.remoteContactName ?? '?', size: AvatarSize.large)
+          else
+            ..._remoteRenderers.keys.map((k) => UserAvatar(displayName: k, size: AvatarSize.large)),
+        ],
       ),
     );
   }
 
-  String _stateText(CallState state) => switch (state) {
-        CallState.idle => '',
-        CallState.ringing => 'Ringing...',
-        CallState.connecting => 'Connecting...',
-        CallState.connected => 'Connected',
-        CallState.ended => 'Call ended',
-      };
+  Widget _buildControls(BuildContext context, CallService callService) {
+    return Positioned(
+      bottom: 40,
+      left: 0,
+      right: 0,
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _CallActionButton(
+                icon: callService.isMuted ? Icons.mic_off : Icons.mic,
+                onTap: () => callService.toggleMute(),
+                active: !callService.isMuted,
+              ),
+              if (callService.callType == CallType.video)
+                _CallActionButton(
+                  icon: callService.isCameraOff ? Icons.videocam_off : Icons.videocam,
+                  onTap: () => callService.toggleCamera(),
+                  active: !callService.isCameraOff,
+                ),
+              _CallActionButton(
+                icon: Icons.call_end,
+                onTap: () {
+                  callService.endCall();
+                  Navigator.pop(context);
+                },
+                color: Colors.red,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-/// Circular call control button.
-class _CallButton extends StatelessWidget {
+class _CallActionButton extends StatelessWidget {
   final IconData icon;
-  final Color color;
-  final String label;
-  final double size;
   final VoidCallback onTap;
+  final Color? color;
+  final bool active;
 
-  const _CallButton({
+  const _CallActionButton({
     required this.icon,
-    required this.color,
-    required this.label,
-    this.size = 56,
     required this.onTap,
+    this.color,
+    this.active = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: Colors.white, size: size * 0.45),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 11),
-        ),
-      ],
+    return IconButton(
+      onPressed: onTap,
+      iconSize: 32,
+      style: IconButton.styleFrom(
+        backgroundColor: color ?? (active ? Colors.white24 : Colors.red),
+        padding: const EdgeInsets.all(16),
+      ),
+      icon: Icon(icon, color: Colors.white),
     );
   }
 }

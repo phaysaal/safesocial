@@ -22,6 +22,8 @@ class RustCoreService extends ChangeNotifier {
   late _SpheresImportIdentityFunc _spheresImportIdentity;
   late _SpheresCreateVaultFunc _spheresCreateVault;
   late _SpheresUnlockVaultFunc _spheresUnlockVault;
+  late _SpheresCreateGroupKeyFunc _spheresCreateGroupKey;
+  late _SpheresEncryptGroupMsgFunc _spheresEncryptGroupMsg;
   late _SpheresStringFreeFunc _spheresStringFree;
 
   bool _isInitialized = false;
@@ -63,6 +65,12 @@ class RustCoreService extends ChangeNotifier {
       _spheresUnlockVault = _lib
           .lookup<ffi.NativeFunction<_SpheresUnlockVaultNative>>('spheres_unlock_vault')
           .asFunction();
+      _spheresCreateGroupKey = _lib
+          .lookup<ffi.NativeFunction<_SpheresCreateGroupKeyNative>>('spheres_create_group_key')
+          .asFunction();
+      _spheresEncryptGroupMsg = _lib
+          .lookup<ffi.NativeFunction<_SpheresEncryptGroupMsgNative>>('spheres_encrypt_group_msg')
+          .asFunction();
       _spheresStringFree = _lib
           .lookup<ffi.NativeFunction<_SpheresStringFreeNative>>('spheres_string_free')
           .asFunction();
@@ -99,6 +107,28 @@ class RustCoreService extends ChangeNotifier {
     malloc.free(secretPtr);
 
     _spheresStringFree(resultPtr);
+  }
+
+  String? createGroupKey(String groupId) {
+    if (!_isInitialized || _handle == null) return null;
+    final idPtr = groupId.toNativeUtf8();
+    final resultPtr = _spheresCreateGroupKey(_handle!, idPtr.cast<ffi.Char>());
+    malloc.free(idPtr);
+    final result = resultPtr.cast<Utf8>().toDartString();
+    _spheresStringFree(resultPtr);
+    return result;
+  }
+
+  String? encryptGroupMessage(String groupId, String content) {
+    if (!_isInitialized || _handle == null) return null;
+    final idPtr = groupId.toNativeUtf8();
+    final contentPtr = content.toNativeUtf8();
+    final resultPtr = _spheresEncryptGroupMsg(_handle!, idPtr.cast<ffi.Char>(), contentPtr.cast<ffi.Char>());
+    malloc.free(idPtr);
+    malloc.free(contentPtr);
+    final result = resultPtr.cast<Utf8>().toDartString();
+    _spheresStringFree(resultPtr);
+    return result;
   }
 
   String? exportIdentity(String sessionSecretBase64) {
@@ -227,6 +257,16 @@ typedef _SpheresUnlockVaultNative = ffi.Pointer<ffi.Char> Function(
     ffi.Pointer handle, ffi.Pointer<ffi.Char> vaultBlobB64, ffi.Pointer<ffi.Char> passphrase);
 typedef _SpheresUnlockVaultFunc = ffi.Pointer<ffi.Char> Function(
     ffi.Pointer handle, ffi.Pointer<ffi.Char> vaultBlobB64, ffi.Pointer<ffi.Char> passphrase);
+
+typedef _SpheresCreateGroupKeyNative = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> groupId);
+typedef _SpheresCreateGroupKeyFunc = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> groupId);
+
+typedef _SpheresEncryptGroupMsgNative = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> groupId, ffi.Pointer<ffi.Char> content);
+typedef _SpheresEncryptGroupMsgFunc = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> groupId, ffi.Pointer<ffi.Char> content);
 
 typedef _SpheresStringFreeNative = ffi.Void Function(ffi.Pointer<ffi.Char> s);
 typedef _SpheresStringFreeFunc = void Function(ffi.Pointer<ffi.Char> s);
