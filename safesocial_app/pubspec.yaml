@@ -1,7 +1,7 @@
 name: spheres_app
 description: Spheres — Decentralized P2P Social Network
 publish_to: 'none'
-version: 0.3.2+3
+version: 0.3.3+4
 
 environment:
   sdk: '>=3.8.0 <4.0.0'

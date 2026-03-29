@@ -211,15 +211,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       return Column(
                         children: [
                           Text(
-                            'Backend failed to start',
-                            style: TextStyle(color: cs.error, fontSize: 14),
+                            vs.error ?? 'Backend failed to start',
+                            style: TextStyle(color: cs.error, fontSize: 12),
                             textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 8),
                           ElevatedButton(
                             onPressed: () async {
-                              final main = context.read<IdentityService>().veilidService;
-                              await main.retryInitialize();
+                              await context.read<IdentityService>().veilidService.retryInitialize();
                             },
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.all(18),
@@ -232,6 +233,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                             ),
                           ),
+                          if (vs.isProtectedStoreError) ...[
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: () async {
+                                await context.read<IdentityService>().veilidService.clearStateAndRetry();
+                              },
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.all(16),
+                                side: BorderSide(color: cs.error),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              child: Text(
+                                'Clear Corrupted Data & Retry',
+                                style: TextStyle(fontSize: 14, color: cs.error),
+                              ),
+                            ),
+                          ],
                         ],
                       );
                     }

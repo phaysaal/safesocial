@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:veilid/veilid.dart';
@@ -139,6 +140,32 @@ class VeilidService extends ChangeNotifier {
     if (_isInitialized || _statePath == null) return;
     await initialize(_statePath!);
   }
+
+  /// Wipe Veilid state directories and retry — use when ProtectedStore is corrupted.
+  Future<void> clearStateAndRetry() async {
+    if (_isInitialized || _statePath == null) return;
+    DebugLogService().warn('Veilid', 'Clearing corrupted state at $_statePath…');
+    try {
+      final dir = Directory(_statePath!);
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+      await Directory(_statePath!).create(recursive: true);
+      await Directory('$_statePath/protected_store').create(recursive: true);
+      await Directory('$_statePath/table_store').create(recursive: true);
+      await Directory('$_statePath/block_store').create(recursive: true);
+      DebugLogService().info('Veilid', 'State cleared — retrying…');
+    } catch (e) {
+      DebugLogService().error('Veilid', 'Failed to clear state: $e');
+    }
+    await initialize(_statePath!);
+  }
+
+  /// Returns true if the error looks like a ProtectedStore corruption.
+  bool get isProtectedStoreError =>
+      _error != null &&
+      (_error!.toLowerCase().contains('protected store') ||
+       _error!.toLowerCase().contains('protectedstore'));
 
   /// Shut down the Veilid node and release resources.
   Future<void> shutdown() async {
