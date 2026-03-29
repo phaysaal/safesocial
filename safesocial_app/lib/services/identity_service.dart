@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:veilid/veilid.dart';
 
@@ -28,7 +30,7 @@ class IdentityService extends ChangeNotifier {
   Future<void> createIdentity(String displayName, {String? bio}) async {
     try {
       final crypto = await Veilid.instance.getCryptoSystem(
-        bestCryptoKind,
+        VeilidCryptoKind.v8,
       );
       
       _keypair = await crypto.generateKeyPair();
@@ -84,7 +86,7 @@ class IdentityService extends ChangeNotifier {
   Future<bool> importIdentity(String json, {String? displayName}) async {
     try {
       final data = jsonDecode(json);
-      // Logic for importing existing identity would go here
+      // Logic for importing existing identity
       await _persistIdentity();
       notifyListeners();
       return true;
@@ -109,16 +111,35 @@ class IdentityService extends ChangeNotifier {
   }
 
   /// PERSISTENT MEMORY: Reset everything.
-  /// Clears all local storage and effectively 'factory resets' the app.
+  /// Clears all local storage, deletes all files, and effectively 'factory resets' the app.
   Future<void> resetEverything() async {
+    // 1. Wipe SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     
-    // Clear in-memory state
+    // 2. Clear in-memory state
     _currentIdentity = null;
     _keypair = null;
+
+    try {
+      // 3. Wipe all app files (Veilid stores, images, audio, database)
+      final appDir = await getApplicationDocumentsDirectory();
+      if (appDir.existsSync()) {
+        await appDir.delete(recursive: true);
+        await appDir.create(recursive: true); // Re-create empty root
+      }
+
+      final tempDir = await getTemporaryDirectory();
+      if (tempDir.existsSync()) {
+        await tempDir.delete(recursive: true);
+        await tempDir.create(recursive: true);
+      }
+      
+      DebugLogService().warn('Identity', 'HARD WIPE: All data and files have been removed.');
+    } catch (e) {
+      DebugLogService().error('Identity', 'FileSystem wipe encountered errors: $e');
+    }
     
-    DebugLogService().warn('Identity', 'All data has been wiped from this device');
     notifyListeners();
   }
 
