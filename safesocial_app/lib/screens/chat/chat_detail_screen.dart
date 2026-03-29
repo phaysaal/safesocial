@@ -1,6 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/message.dart';
 import '../../services/chat_service.dart';
@@ -28,9 +34,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _scrollController = ScrollController();
   bool _hasText = false;
 
+  // Voice Note
+  late AudioRecorder _audioRecorder;
+  bool _isRecording = false;
+  String? _audioPath;
+
   @override
   void initState() {
     super.initState();
+    _audioRecorder = AudioRecorder();
     context.read<ChatService>().setActiveConversation(widget.conversationId);
     _messageController.addListener(() {
       final has = _messageController.text.trim().isNotEmpty;
@@ -40,6 +52,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    _audioRecorder.dispose();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -54,6 +67,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         .read<ChatService>()
         .sendMessage(widget.conversationId, text);
 
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -63,6 +80,45 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         );
       }
     });
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      if (await Permission.microphone.request().isGranted) {
+        final dir = await getApplicationDocumentsDirectory();
+        final path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        
+        const config = RecordConfig();
+        await _audioRecorder.start(config, path: path);
+        
+        setState(() {
+          _isRecording = true;
+          _audioPath = path;
+        });
+      }
+    } catch (e) {
+      debugPrint('[VoiceNote] Error starting recording: $e');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      final path = await _audioRecorder.stop();
+      setState(() {
+        _isRecording = false;
+      });
+
+      if (path != null) {
+        await context.read<ChatService>().sendMessage(
+          widget.conversationId,
+          '[Voice Note]',
+          audioRef: path,
+        );
+        _scrollToBottom();
+      }
+    } catch (e) {
+      debugPrint('[VoiceNote] Error stopping recording: $e');
+    }
   }
 
   void _showEmoticonPicker(BuildContext context) {
@@ -102,6 +158,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             '[Image]',
             mediaRefs: [path],
           );
+      _scrollToBottom();
     }
   }
 
@@ -282,89 +339,128 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Emoticon picker
-                  IconButton(
-                    icon: Icon(Icons.emoji_emotions_outlined,
-                        color: cs.primary, size: 26),
-                    onPressed: () => _showEmoticonPicker(context),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 36,
-                      minHeight: 36,
+                  if (!_isRecording) ...[
+                    // Emoticon picker
+                    IconButton(
+                      icon: Icon(Icons.emoji_emotions_outlined,
+                          color: cs.primary, size: 26),
+                      onPressed: () => _showEmoticonPicker(context),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
                     ),
-                  ),
-                  // Attachment buttons
-                  IconButton(
-                    icon: Icon(Icons.add_circle,
-                        color: cs.primary, size: 28),
-                    onPressed: _attachMedia,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 36,
-                      minHeight: 36,
+                    // Attachment buttons
+                    IconButton(
+                      icon: Icon(Icons.add_circle,
+                          color: cs.primary, size: 28),
+                      onPressed: _attachMedia,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
                     ),
-                  ),
+                  ],
 
-                  // Text input
+                  // Text input or recording state
                   Expanded(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: TextField(
-                        controller: _messageController,
-                        decoration: const InputDecoration(
-                          hintText: 'Aa',
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
+                    child: _isRecording
+                        ? _buildRecordingStatus(theme, cs)
+                        : Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            decoration: BoxDecoration(
+                              color: cs.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: TextField(
+                              controller: _messageController,
+                              decoration: const InputDecoration(
+                                hintText: 'Aa',
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                isDense: true,
+                              ),
+                              textCapitalization: TextCapitalization.sentences,
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => _sendMessage(),
+                              maxLines: 4,
+                              minLines: 1,
+                            ),
                           ),
-                          isDense: true,
-                        ),
-                        textCapitalization: TextCapitalization.sentences,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _sendMessage(),
-                        maxLines: 4,
-                        minLines: 1,
-                      ),
-                    ),
                   ),
 
-                  // Send or like button
-                  _hasText
-                      ? IconButton(
-                          icon: Icon(Icons.send_rounded,
-                              color: cs.primary, size: 24),
-                          onPressed: _sendMessage,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 36,
-                            minHeight: 36,
-                          ),
-                        )
-                      : IconButton(
-                          icon: Icon(Icons.thumb_up,
-                              color: cs.primary, size: 24),
-                          onPressed: () {
-                            context.read<ChatService>().sendMessage(
-                                  widget.conversationId,
-                                  '\u{1F44D}',
-                                );
-                          },
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 36,
-                            minHeight: 36,
-                          ),
+                  // Send, like or Mic button
+                  if (_isRecording)
+                    IconButton(
+                      icon: const Icon(Icons.send_rounded, color: Colors.green, size: 24),
+                      onPressed: _stopRecording,
+                    )
+                  else if (_hasText)
+                    IconButton(
+                      icon: Icon(Icons.send_rounded,
+                          color: cs.primary, size: 24),
+                      onPressed: _sendMessage,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
+                    )
+                  else
+                    GestureDetector(
+                      onLongPressStart: (_) => _startRecording(),
+                      onLongPressEnd: (_) => _stopRecording(),
+                      child: IconButton(
+                        icon: Icon(Icons.mic_none_rounded,
+                            color: cs.primary, size: 26),
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Hold to record voice note')),
+                          );
+                        },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
                         ),
+                      ),
+                    ),
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecordingStatus(ThemeData theme, ColorScheme cs) {
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: cs.errorContainer.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.fiber_manual_record, color: Colors.red, size: 12),
+          const SizedBox(width: 8),
+          const Text('Recording...', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          const Spacer(),
+          TextButton(
+            onPressed: () async {
+              await _audioRecorder.stop();
+              setState(() => _isRecording = false);
+            },
+            child: const Text('Cancel'),
           ),
         ],
       ),

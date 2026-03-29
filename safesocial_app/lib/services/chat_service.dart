@@ -59,7 +59,7 @@ class ChatService extends ChangeNotifier {
 
   List<String> getConversationIds() => _conversations.keys.toList();
 
-  Future<void> sendMessage(String contactPublicKey, String content, {List<String>? mediaRefs}) async {
+  Future<void> sendMessage(String contactPublicKey, String content, {List<String>? mediaRefs, String? audioRef}) async {
     final message = Message(
       id: const Uuid().v4(),
       senderId: _myPublicKey ?? 'self',
@@ -67,6 +67,7 @@ class ChatService extends ChangeNotifier {
       content: content,
       timestamp: DateTime.now(),
       mediaRefs: mediaRefs ?? [],
+      audioRef: audioRef,
     );
 
     _addMessageLocally(contactPublicKey, message);

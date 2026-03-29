@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/message.dart';
 import 'emoticon_picker.dart';
 import 'media_preview.dart';
+import 'voice_note_player.dart';
 
 /// Chat message bubble.
 /// Sent: right-aligned, theme primary color.
@@ -66,6 +67,15 @@ class MessageBubble extends StatelessWidget {
                   children: message.mediaRefs
                       .map((ref) => MediaPreview(mediaRef: ref))
                       .toList(),
+                ),
+                const SizedBox(height: 6),
+              ],
+
+              // Voice note
+              if (message.audioRef != null) ...[
+                VoiceNotePlayer(
+                  audioPath: message.audioRef!,
+                  isMine: isMine,
                 ),
                 const SizedBox(height: 6),
               ],

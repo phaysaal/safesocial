@@ -9,6 +9,7 @@ class Message with EquatableMixin {
   final DateTime timestamp;
   final bool delivered;
   final List<String> mediaRefs;
+  final String? audioRef;
 
   const Message({
     required this.id,
@@ -18,6 +19,7 @@ class Message with EquatableMixin {
     required this.timestamp,
     this.delivered = false,
     this.mediaRefs = const [],
+    this.audioRef,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,7 @@ class Message with EquatableMixin {
               ?.map((e) => e as String)
               .toList() ??
           [],
+      audioRef: json['audioRef'] as String?,
     );
   }
 
@@ -44,6 +47,7 @@ class Message with EquatableMixin {
       'timestamp': timestamp.toIso8601String(),
       'delivered': delivered,
       'mediaRefs': mediaRefs,
+      'audioRef': audioRef,
     };
   }
 
@@ -55,6 +59,7 @@ class Message with EquatableMixin {
     DateTime? timestamp,
     bool? delivered,
     List<String>? mediaRefs,
+    String? audioRef,
   }) {
     return Message(
       id: id ?? this.id,
@@ -64,10 +69,11 @@ class Message with EquatableMixin {
       timestamp: timestamp ?? this.timestamp,
       delivered: delivered ?? this.delivered,
       mediaRefs: mediaRefs ?? this.mediaRefs,
+      audioRef: audioRef ?? this.audioRef,
     );
   }
 
   @override
   List<Object?> get props =>
-      [id, senderId, recipientId, content, timestamp, delivered, mediaRefs];
+      [id, senderId, recipientId, content, timestamp, delivered, mediaRefs, audioRef];
 }
