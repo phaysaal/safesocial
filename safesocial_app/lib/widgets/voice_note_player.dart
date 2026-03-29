@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:audio_waveforms/audio_waveforms.dart';
 import 'dart:io';
 
+/// A modern voice note player with waveform visualization.
 class VoiceNotePlayer extends StatefulWidget {
   final String audioPath;
   final bool isMine;
@@ -17,82 +18,93 @@ class VoiceNotePlayer extends StatefulWidget {
 }
 
 class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  bool _isPlaying = false;
-  Duration _duration = Duration.zero;
-  Duration _position = Duration.zero;
+  late PlayerController _playerController;
+  bool _isPrepared = false;
 
   @override
   void initState() {
     super.initState();
-    _initPlayer();
+    _playerController = PlayerController();
+    _preparePlayer();
   }
 
-  Future<void> _initPlayer() async {
-    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
-    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
-    _audioPlayer.onPlayerComplete.listen((_) {
-      setState(() {
-        _isPlaying = false;
-        _position = Duration.zero;
-      });
-    });
+  Future<void> _preparePlayer() async {
+    try {
+      await _playerController.preparePlayer(
+        path: widget.audioPath,
+        shouldExtractWaveform: true,
+        noOfSamples: 100,
+        volume: 1.0,
+      );
+      if (mounted) {
+        setState(() {
+          _isPrepared = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('[VoiceNote] Failed to prepare player: $e');
+    }
   }
 
   @override
   void dispose() {
-    _audioPlayer.dispose();
+    _playerController.dispose();
     super.dispose();
   }
 
   void _togglePlay() async {
-    if (_isPlaying) {
-      await _audioPlayer.pause();
+    if (_playerController.playerState.isPlaying) {
+      await _playerController.pausePlayer();
     } else {
-      await _audioPlayer.play(DeviceFileSource(widget.audioPath));
+      await _playerController.startPlayer();
     }
-    setState(() => _isPlaying = !_isPlaying);
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.isMine ? Colors.white : Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final color = widget.isMine ? Colors.white : theme.colorScheme.primary;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: color),
-            onPressed: _togglePlay,
-          ),
-          Expanded(
-            child: Slider(
-              value: _position.inMilliseconds.toDouble(),
-              max: _duration.inMilliseconds.toDouble() > 0 
-                  ? _duration.inMilliseconds.toDouble() 
-                  : 1.0,
-              activeColor: color,
-              inactiveColor: color.withValues(alpha: 0.3),
-              onChanged: (val) {
-                _audioPlayer.seek(Duration(milliseconds: val.toInt()));
-              },
+            icon: Icon(
+              _playerController.playerState.isPlaying ? Icons.pause : Icons.play_arrow,
+              color: color,
             ),
+            onPressed: _isPrepared ? _togglePlay : null,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           ),
-          Text(
-            _formatDuration(_duration - _position),
-            style: TextStyle(color: color, fontSize: 12),
-          ),
+          const SizedBox(width: 4),
+          if (!_isPrepared)
+            SizedBox(
+              width: 150,
+              height: 30,
+              child: LinearProgressIndicator(
+                backgroundColor: color.withValues(alpha: 0.1),
+                valueColor: AlwaysStoppedAnimation<Color>(color.withValues(alpha: 0.3)),
+              ),
+            )
+          else
+            AudioFileWaveforms(
+              size: const Size(150, 30),
+              playerController: _playerController,
+              enableSeekGesture: true,
+              waveformType: WaveformType.fitWidth,
+              playerWaveStyle: PlayerWaveStyle(
+                fixedWaveColor: color.withValues(alpha: 0.3),
+                liveWaveColor: color,
+                spacing: 3,
+                waveThickness: 2.5,
+              ),
+            ),
         ],
       ),
     );
-  }
-
-  String _formatDuration(Duration d) {
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-    String twoDigitMinutes = twoDigits(d.inMinutes.remainder(60));
-    String twoDigitSeconds = twoDigits(d.inSeconds.remainder(60));
-    return "$twoDigitMinutes:$twoDigitSeconds";
   }
 }

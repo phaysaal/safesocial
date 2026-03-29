@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import 'package:record/record.dart';
+import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -35,14 +35,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _hasText = false;
 
   // Voice Note
-  late AudioRecorder _audioRecorder;
+  late final RecorderController _recorderController;
   bool _isRecording = false;
   String? _audioPath;
 
   @override
   void initState() {
     super.initState();
-    _audioRecorder = AudioRecorder();
+    _recorderController = RecorderController()
+      ..androidEncoder = AndroidEncoder.aac
+      ..androidOutputFormat = AndroidOutputFormat.mpeg4
+      ..iosEncoder = IosEncoder.kAudioFormatMPEG4AAC
+      ..sampleRate = 44100;
+
     context.read<ChatService>().setActiveConversation(widget.conversationId);
     _messageController.addListener(() {
       final has = _messageController.text.trim().isNotEmpty;
@@ -52,7 +57,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
-    _audioRecorder.dispose();
+    _recorderController.dispose();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -88,8 +93,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final dir = await getApplicationDocumentsDirectory();
         final path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
         
-        const config = RecordConfig();
-        await _audioRecorder.start(config, path: path);
+        await _recorderController.record(path: path);
         
         setState(() {
           _isRecording = true;
@@ -103,7 +107,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   Future<void> _stopRecording() async {
     try {
-      final path = await _audioRecorder.stop();
+      final path = await _recorderController.stop();
       setState(() {
         _isRecording = false;
       });
@@ -130,7 +134,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       builder: (ctx) => EmoticonPicker(
         onSelected: (code) {
-          // Insert #code# at cursor position
           final text = _messageController.text;
           final selection = _messageController.selection;
           final insert = '#$code#';
@@ -451,13 +454,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.fiber_manual_record, color: Colors.red, size: 12),
-          const SizedBox(width: 8),
-          const Text('Recording...', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          AudioWaveforms(
+            size: const Size(100, 30),
+            recorderController: _recorderController,
+            enableGesture: false,
+            waveStyle: WaveStyle(
+              waveColor: Colors.red,
+              showMiddleLine: false,
+              spacing: 4,
+              extendWaveform: true,
+            ),
+          ),
           const Spacer(),
           TextButton(
             onPressed: () async {
-              await _audioRecorder.stop();
+              await _recorderController.stop();
               setState(() => _isRecording = false);
             },
             child: const Text('Cancel'),

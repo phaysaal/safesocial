@@ -35,6 +35,7 @@ dependencies:
   image: ^4.3.0
   record: ^6.0.0
   audioplayers: ^5.2.1
+  audio_waveforms: ^1.0.5
   ffi: ^2.1.2
 
 dev_dependencies:
