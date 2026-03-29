@@ -18,6 +18,7 @@ import 'services/debug_log_service.dart';
 import 'services/rust_core_service.dart';
 import 'services/sync_service.dart';
 import 'services/ring_service.dart';
+import 'services/album_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,6 +35,7 @@ void main() async {
   final rustCoreService = RustCoreService();
   final syncService = SyncService();
   final ringService = RingService();
+  final albumService = AlbumService();
 
   // Load theme (no Veilid needed)
   await themeService.load();
@@ -54,6 +56,7 @@ void main() async {
   await groupService.loadGroups();
   await feedService.loadPosts();
   await ringService.loadRings();
+  await albumService.loadAlbums();
 
   // Set my info for contact handshakes
   if (identityService.publicKey != null) {
@@ -61,7 +64,7 @@ void main() async {
   }
 
   // Set up relay for existing contacts — works WITHOUT Veilid
-  _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
+  _connectRelay(identityService, chatService, feedService, groupService, contactService, callService, albumService);
 
   // Start Veilid and Rust Core in the background AFTER the app is running
   WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -89,7 +92,7 @@ void main() async {
       }
 
       // Reconnect relay with any new identity from Veilid
-      _connectRelay(identityService, chatService, feedService, groupService, contactService, callService);
+      _connectRelay(identityService, chatService, feedService, groupService, contactService, callService, albumService);
     } catch (e) {
       DebugLogService().error('Main', 'Backend startup failed: $e');
     }
@@ -110,6 +113,7 @@ void main() async {
         ChangeNotifierProvider.value(value: rustCoreService),
         ChangeNotifierProvider.value(value: syncService),
         ChangeNotifierProvider.value(value: ringService),
+        ChangeNotifierProvider.value(value: albumService),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),
@@ -125,6 +129,7 @@ void _connectRelay(
   GroupService groupService,
   ContactService contactService,
   CallService callService,
+  AlbumService albumService,
 ) {
   final pubKey = identityService.publicKey;
   if (pubKey == null || pubKey.isEmpty) return;
@@ -137,6 +142,7 @@ void _connectRelay(
   }
   feedService.initSync(pubKey, contactService.contacts);
   groupService.initSync(pubKey);
+  albumService.initSync(pubKey);
 
   DebugLogService().success('Main', 'Relay connected for ${contactService.contacts.length} contacts');
 }

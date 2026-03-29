@@ -16,6 +16,8 @@ import 'screens/feed/feed_screen.dart';
 import 'screens/contacts/contact_list_screen.dart';
 import 'screens/contacts/add_contact_screen.dart';
 import 'screens/contacts/manage_rings_screen.dart';
+import 'screens/media/album_list_screen.dart';
+import 'screens/media/album_detail_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
@@ -116,6 +118,16 @@ class _SpheresAppState extends State<SpheresApp> {
         GoRoute(
           path: '/call',
           builder: (context, state) => const CallScreen(),
+        ),
+        GoRoute(
+          path: '/albums',
+          builder: (context, state) => const AlbumListScreen(),
+        ),
+        GoRoute(
+          path: '/album/:id',
+          builder: (context, state) => AlbumDetailScreen(
+            albumId: state.pathParameters['id']!,
+          ),
         ),
         GoRoute(
           path: '/contacts/add',
