@@ -28,10 +28,11 @@ gh release create "$VERSION" \
   --title "v$VERSION" \
   --generate-notes
 
-# 3. Update landing page version references
+# 3. Update landing page — replace every version string and download URL
 echo "Updating landing page to v$VERSION..."
-PREV=$(grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' landing/index.html | head -1)
-sed -i "s/${PREV}/v${VERSION}/g" landing/index.html
+# Replace all vX.Y.Z occurrences (button captions, headings, paragraph text)
+sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${VERSION}/g" landing/index.html
+# Replace the download URL version (releases/download/X.Y.Z/app...)
 sed -i "s|releases/download/[0-9.]\+/app|releases/download/${VERSION}/app|g" landing/index.html
 
 # 4. Deploy to Cloudflare Pages
