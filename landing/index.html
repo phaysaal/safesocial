@@ -74,6 +74,8 @@
       line-height: 1.1;
     }
 
+    .hero h1 span { color: #ffd1d1; }
+
     .hero p {
       font-size: 20px;
       max-width: 700px;
@@ -179,7 +181,7 @@
 
     .footer-links {
       display: flex;
-      justify-content: center;
+      justify(content: center);
       gap: 30px;
       margin-bottom: 20px;
     }
@@ -211,9 +213,9 @@
 
   <section class="hero">
     <div class="container">
-      <h1>Your life. Your network.<br>Absolute privacy.</h1>
-      <p>Spheres is a decentralized social network designed for close-knit circles. No algorithms, no ads, and zero server-side storage. Just you and the people who matter most.</p>
-      <a href="#download" class="btn btn-primary">Download Spheres v0.2.0</a>
+      <h1>Your life. Your network.<br><span>Absolute privacy.</span></h1>
+      <p>Spheres v0.3.0: The "Circle of Trust" update is here. A decentralized social network designed for close-knit circles. No algorithms, no ads, and zero server-side storage.</p>
+      <a href="#download" class="btn btn-primary">Download Spheres v0.3.0</a>
     </div>
   </section>
 
@@ -221,21 +223,21 @@
     <div class="container">
       <div class="section-title">
         <h2>Built for your Close Circle</h2>
-        <p>Most social networks want your time. We want your trust. Spheres is built to replace the "noise" with a high-fidelity connection to your real world.</p>
+        <p>Most social networks want your time. We want your trust. Spheres replaces the "noise" with high-fidelity connections.</p>
       </div>
       
       <div class="goals-grid">
         <div class="card">
-          <h3>Anti-Addiction</h3>
-          <p>By removing algorithmic feeds and "discovery" tabs, we eliminate the endless scroll. See what your friends are doing, then get back to your life.</p>
+          <h3>NEW: Voice Notes</h3>
+          <p>Express yourself with secure voice messages featuring real-time waveform visualization. Perfect for quick, personal updates.</p>
         </div>
         <div class="card">
-          <h3>No Network Pollution</h3>
-          <p>Spheres is a utility, not a broadcast platform. It is designed for verified contacts only, preventing spam, bots, and public harassment.</p>
+          <h3>NEW: Shared Albums</h3>
+          <p>Collaborate on photo collections with your circle. Every contribution is synced P2P and encrypted end-to-end.</p>
         </div>
         <div class="card">
-          <h3>Zero Server Metadata</h3>
-          <p>Traditional apps know who you talk to even if they can't read your messages. Spheres hides your social graph from everyone, including us.</p>
+          <h3>NEW: On This Day</h3>
+          <p>Relive your favorite moments. Our local-first memory engine surfaces past posts from this day in previous years.</p>
         </div>
       </div>
     </div>
@@ -245,7 +247,7 @@
     <div class="container">
       <div class="section-title">
         <h2>"Military Grade" Security</h2>
-        <p>Technically honest privacy. We've moved the goalposts for what a mobile app can protect.</p>
+        <p>Spheres v0.3.0 features our most advanced privacy architecture yet.</p>
       </div>
 
       <div class="security-grid">
@@ -253,42 +255,42 @@
           <div class="security-icon">🛡️</div>
           <div>
             <h4>Double Ratchet Forward Secrecy</h4>
-            <p>Every single message uses a unique, ephemeral key. If your device is compromised today, your message history remains encrypted and unreadable.</p>
+            <p>Every single message uses a unique, ephemeral key. Past message history remains unreadable even if current keys are compromised.</p>
           </div>
         </div>
         <div class="security-item">
           <div class="security-icon">🧅</div>
           <div>
             <h4>Onion Routing (Veilid)</h4>
-            <p>All traffic is routed through multiple peer nodes. Your IP address is never revealed to your contacts or the network infrastructure.</p>
+            <p>All traffic is masked by multiple peer nodes. Your IP address is never revealed to your contacts or the network infrastructure.</p>
           </div>
         </div>
         <div class="security-item">
           <div class="security-icon">👥</div>
           <div>
             <h4>Social Identity Recovery</h4>
-            <p>No phone number or email required. Trust your close circle with encrypted fragments of your key via Shamir's Secret Sharing to rebuild your identity if you lose your phone.</p>
+            <p>No phone number or email required. Trust your close circle with encrypted fragments of your key via Shamir's Secret Sharing.</p>
+          </div>
+        </div>
+        <div class="security-item">
+          <div class="security-icon">📦</div>
+          <div>
+            <h4>Encrypted Vault Backups</h4>
+            <p>Export your entire social network and history into a single, passphrase-secured .spheres file for safe cold storage.</p>
+          </div>
+        </div>
+        <div class="security-item">
+          <div class="security-icon">💍</div>
+          <div>
+            <h4>Audience Rings</h4>
+            <p>Organize contacts into private circles. You decide exactly which group sees every post through multi-wrapped encryption.</p>
           </div>
         </div>
         <div class="security-item">
           <div class="security-icon">✨</div>
           <div>
             <h4>Metadata Scrubbing</h4>
-            <p>Our app automatically strips GPS coordinates, camera models, and timestamps from photos and videos before they are shared, preventing accidental location leaks.</p>
-          </div>
-        </div>
-        <div class="security-item">
-          <div class="security-icon">⚡</div>
-          <div>
-            <h4>Zero-Knowledge Signaling</h4>
-            <p>Our relay uses salted SHA-256 room identifiers. Even with physical access to our relay, an observer cannot tell who is talking to whom.</p>
-          </div>
-        </div>
-        <div class="security-item">
-          <div class="security-icon">🦀</div>
-          <div>
-            <h4>Auditable Rust Core</h4>
-            <p>All security logic is implemented in memory-safe Rust, protecting the app from the buffer overflow exploits typically used in targeted surveillance.</p>
+            <p>The app automatically strips GPS coordinates and device IDs from media before sharing, preventing accidental location leaks.</p>
           </div>
         </div>
       </div>
@@ -298,28 +300,27 @@
   <section id="download" class="section">
     <div class="container">
       <div class="section-title">
-        <h2>Get Started</h2>
+        <h2>Get Started with v0.3.0</h2>
         <p>Start your private network today. All data stays on your device.</p>
       </div>
 
       <div class="card apk-card">
         <img src="https://raw.githubusercontent.com/phaysaal/safesocial/main/safesocial_app/assets/images/icon_1024.png" alt="Spheres" style="width: 80px; margin-bottom: 20px; border-radius: 20px;">
         <h3>Download Spheres for Android</h3>
-        <p style="margin-bottom: 30px;">v0.2.0-alpha &bull; No ads &bull; Open Source</p>
+        <p style="margin-bottom: 30px;">v0.3.0-alpha &bull; (stealth version) &bull; Open Source</p>
         
-        <a href="https://github.com/phaysaal/safesocial/releases/download/0.2.0/app-release.apk" class="btn download-btn">Download for Android (stealth version)</a>
+        <a href="https://github.com/phaysaal/safesocial/releases/download/0.3.0/app-release.apk" class="btn download-btn">Download Full APK (v0.3.0)</a>
       </div>
     </div>
   </section>
 
   <footer>
     <div class="container">
+      <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 10px;">Part of the <strong>SafeSelf</strong> project. Your data. Your network. Your rules.</p>
       <div class="footer-links">
-        <a href="https://github.com/phaysaal/safesocial">GitHub Repository</a>
-        <a href="https://veilid.com">Built on Veilid</a>
-        <a href="#">Privacy Protocol</a>
+        <a href="https://github.com/phaysaal/safesocial">GitHub</a>
+        <a href="https://veilid.com">Veilid</a>
       </div>
-      <p style="color: var(--text-muted); font-size: 12px;">Part of the <strong>SafeSelf</strong> project. Your data. Your network. Your rules.</p>
     </div>
   </footer>
 
