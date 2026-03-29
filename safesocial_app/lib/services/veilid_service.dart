@@ -101,16 +101,21 @@ class VeilidService extends ChangeNotifier {
       );
 
       // Step 4: Attach to the network (non-blocking — attachment state comes via updates).
+      DebugLogService().info('Veilid', 'Calling attach()…');
       await Veilid.instance.attach();
+      DebugLogService().info('Veilid', 'attach() returned — waiting for network…');
 
-      // Step 5: Create a basic routing context.
-      // Avoid safeRoutingContext() — its internal cast (as SafetySelectionSafe)
-      // throws TypeError if the node's default safety isn't what it expects.
-      _routingContext = await Veilid.instance.routingContext();
+      // Step 5: Create a basic routing context (with timeout — can hang on some devices).
+      DebugLogService().info('Veilid', 'Creating routing context…');
+      _routingContext = await Future.any([
+        Veilid.instance.routingContext(),
+        Future.delayed(const Duration(seconds: 10))
+            .then((_) => throw TimeoutException('routingContext() timed out after 10s')),
+      ]);
 
       _isInitialized = true;
       _isInitializing = false;
-      DebugLogService().success('Veilid', 'Core started — attaching to network…');
+      DebugLogService().success('Veilid', 'Ready — watching for peers…');
       notifyListeners();
     } on TimeoutException catch (e) {
       _isInitializing = false;
@@ -222,23 +227,26 @@ class VeilidService extends ChangeNotifier {
   void _handleUpdate(VeilidUpdate update) {
     switch (update) {
       case VeilidUpdateAttachment(:final state):
-        final wasAttached = _isAttached;
+        final wasState = _attachmentState;
         _attachmentState = state;
         _isAttached = state == AttachmentState.attachedWeak ||
             state == AttachmentState.attachedGood ||
             state == AttachmentState.attachedStrong ||
             state == AttachmentState.fullyAttached ||
             state == AttachmentState.overAttached;
-        // Only log when state actually changes
-        if (_isAttached != wasAttached) {
-          DebugLogService().success('Veilid', _isAttached ? 'Connected ($state)' : 'Disconnected ($state)');
+        // Log every state change so the onboarding log panel shows progress
+        if (state != wasState) {
+          if (_isAttached) {
+            DebugLogService().success('Veilid', 'Network: $state');
+          } else {
+            DebugLogService().info('Veilid', 'Network: $state');
+          }
         }
         notifyListeners();
 
       case VeilidUpdateNetwork(:final started, :final peers):
-        // Only log network changes when they're significant (not every update)
-        if (started && peers.isNotEmpty && peers.length % 10 == 0) {
-          DebugLogService().info('Veilid', 'Network: ${peers.length} peers');
+        if (started) {
+          DebugLogService().info('Veilid', 'Network active — peers: ${peers.length}');
         }
 
       case VeilidUpdateValueChange(:final key, :final subkeys):
