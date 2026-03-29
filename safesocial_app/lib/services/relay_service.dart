@@ -9,6 +9,7 @@ import 'debug_log_service.dart';
 /// WebSocket relay client for messaging.
 class RelayService extends ChangeNotifier {
   static const _defaultRelayUrl = 'wss://relay.spheres.dev';
+  static const _fallbackRelayUrl = 'wss://spheres-relay.phaysaal.workers.dev';
 
   final Map<String, WebSocketChannel> _channels = {};
   final _log = DebugLogService();
@@ -16,9 +17,9 @@ class RelayService extends ChangeNotifier {
   void Function(String contactPublicKey, String encryptedMessage)? onMessageReceived;
 
   /// Connect to a relay room for a specific contact.
-  Future<void> connect(String myPublicKey, String contactPublicKey, {String? relayUrl}) async {
+  Future<void> connect(String myPublicKey, String contactPublicKey, {String? relayUrl, bool isFallback = false}) async {
     final roomId = CryptoService.deriveRelayRoomId(myPublicKey, contactPublicKey);
-    final url = relayUrl ?? _defaultRelayUrl;
+    final url = relayUrl ?? (isFallback ? _fallbackRelayUrl : _defaultRelayUrl);
     final wsUrl = '$url/room/$roomId';
 
     if (_channels.containsKey(contactPublicKey)) {
@@ -36,6 +37,12 @@ class RelayService extends ChangeNotifier {
         _log.success('Relay', 'Connected to room $roomId');
       } catch (e) {
         _log.error('Relay', 'WebSocket handshake failed: $e');
+        
+        // Try fallback if not already using it
+        if (!isFallback && relayUrl == null) {
+          _log.warn('Relay', 'Primary relay failed, trying fallback...');
+          return connect(myPublicKey, contactPublicKey, isFallback: true);
+        }
         return;
       }
 

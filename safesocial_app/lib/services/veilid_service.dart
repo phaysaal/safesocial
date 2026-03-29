@@ -39,7 +39,11 @@ class VeilidService extends ChangeNotifier {
         programName: 'spheres',
         namespace: '',
         deviceEncryptionKeyPassword: '',
-      );
+      ).then((c) => c.copyWith(
+        tableStore: c.tableStore.copyWith(directory: '$statePath/table_store'),
+        blockStore: c.blockStore.copyWith(directory: '$statePath/block_store'),
+        protectedStore: c.protectedStore.copyWith(directory: '$statePath/protected_store'),
+      ));
 
       final updateStream = await Veilid.instance.startupVeilidCore(config);
 

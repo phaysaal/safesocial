@@ -115,6 +115,13 @@ class SettingsScreen extends StatelessWidget {
           // ── Privacy & Security ──────────────────────────
           _SectionHeader(title: 'Privacy & Security'),
           ListTile(
+            leading: Icon(Icons.delete_forever, color: cs.error),
+            title: Text('Reset Everything', style: TextStyle(color: cs.error)),
+            subtitle: const Text('Wipe all local data and start fresh'),
+            onTap: () => _showResetDialog(context, identityService),
+          ),
+          const Divider(indent: 56),
+          ListTile(
             leading: Icon(Icons.shield_outlined, color: cs.primary),
             title: const Text('Encryption'),
             subtitle: const Text('End-to-end XChaCha20-Poly1305'),
@@ -151,7 +158,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(Icons.code, color: cs.primary),
             title: const Text('Version'),
-            subtitle: const Text('0.1.0 (development)'),
+            subtitle: const Text('0.3.0 (development)'),
           ),
           const Divider(indent: 56),
 
@@ -164,6 +171,32 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => context.push('/debug'),
           ),
           const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  void _showResetDialog(BuildContext context, IdentityService service) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset Everything?'),
+        content: const Text(
+          'This will permanently delete your identity, contacts, and all messages from this device.\n\n'
+          'This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              await service.resetEverything();
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+                context.go('/onboarding');
+              }
+            },
+            child: const Text('Reset', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
