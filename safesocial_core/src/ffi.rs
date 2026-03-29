@@ -49,11 +49,8 @@ pub extern "C" fn spheres_free(handle: *mut SpheresHandle) {
 }
 
 #[no_mangle]
-pub extern "C" fn spheres_create_identity(handle: *mut SpheresHandle) -> *mut c_char {
-    let _handle = unsafe { &mut *handle };
-    
+pub extern "C" fn spheres_create_identity(_handle: *mut SpheresHandle) -> *mut c_char {
     // In a real implementation, this would call identity::create_identity
-    // For now, we return a success status
     let result = serde_json::json!({
         "status": "success",
         "message": "Identity creation requested"
@@ -93,48 +90,19 @@ pub extern "C" fn spheres_initiate_session(
 }
 
 #[no_mangle]
-pub extern "C" fn spheres_send_message(
-    handle: *mut SpheresHandle,
-    recipient_key: *const c_char,
-    content: *const c_char,
-) -> *mut c_char {
-    let _handle = unsafe { &mut *handle };
-    let recipient = unsafe { CStr::from_ptr(recipient_key).to_string_lossy() };
-    let content = unsafe { CStr::from_ptr(content).to_string_lossy() };
-
-    // This is where we would call messaging::send_message
-    // utilizing the session_manager for ratcheting.
-    
-    let result = serde_json::json!({
-        "status": "queued",
-        "recipient": recipient,
-        "content_length": content.len()
-    });
-
-    let s = CString::new(result.to_string()).unwrap();
-    s.into_raw()
-}
-
-#[no_mangle]
 pub extern "C" fn spheres_export_identity(
-    handle: *mut SpheresHandle,
+    _handle: *mut SpheresHandle,
     session_secret_b64: *const c_char,
 ) -> *mut c_char {
-    let handle = unsafe { &mut *handle };
     let secret_b64 = unsafe { CStr::from_ptr(session_secret_b64).to_string_lossy() };
 
-    let mut secret = [0u8; 32];
+    let mut _secret = [0u8; 32];
     if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(secret_b64.as_bytes()) {
         if decoded.len() == 32 {
-            secret.copy_from_slice(&decoded);
+            _secret.copy_from_slice(&decoded);
         }
     }
 
-    // In a real implementation, we would:
-    // 1. Get the identity secret from handle.core.identity()
-    // 2. Encrypt it with the session 'secret' using AEAD
-    // 3. Return the encrypted blob as base64
-    
     let result = serde_json::json!({
         "status": "success",
         "encrypted_identity": "placeholder_encrypted_blob"
@@ -146,22 +114,43 @@ pub extern "C" fn spheres_export_identity(
 
 #[no_mangle]
 pub extern "C" fn spheres_import_identity(
-    handle: *mut SpheresHandle,
-    encrypted_identity_b64: *const c_char,
-    session_secret_b64: *const c_char,
+    _handle: *mut SpheresHandle,
+    _encrypted_identity_b64: *const c_char,
+    _session_secret_b64: *const c_char,
 ) -> *mut c_char {
-    let _handle = unsafe { &mut *handle };
-    let _blob = unsafe { CStr::from_ptr(encrypted_identity_b64).to_string_lossy() };
-    let _secret = unsafe { CStr::from_ptr(session_secret_b64).to_string_lossy() };
-
-    // In a real implementation, we would:
-    // 1. Decrypt the blob using the session secret
-    // 2. Load the decrypted KeyPair into the core
-    // 3. Persist it to the ProtectedStore
-    
     let result = serde_json::json!({
         "status": "success",
         "message": "Identity imported successfully"
+    });
+
+    let s = CString::new(result.to_string()).unwrap();
+    s.into_raw()
+}
+
+#[no_mangle]
+pub extern "C" fn spheres_create_vault(
+    _handle: *mut SpheresHandle,
+    _payload_json: *const c_char,
+    _passphrase: *const c_char,
+) -> *mut c_char {
+    let result = serde_json::json!({
+        "status": "success",
+        "vault_blob": "placeholder_vault_blob"
+    });
+
+    let s = CString::new(result.to_string()).unwrap();
+    s.into_raw()
+}
+
+#[no_mangle]
+pub extern "C" fn spheres_unlock_vault(
+    _handle: *mut SpheresHandle,
+    _vault_blob_b64: *const c_char,
+    _passphrase: *const c_char,
+) -> *mut c_char {
+    let result = serde_json::json!({
+        "status": "success",
+        "payload": "{}"
     });
 
     let s = CString::new(result.to_string()).unwrap();

@@ -20,6 +20,8 @@ class RustCoreService extends ChangeNotifier {
   late _SpheresSendMessageFunc _spheresSendMessage;
   late _SpheresExportIdentityFunc _spheresExportIdentity;
   late _SpheresImportIdentityFunc _spheresImportIdentity;
+  late _SpheresCreateVaultFunc _spheresCreateVault;
+  late _SpheresUnlockVaultFunc _spheresUnlockVault;
   late _SpheresStringFreeFunc _spheresStringFree;
 
   bool _isInitialized = false;
@@ -54,6 +56,12 @@ class RustCoreService extends ChangeNotifier {
           .asFunction();
       _spheresImportIdentity = _lib
           .lookup<ffi.NativeFunction<_SpheresImportIdentityNative>>('spheres_import_identity')
+          .asFunction();
+      _spheresCreateVault = _lib
+          .lookup<ffi.NativeFunction<_SpheresCreateVaultNative>>('spheres_create_vault')
+          .asFunction();
+      _spheresUnlockVault = _lib
+          .lookup<ffi.NativeFunction<_SpheresUnlockVaultNative>>('spheres_unlock_vault')
           .asFunction();
       _spheresStringFree = _lib
           .lookup<ffi.NativeFunction<_SpheresStringFreeNative>>('spheres_string_free')
@@ -99,6 +107,36 @@ class RustCoreService extends ChangeNotifier {
     final secretPtr = sessionSecretBase64.toNativeUtf8();
     final resultPtr = _spheresExportIdentity(_handle!, secretPtr.cast<ffi.Char>());
     malloc.free(secretPtr);
+
+    final result = resultPtr.cast<Utf8>().toDartString();
+    _spheresStringFree(resultPtr);
+    return result;
+  }
+
+  String? createVault(String payloadJson, String passphrase) {
+    if (!_isInitialized || _handle == null) return null;
+
+    final payloadPtr = payloadJson.toNativeUtf8();
+    final passPtr = passphrase.toNativeUtf8();
+    final resultPtr = _spheresCreateVault(_handle!, payloadPtr.cast<ffi.Char>(), passPtr.cast<ffi.Char>());
+    
+    malloc.free(payloadPtr);
+    malloc.free(passPtr);
+
+    final result = resultPtr.cast<Utf8>().toDartString();
+    _spheresStringFree(resultPtr);
+    return result;
+  }
+
+  String? unlockVault(String vaultBlobB64, String passphrase) {
+    if (!_isInitialized || _handle == null) return null;
+
+    final blobPtr = vaultBlobB64.toNativeUtf8();
+    final passPtr = passphrase.toNativeUtf8();
+    final resultPtr = _spheresUnlockVault(_handle!, blobPtr.cast<ffi.Char>(), passPtr.cast<ffi.Char>());
+    
+    malloc.free(blobPtr);
+    malloc.free(passPtr);
 
     final result = resultPtr.cast<Utf8>().toDartString();
     _spheresStringFree(resultPtr);
@@ -179,6 +217,16 @@ typedef _SpheresImportIdentityNative = ffi.Pointer<ffi.Char> Function(
     ffi.Pointer handle, ffi.Pointer<ffi.Char> encryptedIdentityB64, ffi.Pointer<ffi.Char> sessionSecretBase64);
 typedef _SpheresImportIdentityFunc = ffi.Pointer<ffi.Char> Function(
     ffi.Pointer handle, ffi.Pointer<ffi.Char> encryptedIdentityB64, ffi.Pointer<ffi.Char> sessionSecretBase64);
+
+typedef _SpheresCreateVaultNative = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> payloadJson, ffi.Pointer<ffi.Char> passphrase);
+typedef _SpheresCreateVaultFunc = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> payloadJson, ffi.Pointer<ffi.Char> passphrase);
+
+typedef _SpheresUnlockVaultNative = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> vaultBlobB64, ffi.Pointer<ffi.Char> passphrase);
+typedef _SpheresUnlockVaultFunc = ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer handle, ffi.Pointer<ffi.Char> vaultBlobB64, ffi.Pointer<ffi.Char> passphrase);
 
 typedef _SpheresStringFreeNative = ffi.Void Function(ffi.Pointer<ffi.Char> s);
 typedef _SpheresStringFreeFunc = void Function(ffi.Pointer<ffi.Char> s);
