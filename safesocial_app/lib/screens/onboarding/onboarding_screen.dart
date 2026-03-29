@@ -14,6 +14,7 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   bool _isCreating = false;
 
@@ -24,14 +25,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _handleOnboarding() async {
-    final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your display name')),
-      );
-      return;
-    }
+    // Fix Issue #10: Validate input
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
+    final name = _nameController.text.trim();
     setState(() => _isCreating = true);
 
     try {
@@ -60,94 +57,114 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              Center(
-                child: Image.asset(
-                  'assets/images/logo.png',
-                  width: 120,
-                  height: 120,
-                ),
-              ),
-              const SizedBox(height: 40),
-              Text(
-                'Welcome to Spheres',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Your data. Your network. Your rules.',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const Spacer(),
-              TextField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  labelText: 'Display Name',
-                  hintText: 'e.g. Alice',
-                  prefixIcon: const Icon(Icons.person_outline),
-                  filled: true,
-                  fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.3),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Spacer(),
+                Center(
+                  child: Image.asset(
+                    'assets/images/logo.png',
+                    width: 120,
+                    height: 120,
                   ),
                 ),
-                textCapitalization: TextCapitalization.words,
-                autofocus: true,
-                onSubmitted: (_) => _handleOnboarding(),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _isCreating ? null : _handleOnboarding,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.all(18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                const SizedBox(height: 40),
+                Text(
+                  'Welcome to Spheres',
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
                   ),
+                  textAlign: TextAlign.center,
                 ),
-                child: _isCreating
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2.5),
-                      )
-                    : ListenableBuilder(
-                        listenable: context.watch<IdentityService>().veilidService,
-                        builder: (context, _) {
-                          final vs = context.read<IdentityService>().veilidService;
-                          if (!vs.isInitialized) {
-                            return const Text('Initializing Backend...', style: TextStyle(fontSize: 16));
-                          }
-                          return const Text(
-                            'Start Networking',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                          );
-                        },
+                const SizedBox(height: 12),
+                Text(
+                  'Your data. Your network. Your rules.',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const Spacer(),
+                TextFormField(
+                  controller: _nameController,
+                  decoration: InputDecoration(
+                    labelText: 'Display Name',
+                    hintText: 'e.g. Alice',
+                    prefixIcon: const Icon(Icons.person_outline),
+                    filled: true,
+                    fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  textCapitalization: TextCapitalization.words,
+                  autofocus: true,
+                  onFieldSubmitted: (_) => _handleOnboarding(),
+                  // Fix Issue #10: Validation logic
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter a name';
+                    }
+                    if (value.trim().length < 2) {
+                      return 'Name is too short (min 2 chars)';
+                    }
+                    if (value.trim().length > 30) {
+                      return 'Name is too long (max 30 chars)';
+                    }
+                    if (!RegExp(r'^[a-zA-Z0-9 _-]+$').hasMatch(value)) {
+                      return 'Only letters, numbers, spaces, and -_ allowed';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 24),
+                
+                // Fix Issue #5: Disable button while initializing
+                ListenableBuilder(
+                  listenable: context.watch<IdentityService>().veilidService,
+                  builder: (context, _) {
+                    final vs = context.read<IdentityService>().veilidService;
+                    final isReady = vs.isInitialized;
+                    
+                    return ElevatedButton(
+                      onPressed: (_isCreating || !isReady) ? null : _handleOnboarding,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.all(18),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
-              ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () {
-                  // TODO: Implement "Import existing identity"
-                },
-                child: Text(
-                  'Import existing identity',
-                  style: TextStyle(color: cs.onSurfaceVariant),
+                      child: _isCreating
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2.5),
+                            )
+                          : Text(
+                              isReady ? 'Start Networking' : 'Initializing Backend...',
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                    );
+                  },
                 ),
-              ),
-              const SizedBox(height: 32),
-            ],
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () {
+                    // TODO: Implement "Import existing identity"
+                  },
+                  child: Text(
+                    'Import existing identity',
+                    style: TextStyle(color: cs.onSurfaceVariant),
+                  ),
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
           ),
         ),
       ),

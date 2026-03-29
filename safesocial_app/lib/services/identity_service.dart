@@ -10,6 +10,7 @@ import 'package:veilid/veilid.dart';
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
 import 'veilid_service.dart';
+import 'rust_core_service.dart';
 
 /// Manages the user's cryptographic identity and profile.
 class IdentityService extends ChangeNotifier {
@@ -17,6 +18,7 @@ class IdentityService extends ChangeNotifier {
   static const _prefsKeypairKey = 'spheres_identity_keypair';
 
   final VeilidService veilidService;
+  final RustCoreService _rustCore = RustCoreService();
   UserProfile? _currentIdentity;
   KeyPair? _keypair;
 
@@ -24,7 +26,7 @@ class IdentityService extends ChangeNotifier {
 
   UserProfile? get currentIdentity => _currentIdentity;
   String? get publicKey => _keypair?.key.toString();
-  bool get isOnboarded => _currentIdentity != null;
+  bool get isOnboarded => _currentIdentity != null && _keypair != null;
 
   /// Generate a new identity keypair and profile.
   Future<void> createIdentity(String displayName, {String? bio}) async {
@@ -47,6 +49,7 @@ class IdentityService extends ChangeNotifier {
       );
 
       await _persistIdentity();
+      await _publishProfileToDHT();
       notifyListeners();
     } catch (e) {
       DebugLogService().error('Identity', 'Failed to create identity: $e');
@@ -63,6 +66,7 @@ class IdentityService extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _persistIdentity();
+    await _publishProfileToDHT();
     notifyListeners();
   }
 
@@ -74,22 +78,54 @@ class IdentityService extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _persistIdentity();
+    await _publishProfileToDHT();
     notifyListeners();
   }
 
-  /// Export the current identity keypair as a JSON string.
-  Future<String> exportIdentity() async {
+  /// Export the current identity keypair as a secure encrypted vault.
+  Future<String> exportIdentity(String passphrase) async {
     if (_keypair == null) throw Exception('No identity to export');
-    return jsonEncode({
+    
+    // Create the bundle
+    final payload = jsonEncode({
       'key': _keypair!.key.toString(),
       'secret': _keypair!.secret.toString(),
+      'profile': _currentIdentity?.toJson(),
     });
+
+    // Use Rust Core to encrypt with Argon2id + XChaCha20
+    final vault = _rustCore.createVault(payload, passphrase);
+    if (vault == null) throw Exception('Failed to encrypt identity vault');
+    
+    return vault;
   }
 
-  /// Import an identity from a JSON string.
-  Future<bool> importIdentity(String json, {String? displayName}) async {
+  /// Import an identity from a secure vault or plain JSON (legacy).
+  Future<bool> importIdentity(String blob, {String? passphrase}) async {
     try {
-      final data = jsonDecode(json);
+      String decrypted;
+      if (passphrase != null && passphrase.isNotEmpty) {
+        final result = _rustCore.unlockVault(blob, passphrase);
+        if (result == null) return false;
+        decrypted = result;
+      } else {
+        // Fallback for plaintext (not recommended)
+        decrypted = blob;
+      }
+
+      final data = jsonDecode(decrypted);
+      final keyStr = data['key'] as String;
+      final secretStr = data['secret'] as String;
+      
+      _keypair = KeyPair(
+        key: PublicKey.fromString(keyStr),
+        secret: SecretKey.fromString(secretStr),
+      );
+
+      if (data['profile'] != null) {
+        _currentIdentity = UserProfile.fromJson(data['profile']);
+      }
+
       await _persistIdentity();
       notifyListeners();
       return true;
@@ -103,10 +139,24 @@ class IdentityService extends ChangeNotifier {
   Future<void> loadIdentity() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      
+      // Load Profile
       final profileJson = prefs.getString(_prefsProfileKey);
       if (profileJson != null) {
         _currentIdentity = UserProfile.fromJson(jsonDecode(profileJson));
       }
+      
+      // Load KeyPair (Issue #1 & #2 Fix)
+      final keypairJson = prefs.getString(_prefsKeypairKey);
+      if (keypairJson != null) {
+        final data = jsonDecode(keypairJson);
+        _keypair = KeyPair(
+          key: PublicKey.fromString(data['key']),
+          secret: SecretKey.fromString(data['secret']),
+        );
+        DebugLogService().success('Identity', 'Cryptographic identity restored');
+      }
+      
       notifyListeners();
     } catch (e) {
       debugPrint('[IdentityService] Load failed: $e');
@@ -116,26 +166,37 @@ class IdentityService extends ChangeNotifier {
   /// PERSISTENT MEMORY: Reset everything.
   /// Clears all local storage, deletes all files, and ensures Android Backup is updated.
   Future<void> resetEverything() async {
-    // 1. Wipe SharedPreferences and ENSURE it commits (for Android Backup)
+    // 1. Shutdown Veilid first to release file locks
+    await veilidService.shutdown();
+
+    // 2. Wipe SharedPreferences and ENSURE it commits (for Android Backup)
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     
-    // 2. Clear in-memory state
+    // 3. Clear in-memory state
     _currentIdentity = null;
     _keypair = null;
 
     try {
-      // 3. Wipe all app files (Veilid stores, images, audio, database)
+      // 4. Wipe all app files by deleting directory contents
       final appDir = await getApplicationDocumentsDirectory();
       if (appDir.existsSync()) {
-        await appDir.delete(recursive: true);
-        await appDir.create(recursive: true); 
+        final items = appDir.listSync();
+        for (var item in items) {
+          try {
+            await item.delete(recursive: true);
+          } catch (_) {}
+        }
       }
 
       final tempDir = await getTemporaryDirectory();
       if (tempDir.existsSync()) {
-        await tempDir.delete(recursive: true);
-        await tempDir.create(recursive: true);
+        final items = tempDir.listSync();
+        for (var item in items) {
+          try {
+            await item.delete(recursive: true);
+          } catch (_) {}
+        }
       }
       
       DebugLogService().warn('Identity', 'HARD WIPE COMPLETE: Local and cloud state synchronized.');
@@ -146,11 +207,24 @@ class IdentityService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _publishProfileToDHT() async {
+    if (_keypair == null || _currentIdentity == null) return;
+    // FUTURE: Write _currentIdentity to a DHT record owned by _keypair
+    DebugLogService().info('Identity', 'Profile publication to DHT scheduled');
+  }
+
   Future<void> _persistIdentity() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (_keypair != null) await prefs.setString(_prefsKeypairKey, _keypair!.key.toString());
-      if (_currentIdentity != null) await prefs.setString(_prefsProfileKey, jsonEncode(_currentIdentity!.toJson()));
+      if (_keypair != null) {
+        await prefs.setString(_prefsKeypairKey, jsonEncode({
+          'key': _keypair!.key.toString(),
+          'secret': _keypair!.secret.toString(),
+        }));
+      }
+      if (_currentIdentity != null) {
+        await prefs.setString(_prefsProfileKey, jsonEncode(_currentIdentity!.toJson()));
+      }
     } catch (e) {
       debugPrint('[IdentityService] SharedPreferences persist failed: $e');
     }

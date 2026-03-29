@@ -74,15 +74,33 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Export Private Key'),
             subtitle: const Text('Copy for backup or multi-device use'),
             onTap: () async {
-              final key = await identityService.exportIdentity();
-              if (context.mounted) {
-                Clipboard.setData(ClipboardData(text: key));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Private key copied to clipboard'),
-                    duration: Duration(seconds: 2),
+              final passphraseController = TextEditingController();
+              final passphrase = await showDialog<String>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Export Identity'),
+                  content: TextField(
+                    controller: passphraseController,
+                    decoration: const InputDecoration(labelText: 'Passphrase'),
+                    obscureText: true,
                   ),
-                );
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                    ElevatedButton(onPressed: () => Navigator.pop(ctx, passphraseController.text), child: const Text('Export')),
+                  ],
+                ),
+              );
+              if (passphrase == null) return;
+              try {
+                final key = await identityService.exportIdentity(passphrase);
+                if (context.mounted) {
+                  Clipboard.setData(ClipboardData(text: key));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Identity copied to clipboard')),
+                  );
+                }
+              } catch(e) {
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
               }
             },
           ),
@@ -324,8 +342,8 @@ class SettingsScreen extends StatelessWidget {
             TextField(
               controller: nameController,
               decoration: const InputDecoration(
-                labelText: 'Display Name',
-                hintText: 'Your name on this device',
+                labelText: 'Passphrase',
+                hintText: 'Passphrase used during export',
               ),
               textCapitalization: TextCapitalization.words,
             ),
@@ -340,11 +358,10 @@ class SettingsScreen extends StatelessWidget {
             onPressed: () async {
               final key = controller.text.trim();
               if (key.isEmpty) return;
+              final pass = nameController.text.trim(); // Re-using name field for passphrase
               final success = await context.read<IdentityService>().importIdentity(
                     key,
-                    displayName: nameController.text.trim().isNotEmpty
-                        ? nameController.text.trim()
-                        : null,
+                    passphrase: pass.isNotEmpty ? pass : null,
                   );
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) {

@@ -46,11 +46,13 @@ class SpheresApp extends StatefulWidget {
 class _SpheresAppState extends State<SpheresApp> {
   late AppLinks _appLinks;
   StreamSubscription<Uri>? _linkSubscription;
+  late final GoRouter _router;
 
   @override
   void initState() {
     super.initState();
     _initDeepLinking();
+    _initRouter();
   }
 
   @override
@@ -73,13 +75,21 @@ class _SpheresAppState extends State<SpheresApp> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final identityService = context.watch<IdentityService>();
-    final themeService = context.watch<ThemeService>();
+  void _initRouter() {
+    // Fix Issue #8: Create router once
+    _router = GoRouter(
+      initialLocation: '/',
+      redirect: (context, state) {
+        final identity = context.read<IdentityService>();
+        final onboarded = identity.isOnboarded;
+        final goingToOnboarding = state.matchedLocation == '/onboarding';
 
-    final router = GoRouter(
-      initialLocation: identityService.isOnboarded ? '/' : '/onboarding',
+        // Fix Issue #6: Route Guards
+        if (!onboarded && !goingToOnboarding) return '/onboarding';
+        if (onboarded && goingToOnboarding) return '/';
+        
+        return null;
+      },
       routes: [
         GoRoute(
           path: '/onboarding',
@@ -206,6 +216,11 @@ class _SpheresAppState extends State<SpheresApp> {
         ),
       ],
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final themeService = context.watch<ThemeService>();
 
     return MaterialApp.router(
       title: 'Spheres',
@@ -213,7 +228,7 @@ class _SpheresAppState extends State<SpheresApp> {
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: themeService.themeMode,
-      routerConfig: router,
+      routerConfig: _router,
     );
   }
 }
@@ -245,8 +260,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    // Note: In a real app, you'd want to remove the listener
-    // but CallService is a global provider so we need to be careful.
     super.dispose();
   }
 
