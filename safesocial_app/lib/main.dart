@@ -15,6 +15,7 @@ import 'services/rust_core_service.dart';
 import 'services/sync_service.dart';
 import 'services/ring_service.dart';
 import 'services/album_service.dart';
+import 'services/relay_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +32,7 @@ void main() async {
   final syncService = SyncService();
   final ringService = RingService();
   final albumService = AlbumService();
+  final relayService = RelayService();
 
   // Load theme
   await themeService.load();
@@ -81,6 +83,7 @@ void main() async {
         ChangeNotifierProvider.value(value: syncService),
         ChangeNotifierProvider.value(value: ringService),
         ChangeNotifierProvider.value(value: albumService),
+        ChangeNotifierProvider.value(value: relayService),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),
