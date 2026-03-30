@@ -20,6 +20,7 @@ class FeedService extends ChangeNotifier {
 
   final RelayService _feedRelay = RelayService();
   String? _myPublicKey;
+  String? _mySecretKey;
   List<Contact> _contacts = [];
 
   List<Post> get posts =>
@@ -57,8 +58,9 @@ class FeedService extends ChangeNotifier {
   Set<String> get hiddenPostIds => Set.unmodifiable(_hiddenPostIds);
 
 
-  void initSync(String myPublicKey, List<Contact> contacts) {
+  void initSync(String myPublicKey, String mySecretKey, List<Contact> contacts) {
     _myPublicKey = myPublicKey;
+    _mySecretKey = mySecretKey;
     _contacts = contacts;
 
     _feedRelay.onMessageReceived = (contactKey, data) {
@@ -66,7 +68,7 @@ class FeedService extends ChangeNotifier {
     };
 
     for (final contact in contacts.where((c) => !c.blocked)) {
-      _feedRelay.connect('feed:$myPublicKey', 'feed:${contact.publicKey}');
+      _feedRelay.connect('feed:$myPublicKey', 'feed:${contact.publicKey}', mySecretKey: _mySecretKey!);
     }
   }
 
@@ -148,6 +150,24 @@ class FeedService extends ChangeNotifier {
       final json = jsonDecode(data);
       if (json['type'] == 'post') {
         _mergePost(Post.fromJson(json['post']));
+      } else if (json['type'] == 'reaction') {
+        final postId = json['post_id'] as String;
+        final authorId = json['author_id'] as String;
+        final emoji = json['emoji'] as String;
+        final index = _posts.indexWhere((p) => p.id == postId);
+        if (index == -1) return;
+        final post = _posts[index];
+        final newReactions = List<Reaction>.from(post.reactions);
+        final existing = newReactions.indexWhere(
+            (r) => r.reactorId == authorId && r.emoji == emoji);
+        if (existing != -1) {
+          newReactions.removeAt(existing);
+        } else {
+          newReactions.add(Reaction(reactorId: authorId, emoji: emoji, timestamp: DateTime.now()));
+        }
+        _posts[index] = post.copyWith(reactions: newReactions);
+        _persistPosts();
+        notifyListeners();
       }
     } catch (e) {
       DebugLogService().warn('Feed', 'Malformed feed item');
@@ -207,7 +227,36 @@ class FeedService extends ChangeNotifier {
   }
 
   void reactToPost(String postId, String emoji) {
-    // Reaction implementation
+    if (_myPublicKey == null) return;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return;
+
+    final post = _posts[index];
+    final newReactions = List<Reaction>.from(post.reactions);
+    final existing = newReactions.indexWhere(
+        (r) => r.reactorId == _myPublicKey && r.emoji == emoji);
+
+    if (existing != -1) {
+      // Toggle off — remove reaction
+      newReactions.removeAt(existing);
+    } else {
+      newReactions.add(Reaction(reactorId: _myPublicKey!, emoji: emoji, timestamp: DateTime.now()));
+    }
+
+    _posts[index] = post.copyWith(reactions: newReactions);
+    notifyListeners();
+    _persistPosts();
+
+    // Broadcast reaction update to contacts
+    final reactionJson = jsonEncode({
+      'type': 'reaction',
+      'post_id': postId,
+      'author_id': _myPublicKey,
+      'emoji': emoji,
+    });
+    for (final contact in _contacts.where((c) => !c.blocked)) {
+      _feedRelay.sendViaRelay(contact.publicKey, reactionJson);
+    }
   }
 
   Future<void> refreshFeed() async {
