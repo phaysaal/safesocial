@@ -26,7 +26,7 @@ class AlbumService extends ChangeNotifier {
     };
 
     for (final album in _albums) {
-      _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!);
+      _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!, authPublicKey: myPublicKey);
     }
   }
 
@@ -59,7 +59,7 @@ class AlbumService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!);
+    _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!, authPublicKey: _myPublicKey);
     DebugLogService().success('Media', 'Shared album "$name" created');
   }
 

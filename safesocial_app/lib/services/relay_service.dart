@@ -31,7 +31,9 @@ class RelayService extends ChangeNotifier {
   }
 
   /// Connect to a relay room for a specific contact and sync offline messages.
-  Future<void> connect(String myPublicKey, String contactPublicKey, {String? mySecretKey, bool isFallback = false}) async {
+  /// [authPublicKey] is the raw hex Ed25519 public key used for mailbox auth.
+  /// If omitted, [myPublicKey] is used (fine when it has no namespace prefix).
+  Future<void> connect(String myPublicKey, String contactPublicKey, {String? mySecretKey, String? authPublicKey, bool isFallback = false}) async {
     final roomId = CryptoService.deriveRelayRoomId(myPublicKey, contactPublicKey);
     final wsUrl = '${_getBaseUrl(isFallback, true)}/room/$roomId';
     final httpUrl = '${_getBaseUrl(isFallback, false)}/room/$roomId';
@@ -57,7 +59,7 @@ class RelayService extends ChangeNotifier {
         _isSyncing.remove(contactPublicKey);
         if (!isFallback) {
           _log.warn('Relay', 'Primary relay failed, trying fallback...');
-          return connect(myPublicKey, contactPublicKey, mySecretKey: mySecretKey, isFallback: true);
+          return connect(myPublicKey, contactPublicKey, mySecretKey: mySecretKey, authPublicKey: authPublicKey, isFallback: true);
         }
         return;
       }
@@ -80,14 +82,15 @@ class RelayService extends ChangeNotifier {
           _log.info('Relay', 'WebSocket closed, reconnecting in 5s...');
           _channels.remove(contactPublicKey);
           Future.delayed(const Duration(seconds: 5), () {
-            connect(myPublicKey, contactPublicKey, mySecretKey: mySecretKey, isFallback: isFallback);
+            connect(myPublicKey, contactPublicKey, mySecretKey: mySecretKey, authPublicKey: authPublicKey, isFallback: isFallback);
           });
         },
       );
 
       // 2. Fetch offline messages (only if we have a secret key)
       if (mySecretKey != null) {
-        await _syncOfflineMessages(httpUrl, contactPublicKey, myPublicKey, mySecretKey);
+        final pubKeyForAuth = authPublicKey ?? myPublicKey;
+        await _syncOfflineMessages(httpUrl, contactPublicKey, pubKeyForAuth, mySecretKey);
       } else {
         _log.warn('Relay', 'No secret key provided; skipping offline mailbox sync for $roomId');
       }

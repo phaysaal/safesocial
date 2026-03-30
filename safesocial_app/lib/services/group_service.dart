@@ -32,7 +32,7 @@ class GroupService extends ChangeNotifier {
     };
 
     for (final group in _groups) {
-      _groupRelay.connect('grp:${group.dhtKey}', 'grp:${group.dhtKey}', mySecretKey: _mySecretKey!);
+      _groupRelay.connect('grp:${group.dhtKey}', 'grp:${group.dhtKey}', mySecretKey: _mySecretKey!, authPublicKey: myPublicKey);
     }
   }
 
@@ -91,7 +91,7 @@ class GroupService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    _groupRelay.connect('grp:$dhtKey', 'grp:$dhtKey', mySecretKey: _mySecretKey!);
+    _groupRelay.connect('grp:$dhtKey', 'grp:$dhtKey', mySecretKey: _mySecretKey!, authPublicKey: _myPublicKey);
   }
 
   Future<void> updateGroup(String dhtKey, {String? name, String? description}) async {

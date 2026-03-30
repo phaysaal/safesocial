@@ -68,7 +68,7 @@ class FeedService extends ChangeNotifier {
     };
 
     for (final contact in contacts.where((c) => !c.blocked)) {
-      _feedRelay.connect('feed:$myPublicKey', 'feed:${contact.publicKey}', mySecretKey: _mySecretKey!);
+      _feedRelay.connect('feed:$myPublicKey', 'feed:${contact.publicKey}', mySecretKey: _mySecretKey!, authPublicKey: myPublicKey);
     }
   }
 
