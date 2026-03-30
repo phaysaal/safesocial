@@ -19,6 +19,7 @@ class ChatService extends ChangeNotifier {
   final RelayService _relayService = RelayService();
   final RustCoreService _rustCore = RustCoreService();
   String? _myPublicKey;
+  String? _mySecretKey;
 
   final Map<String, List<Message>> _conversations = {};
   final Map<String, String> _conversationRoles = {}; 
@@ -33,8 +34,9 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setMyPublicKey(String publicKey) {
+  void setMyInfo(String publicKey, String secretKey) {
     _myPublicKey = publicKey;
+    _mySecretKey = secretKey;
     _relayService.onMessageReceived = (contactKey, encryptedMsg) {
       _handleRelayMessage(contactKey, encryptedMsg);
     };
@@ -42,7 +44,7 @@ class ChatService extends ChangeNotifier {
 
   void connectRelay(String contactPublicKey) {
     if (_myPublicKey != null) {
-      _relayService.connect(_myPublicKey!, contactPublicKey);
+      _relayService.connect(_myPublicKey!, contactPublicKey, mySecretKey: _mySecretKey!);
       final sharedSecret = CryptoService.deriveSharedKey(_myPublicKey!, contactPublicKey);
       _rustCore.initiateSession(contactPublicKey, base64Encode(utf8.encode(sharedSecret)));
     }

@@ -20,6 +20,7 @@ class CallService extends ChangeNotifier {
   final RelayService _signaling = RelayService();
   final RustCoreService _rustCore = RustCoreService();
   String? _myPublicKey;
+  String? _mySecretKey;
 
   // WebRTC Mesh: Map of PeerPublicKey -> Connection/Stream
   final Map<String, RTCPeerConnection> _peerConnections = {};
@@ -56,14 +57,15 @@ class CallService extends ChangeNotifier {
     {'urls': 'stun:stun2.l.google.com:19302'},
   ];
 
-  void setMyPublicKey(String key) {
+  void setMyInfo(String key, String secretKey) {
     _myPublicKey = key;
+    _mySecretKey = secretKey;
     _signaling.onMessageReceived = _handleSignaling;
   }
 
   void connectSignaling(String contactKey) {
     if (_myPublicKey == null) return;
-    _signaling.connect('call:$_myPublicKey', 'call:$contactKey');
+    _signaling.connect('call:$_myPublicKey', 'call:$contactKey', mySecretKey: _mySecretKey);
     final sharedSecret = CryptoService.deriveSharedKey(_myPublicKey!, contactKey);
     _rustCore.initiateSession(contactKey, base64Encode(utf8.encode(sharedSecret)));
   }

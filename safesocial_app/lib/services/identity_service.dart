@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:convert/convert.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
@@ -22,9 +23,12 @@ class IdentityKeyPair {
 /// Manages the user's cryptographic identity and profile.
 class IdentityService extends ChangeNotifier {
   static const _prefsProfileKey = 'spheres_identity_profile';
-  static const _prefsKeypairKey = 'spheres_identity_keypair';
+  static const _prefsPubKeyKey = 'spheres_identity_pubkey';
+  static const _secureSecretKey = 'spheres_identity_secret';
 
   final RustCoreService _rustCore = RustCoreService();
+  final _secureStorage = const FlutterSecureStorage();
+  
   UserProfile? _currentIdentity;
   IdentityKeyPair? _keypair;
 
@@ -32,6 +36,7 @@ class IdentityService extends ChangeNotifier {
 
   UserProfile? get currentIdentity => _currentIdentity;
   String? get publicKey => _keypair?.publicKey;
+  String? get secretKey => _keypair?.secretKey;
   bool get isOnboarded => _currentIdentity != null && _keypair != null;
 
   /// Generate a new identity keypair and profile.
@@ -88,21 +93,19 @@ class IdentityService extends ChangeNotifier {
   Future<String> exportIdentity(String passphrase) async {
     if (_keypair == null) throw Exception('No identity to export');
     
-    // Create the bundle
     final payload = jsonEncode({
       'key': _keypair!.publicKey,
       'secret': _keypair!.secretKey,
       'profile': _currentIdentity?.toJson(),
     });
 
-    // Use Rust Core to encrypt with Argon2id + XChaCha20
     final vault = _rustCore.createVault(payload, passphrase);
     if (vault == null) throw Exception('Failed to encrypt identity vault');
     
     return vault;
   }
 
-  /// Import an identity from a secure vault or plain JSON (legacy).
+  /// Import an identity from a secure vault.
   Future<bool> importIdentity(String blob, {String? passphrase}) async {
     try {
       String decrypted;
@@ -115,12 +118,9 @@ class IdentityService extends ChangeNotifier {
       }
 
       final data = jsonDecode(decrypted);
-      final keyStr = data['key'] as String;
-      final secretStr = data['secret'] as String;
-      
       _keypair = IdentityKeyPair(
-        publicKey: keyStr,
-        secretKey: secretStr,
+        publicKey: data['key'],
+        secretKey: data['secret'],
       );
 
       if (data['profile'] != null) {
@@ -136,26 +136,32 @@ class IdentityService extends ChangeNotifier {
     }
   }
 
-  /// Load identity from local storage.
+  /// Load identity from local storage (hybrid Secure + SharedPrefs).
   Future<void> loadIdentity() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Load Profile
       final profileJson = prefs.getString(_prefsProfileKey);
       if (profileJson != null) {
         _currentIdentity = UserProfile.fromJson(jsonDecode(profileJson));
       }
       
-      // Load KeyPair
-      final keypairJson = prefs.getString(_prefsKeypairKey);
-      if (keypairJson != null) {
-        final data = jsonDecode(keypairJson);
-        _keypair = IdentityKeyPair(
-          publicKey: data['key'],
-          secretKey: data['secret'],
-        );
-        DebugLogService().success('Identity', 'Cryptographic identity restored');
+      final pubKey = prefs.getString(_prefsPubKeyKey);
+      final secretKey = await _secureStorage.read(key: _secureSecretKey);
+
+      if (pubKey != null && secretKey != null) {
+        _keypair = IdentityKeyPair(publicKey: pubKey, secretKey: secretKey);
+        DebugLogService().success('Identity', 'Secure identity restored');
+      } else {
+        // Migration from old SharedPreferences keypair if exists
+        final legacyJson = prefs.getString('spheres_identity_keypair');
+        if (legacyJson != null) {
+          final data = jsonDecode(legacyJson);
+          _keypair = IdentityKeyPair(publicKey: data['key'], secretKey: data['secret']);
+          await _persistIdentity(); // This will move it to secure storage
+          await prefs.remove('spheres_identity_keypair');
+          DebugLogService().info('Identity', 'Migrated identity to secure storage');
+        }
       }
       
       notifyListeners();
@@ -165,25 +171,20 @@ class IdentityService extends ChangeNotifier {
   }
 
   /// PERSISTENT MEMORY: Reset everything.
-  /// Clears all local storage, deletes all files.
   Future<void> resetEverything() async {
-    // 1. Wipe SharedPreferences and ENSURE it commits (for Android Backup)
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
+    await _secureStorage.deleteAll();
     
-    // 2. Clear in-memory state
     _currentIdentity = null;
     _keypair = null;
 
     try {
-      // 3. Wipe all app files by deleting directory contents
       final appDir = await getApplicationDocumentsDirectory();
       if (appDir.existsSync()) {
         final items = appDir.listSync();
         for (var item in items) {
-          try {
-            await item.delete(recursive: true);
-          } catch (_) {}
+          try { await item.delete(recursive: true); } catch (_) {}
         }
       }
 
@@ -191,15 +192,12 @@ class IdentityService extends ChangeNotifier {
       if (tempDir.existsSync()) {
         final items = tempDir.listSync();
         for (var item in items) {
-          try {
-            await item.delete(recursive: true);
-          } catch (_) {}
+          try { await item.delete(recursive: true); } catch (_) {}
         }
       }
-      
-      DebugLogService().warn('Identity', 'HARD WIPE COMPLETE: Local and cloud state synchronized.');
+      DebugLogService().warn('Identity', 'HARD WIPE COMPLETE.');
     } catch (e) {
-      DebugLogService().error('Identity', 'FileSystem wipe encountered errors: $e');
+      DebugLogService().error('Identity', 'FileSystem wipe errors: $e');
     }
     
     notifyListeners();
@@ -208,13 +206,22 @@ class IdentityService extends ChangeNotifier {
   Future<void> publishProfileToRelay(RelayService relay) async {
     if (_keypair == null || _currentIdentity == null) return;
     
-    final payload = jsonEncode(_currentIdentity!.toJson());
-    final success = await relay.pushState(publicKey!, 'profile', payload);
+    // Sign the profile to prove ownership (Issue #2 Fix)
+    final profileJson = jsonEncode(_currentIdentity!.toJson());
+    final privKey = ed.PrivateKey(hex.decode(_keypair!.secretKey));
+    final signature = ed.sign(privKey, utf8.encode(profileJson));
+    
+    final payload = jsonEncode({
+      'profile': _currentIdentity!.toJson(),
+      'signature': hex.encode(signature),
+    });
+
+    final success = await relay.pushState(publicKey!, secretKey!, 'profile', payload);
     
     if (success) {
-      DebugLogService().success('Identity', 'Profile published to Relay state store');
+      DebugLogService().success('Identity', 'Signed profile published to Relay');
     } else {
-      DebugLogService().error('Identity', 'Failed to publish profile to Relay');
+      DebugLogService().error('Identity', 'Failed to publish signed profile');
     }
   }
 
@@ -222,16 +229,14 @@ class IdentityService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (_keypair != null) {
-        await prefs.setString(_prefsKeypairKey, jsonEncode({
-          'key': _keypair!.publicKey,
-          'secret': _keypair!.secretKey,
-        }));
+        await prefs.setString(_prefsPubKeyKey, _keypair!.publicKey);
+        await _secureStorage.write(key: _secureSecretKey, value: _keypair!.secretKey);
       }
       if (_currentIdentity != null) {
         await prefs.setString(_prefsProfileKey, jsonEncode(_currentIdentity!.toJson()));
       }
     } catch (e) {
-      debugPrint('[IdentityService] SharedPreferences persist failed: $e');
+      debugPrint('[IdentityService] Persist failed: $e');
     }
   }
 }

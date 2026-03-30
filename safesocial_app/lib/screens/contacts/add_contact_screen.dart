@@ -58,13 +58,12 @@ class _AddContactScreenState extends State<AddContactScreen> with SingleTickerPr
       final contactService = context.read<ContactService>();
       final chatService = context.read<ChatService>();
       final identityService = context.read<IdentityService>();
-      final myKey = identityService.publicKey;
 
       // 1. Add to contact list
       await contactService.addContact(publicKey, name);
 
       // 2. Initialize signaling and relay
-      if (myKey != null) {
+      if (identityService.isOnboarded) {
         final callService = context.read<CallService>();
         callService.connectSignaling(publicKey);
         chatService.connectRelay(publicKey);

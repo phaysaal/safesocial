@@ -14,17 +14,19 @@ class AlbumService extends ChangeNotifier {
   final List<Album> _albums = [];
   final RelayService _albumRelay = RelayService();
   String? _myPublicKey;
+  String? _mySecretKey;
 
   List<Album> get albums => List.unmodifiable(_albums);
 
-  void initSync(String myPublicKey) {
+  void initSync(String myPublicKey, String mySecretKey) {
     _myPublicKey = myPublicKey;
+    _mySecretKey = mySecretKey;
     _albumRelay.onMessageReceived = (albumKey, data) {
       _handleIncomingContribution(albumKey, data);
     };
 
     for (final album in _albums) {
-      _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}');
+      _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!);
     }
   }
 
@@ -57,7 +59,7 @@ class AlbumService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}');
+    _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!);
     DebugLogService().success('Media', 'Shared album "$name" created');
   }
 

@@ -6,32 +6,33 @@ import 'package:uuid/uuid.dart';
 
 import '../models/group.dart';
 import '../models/message.dart';
+import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
-import 'rust_core_service.dart';
 
 /// Manages groups with decentralized, encrypted group messaging and management.
 class GroupService extends ChangeNotifier {
   static const _groupsKey = 'spheres_groups';
   static const _msgPrefix = 'spheres_group_msgs_';
 
-  final RustCoreService _rustCore = RustCoreService();
   List<Group> _groups = [];
   final Map<String, List<Message>> _groupMessages = {};
   final RelayService _groupRelay = RelayService();
   String? _myPublicKey;
+  String? _mySecretKey;
 
   List<Group> get groups => List.unmodifiable(_groups);
   Map<String, List<Message>> get groupMessages => Map.unmodifiable(_groupMessages);
 
-  void initSync(String myPublicKey) {
+  void initSync(String myPublicKey, String mySecretKey) {
     _myPublicKey = myPublicKey;
+    _mySecretKey = mySecretKey;
     _groupRelay.onMessageReceived = (groupKey, data) {
       _handleGroupMessage(groupKey, data);
     };
 
     for (final group in _groups) {
-      _groupRelay.connect('grp:${group.dhtKey}', 'grp:${group.dhtKey}');
+      _groupRelay.connect('grp:${group.dhtKey}', 'grp:${group.dhtKey}', mySecretKey: _mySecretKey!);
     }
   }
 
@@ -70,8 +71,6 @@ class GroupService extends ChangeNotifier {
     final dhtKey = const Uuid().v4();
     final now = DateTime.now();
 
-    _rustCore.createGroupKey(dhtKey);
-
     final creator = GroupMember(
       publicKey: publicKey,
       displayName: displayName,
@@ -92,7 +91,7 @@ class GroupService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    _groupRelay.connect('grp:$dhtKey', 'grp:$dhtKey');
+    _groupRelay.connect('grp:$dhtKey', 'grp:$dhtKey', mySecretKey: _mySecretKey!);
   }
 
   Future<void> updateGroup(String dhtKey, {String? name, String? description}) async {
@@ -165,8 +164,8 @@ class GroupService extends ChangeNotifier {
   }
 
   Future<void> sendGroupMessage(String dhtKey, String senderId, String content) async {
-    final encryptedPayload = _rustCore.encryptGroupMessage(dhtKey, content);
-    if (encryptedPayload == null) return;
+    final groupKey = CryptoService.deriveSharedKey(dhtKey, _myPublicKey ?? senderId);
+    final encryptedPayload = CryptoService.encrypt(content, groupKey);
 
     final message = Message(
       id: const Uuid().v4(),
@@ -205,8 +204,8 @@ class GroupService extends ChangeNotifier {
 
       if (senderId == _myPublicKey || senderId == 'self') return;
 
-      // Placeholder for decryption
-      final decryptedContent = "Decrypted group message"; 
+      final groupKey = CryptoService.deriveSharedKey(groupId, _myPublicKey ?? senderId);
+      final decryptedContent = CryptoService.decrypt(encryptedMsg, groupKey);
 
       final message = Message(
         id: payload['id'],
