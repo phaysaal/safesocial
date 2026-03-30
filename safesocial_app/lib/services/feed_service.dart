@@ -127,7 +127,7 @@ class FeedService extends ChangeNotifier {
     if (_myPublicKey != null) {
       final postJson = jsonEncode({'type': 'post', 'post': post.toJson()});
       for (final contact in _contacts.where((c) => !c.blocked)) {
-        _feedRelay.sendViaRelay(contact.publicKey, postJson);
+        _feedRelay.sendViaRelay('feed:${contact.publicKey}', postJson);
       }
     }
   }
@@ -255,7 +255,7 @@ class FeedService extends ChangeNotifier {
       'emoji': emoji,
     });
     for (final contact in _contacts.where((c) => !c.blocked)) {
-      _feedRelay.sendViaRelay(contact.publicKey, reactionJson);
+      _feedRelay.sendViaRelay('feed:${contact.publicKey}', reactionJson);
     }
   }
 
