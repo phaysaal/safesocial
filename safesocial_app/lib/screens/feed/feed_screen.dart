@@ -240,13 +240,7 @@ class _FeedScreenState extends State<FeedScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Text(
-              'Spheres',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-                fontSize: 24,
-              ),
-            ),
+            Image.asset('assets/images/logo.png', width: 28, height: 28),
             const SizedBox(width: 8),
             _NetworkDot(),
           ],
@@ -257,8 +251,8 @@ class _FeedScreenState extends State<FeedScreen> {
             onPressed: () => _showCreatePostSheet(context),
           ),
           IconButton(
-            icon: const Icon(Icons.favorite_border),
-            onPressed: () {},
+            icon: const Icon(Icons.notifications_none_outlined),
+            onPressed: () => context.push('/notifications'),
           ),
           IconButton(
             icon: const Icon(Icons.chat_bubble_outline),
@@ -275,6 +269,8 @@ class _FeedScreenState extends State<FeedScreen> {
                 slivers: [
                   // Stories row
                   SliverToBoxAdapter(child: _StoriesRow()),
+                  // Quick-access icon row
+                  const SliverToBoxAdapter(child: _QuickAccessRow()),
                   // Memories Banner
                   if (memories.isNotEmpty)
                     SliverToBoxAdapter(child: _MemoriesBanner(count: memories.length)),
@@ -313,6 +309,7 @@ class _FeedScreenState extends State<FeedScreen> {
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _StoriesRow()),
+        const SliverToBoxAdapter(child: _QuickAccessRow()),
         SliverToBoxAdapter(child: _CreatePostBar()),
         SliverToBoxAdapter(
           child: Container(height: 8, color: theme.scaffoldBackgroundColor),
@@ -353,6 +350,61 @@ class _FeedScreenState extends State<FeedScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Quick Access Row ────────────────────────────────────────────────────────
+
+class _QuickAccessRow extends StatelessWidget {
+  const _QuickAccessRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final items = [
+      (Icons.group_outlined, 'Groups', '/groups'),
+      (Icons.photo_album_outlined, 'Albums', '/albums'),
+      (Icons.auto_awesome_outlined, 'Memories', '/memories'),
+      (Icons.search_outlined, 'Search', '/search'),
+      (Icons.settings_outlined, 'Settings', '/settings'),
+    ];
+
+    return Container(
+      color: cs.surface,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: items.map((item) {
+          return InkWell(
+            onTap: () => GoRouter.of(context).push(item.$3),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(item.$1, color: cs.onPrimaryContainer, size: 24),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    item.$2,
+                    style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }
