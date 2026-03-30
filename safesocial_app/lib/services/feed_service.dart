@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../models/contact.dart';
 import '../models/post.dart';
 import 'debug_log_service.dart';
+import 'media_service.dart';
 import 'relay_service.dart';
 
 /// Manages the social feed with P2P sync via Veilid DHT and fallback relay.
@@ -125,7 +126,8 @@ class FeedService extends ChangeNotifier {
     notifyListeners();
 
     if (_myPublicKey != null) {
-      final postJson = jsonEncode({'type': 'post', 'post': post.toJson()});
+      final relayPost = await _encodePostMedia(post);
+      final postJson = jsonEncode({'type': 'post', 'post': relayPost.toJson()});
       for (final contact in _contacts.where((c) => !c.blocked)) {
         _feedRelay.sendViaRelay('feed:${contact.publicKey}', postJson);
       }
@@ -145,11 +147,28 @@ class FeedService extends ChangeNotifier {
     );
   }
 
-  void _handleIncomingFeedItem(String contactKey, String data) {
+  void _handleIncomingFeedItem(String contactKey, String data) async {
     try {
       final json = jsonDecode(data);
       if (json['type'] == 'post') {
-        _mergePost(Post.fromJson(json['post']));
+        final post = await _decodePostMedia(Post.fromJson(json['post']));
+        _mergePost(post);
+      } else if (json['type'] == 'like') {
+        final postId = json['post_id'] as String;
+        final authorId = json['author_id'] as String;
+        final liked = json['liked'] as bool;
+        final index = _posts.indexWhere((p) => p.id == postId);
+        if (index == -1) return;
+        final post = _posts[index];
+        final newLikes = List<String>.from(post.likes);
+        if (liked) {
+          if (!newLikes.contains(authorId)) newLikes.add(authorId);
+        } else {
+          newLikes.remove(authorId);
+        }
+        _posts[index] = post.copyWith(likes: newLikes);
+        _persistPosts();
+        notifyListeners();
       } else if (json['type'] == 'reaction') {
         final postId = json['post_id'] as String;
         final authorId = json['author_id'] as String;
@@ -175,6 +194,36 @@ class FeedService extends ChangeNotifier {
   }
 
 
+  /// Encode local image paths as base64 data URIs for relay transfer.
+  Future<Post> _encodePostMedia(Post post) async {
+    if (post.mediaRefs.isEmpty) return post;
+    final encoded = <String>[];
+    for (final ref in post.mediaRefs) {
+      if (ref.startsWith('data:')) {
+        encoded.add(ref);
+      } else {
+        final b64 = await MediaService.encodeImageForRelay(ref);
+        if (b64 != null) encoded.add(b64);
+      }
+    }
+    return post.copyWith(mediaRefs: encoded);
+  }
+
+  /// Decode base64 data URIs received from relay into local file paths.
+  Future<Post> _decodePostMedia(Post post) async {
+    if (post.mediaRefs.isEmpty) return post;
+    final decoded = <String>[];
+    for (final ref in post.mediaRefs) {
+      if (ref.startsWith('data:image/')) {
+        final localPath = await MediaService.decodeAndSaveImage(ref);
+        if (localPath != null) decoded.add(localPath);
+      } else {
+        decoded.add(ref);
+      }
+    }
+    return post.copyWith(mediaRefs: decoded);
+  }
+
   void _mergePost(Post post) {
     if (_posts.any((p) => p.id == post.id)) return;
     
@@ -194,17 +243,29 @@ class FeedService extends ChangeNotifier {
   }
 
   void toggleLike(String postId) {
+    if (_myPublicKey == null) return;
     final index = _posts.indexWhere((p) => p.id == postId);
-    if (index != -1) {
-      final post = _posts[index];
-      final newLikes = List<String>.from(post.likes);
-      if (post.isLikedBySelf) {
-        newLikes.remove('self');
-      } else {
-        newLikes.add('self');
-      }
-      _posts[index] = post.copyWith(likes: newLikes);
-      notifyListeners();
+    if (index == -1) return;
+    final post = _posts[index];
+    final newLikes = List<String>.from(post.likes);
+    final nowLiked = !post.isLikedBySelf;
+    if (post.isLikedBySelf) {
+      newLikes.remove('self');
+    } else {
+      newLikes.add('self');
+    }
+    _posts[index] = post.copyWith(likes: newLikes);
+    _persistPosts();
+    notifyListeners();
+
+    final likeJson = jsonEncode({
+      'type': 'like',
+      'post_id': postId,
+      'author_id': _myPublicKey,
+      'liked': nowLiked,
+    });
+    for (final contact in _contacts.where((c) => !c.blocked)) {
+      _feedRelay.sendViaRelay('feed:${contact.publicKey}', likeJson);
     }
   }
 
