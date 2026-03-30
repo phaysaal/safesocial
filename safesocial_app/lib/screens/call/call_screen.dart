@@ -17,6 +17,8 @@ class _CallScreenState extends State<CallScreen> {
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final Map<String, RTCVideoRenderer> _remoteRenderers = {};
 
+  bool _listenerAdded = false;
+
   @override
   void initState() {
     super.initState();
@@ -24,8 +26,19 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_listenerAdded) {
+      context.read<CallService>().addListener(_onCallServiceChanged);
+      _listenerAdded = true;
+    }
+  }
+
+  @override
   void dispose() {
-    context.read<CallService>().removeListener(_onCallStateChanged);
+    if (_listenerAdded) {
+      context.read<CallService>().removeListener(_onCallServiceChanged);
+    }
     _localRenderer.dispose();
     for (var r in _remoteRenderers.values) {
       r.dispose();
@@ -33,38 +46,35 @@ class _CallScreenState extends State<CallScreen> {
     super.dispose();
   }
 
-  Future<void> _updateRemoteRenderers(Map<String, MediaStream> streams) async {
-    // Add new renderers
-    for (var entry in streams.entries) {
+  void _onCallServiceChanged() {
+    if (!mounted) return;
+    final cs = context.read<CallService>();
+
+    // Auto-dismiss when call ends
+    if (cs.state == CallState.idle) {
+      Navigator.of(context).popUntil((r) => r.isFirst || r.settings.name == '/');
+      return;
+    }
+
+    // Sync remote renderers whenever streams change
+    _syncRemoteRenderers(cs.remoteStreams);
+  }
+
+  Future<void> _syncRemoteRenderers(Map<String, MediaStream> streams) async {
+    // Add renderers for new streams
+    for (final entry in streams.entries) {
       if (!_remoteRenderers.containsKey(entry.key)) {
         final renderer = RTCVideoRenderer();
         await renderer.initialize();
         renderer.srcObject = entry.value;
-        setState(() {
-          _remoteRenderers[entry.key] = renderer;
-        });
+        if (mounted) setState(() => _remoteRenderers[entry.key] = renderer);
       }
     }
-    // Remove old renderers
-    _remoteRenderers.removeWhere((key, renderer) {
-      if (!streams.containsKey(key)) {
-        renderer.dispose();
-        return true;
-      }
-      return false;
-    });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    context.read<CallService>().addListener(_onCallStateChanged);
-  }
-
-  void _onCallStateChanged() {
-    final cs = context.read<CallService>();
-    if (cs.state == CallState.idle && mounted) {
-      Navigator.of(context).popUntil((r) => r.isFirst || r.settings.name == '/');
+    // Remove renderers for ended streams
+    final toRemove = _remoteRenderers.keys.where((k) => !streams.containsKey(k)).toList();
+    for (final key in toRemove) {
+      _remoteRenderers[key]?.dispose();
+      if (mounted) setState(() => _remoteRenderers.remove(key));
     }
   }
 
@@ -74,7 +84,6 @@ class _CallScreenState extends State<CallScreen> {
     final isVideo = callService.callType == CallType.video;
 
     _localRenderer.srcObject = callService.localStream;
-    _updateRemoteRenderers(callService.remoteStreams);
 
     return Scaffold(
       backgroundColor: Colors.black,
