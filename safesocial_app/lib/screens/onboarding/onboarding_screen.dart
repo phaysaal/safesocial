@@ -1,11 +1,10 @@
-import '../../services/relay_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/identity_service.dart';
-import '../../services/debug_log_service.dart';
 import '../../services/relay_service.dart';
+import '../../services/debug_log_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -51,6 +50,74 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } finally {
       if (mounted) setState(() => _isCreating = false);
     }
+  }
+
+  Future<void> _showImportDialog(BuildContext context) async {
+    final blobController = TextEditingController();
+    final passphraseController = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import Identity'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Paste your backup data below, then enter your passphrase if it was encrypted.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: blobController,
+              decoration: const InputDecoration(labelText: 'Backup data'),
+              maxLines: 4,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: passphraseController,
+              decoration: const InputDecoration(labelText: 'Passphrase (if encrypted)'),
+              obscureText: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final blob = blobController.text.trim();
+              final pass = passphraseController.text.trim();
+              if (blob.isEmpty) return;
+              Navigator.pop(ctx);
+              try {
+                final idService = context.read<IdentityService>();
+                final ok = await idService.importIdentity(blob, passphrase: pass.isEmpty ? null : pass);
+                if (!mounted) return;
+                if (ok) {
+                  final relay = context.read<RelayService>();
+                  await idService.publishProfileToRelay(relay);
+                  context.go('/');
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Import failed — check your backup data or passphrase')),
+                  );
+                }
+              } catch (e) {
+                DebugLogService().error('Onboarding', 'Import failed: $e');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Import failed: $e')),
+                  );
+                }
+              }
+            },
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    blobController.dispose();
+    passphraseController.dispose();
   }
 
   @override
@@ -148,7 +215,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
                 const SizedBox(height: 16),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () => _showImportDialog(context),
                   child: Text(
                     'Import existing identity',
                     style: TextStyle(color: cs.onSurfaceVariant),
