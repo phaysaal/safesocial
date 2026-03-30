@@ -149,7 +149,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(Icons.visibility_off_outlined, color: cs.primary),
             title: const Text('Network Privacy'),
-            subtitle: const Text('Onion routing via Veilid private routes'),
+            subtitle: const Text('End-to-end encrypted via Cloudflare relay'),
             trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
           ),
           const Divider(indent: 56),
@@ -167,8 +167,8 @@ class SettingsScreen extends StatelessWidget {
                 applicationVersion: '0.1.0',
                 applicationLegalese:
                     'Your data. Your network. Your rules.\n\n'
-                    'Spheres is a decentralized peer-to-peer social network '
-                    'built on Veilid.',
+                    'Spheres is a private, end-to-end encrypted social network '
+                    'with no servers storing your data in plaintext.',
               );
             },
           ),
