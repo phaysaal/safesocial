@@ -1,7 +1,4 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
@@ -35,39 +32,35 @@ void main() async {
   final ringService = RingService();
   final albumService = AlbumService();
 
-  // Load theme (no Veilid needed)
+  // Load theme
   await themeService.load();
 
   // Wire services
   syncService.attachServices(identityService);
-  
 
-  // Load local data (SharedPreferences — always available)
+  // Load local data (Secure + SharedPrefs)
   await identityService.loadIdentity();
   await contactService.loadContacts();
   await groupService.loadGroups();
   await feedService.loadPosts();
   await ringService.loadRings();
   await albumService.loadAlbums();
+  await chatService.loadConversations();
 
-  // Set my info for contact handshakes
-  if (identityService.publicKey != null) {
-    contactService.setMyInfo(identityService.publicKey!, identityService.currentIdentity?.displayName ?? 'User');
+  // Set my info for contact handshakes and chat
+  if (identityService.isOnboarded) {
+    contactService.setMyInfo(identityService.publicKey!, identityService.currentIdentity!.displayName);
+    chatService.setMyInfo(identityService.publicKey!, identityService.secretKey!);
+    callService.setMyInfo(identityService.publicKey!, identityService.secretKey!);
   }
 
-  // Set up relay for existing contacts — works WITHOUT Veilid
+  // Set up relay for existing contacts
   _connectRelay(identityService, chatService, feedService, groupService, contactService, callService, albumService);
 
-  // Start Veilid and Rust Core in the background AFTER the app is running
+  // Start Rust Core in the background (non-blocking)
   WidgetsBinding.instance.addPostFrameCallback((_) async {
     try {
-      final appDir = await getApplicationDocumentsDirectory();
-      
-      // Initialize Rust Core (Double Ratchet brain)
       await rustCoreService.init();
-
-
-      _connectRelay(identityService, chatService, feedService, groupService, contactService, callService, albumService);
     } catch (e) {
       DebugLogService().error('Main', 'Backend startup failed: $e');
     }
@@ -95,7 +88,7 @@ void main() async {
   );
 }
 
-/// Connect relay for all existing contacts. Works without Veilid.
+/// Connect relay for all existing contacts.
 void _connectRelay(
   IdentityService identityService,
   ChatService chatService,
@@ -105,18 +98,20 @@ void _connectRelay(
   CallService callService,
   AlbumService albumService,
 ) {
-  final pubKey = identityService.publicKey;
-  if (pubKey == null || pubKey.isEmpty) return;
+  if (!identityService.isOnboarded) return;
 
-  chatService.setMyPublicKey(pubKey);
-  callService.setMyPublicKey(pubKey);
+  final pubKey = identityService.publicKey!;
+  final secretKey = identityService.secretKey!;
+
   for (final contact in contactService.contacts) {
+    if (contact.blocked) continue;
     chatService.connectRelay(contact.publicKey);
-    callService.connectSignaling(contact.publicKey);
   }
-  feedService.initSync(pubKey, contactService.contacts);
-  groupService.initSync(pubKey);
-  albumService.initSync(pubKey);
+  
+  // Feed, Group, and Album services would be updated to use Relay too
+  feedService.initSync(pubKey, secretKey, contactService.contacts);
+  groupService.initSync(pubKey, secretKey);
+  albumService.initSync(pubKey, secretKey);
 
   DebugLogService().success('Main', 'Relay connected for ${contactService.contacts.length} contacts');
 }
