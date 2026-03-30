@@ -89,12 +89,9 @@ class _ContactListTile extends StatelessWidget {
         contact.displayName,
         style: const TextStyle(fontWeight: FontWeight.w600),
       ),
-      subtitle: contact.isPending 
+      subtitle: contact.isPending
           ? Text('Pending approval...', style: TextStyle(color: cs.secondary, fontSize: 12))
-          : Text(
-              contact.publicKey.length > 16 ? contact.publicKey.substring(0, 16) + '...' : contact.publicKey,
-              style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-            ),
+          : null,
       trailing: PopupMenuButton<String>(
         onSelected: (value) => _handleMenuAction(context, value, contactService),
         itemBuilder: (context) => [

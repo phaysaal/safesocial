@@ -109,6 +109,7 @@ void _connectRelay(
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;
     chatService.connectRelay(contact.publicKey);
+    callService.connectSignaling(contact.publicKey);
   }
   
   // Feed, Group, and Album services would be updated to use Relay too
