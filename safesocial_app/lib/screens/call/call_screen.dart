@@ -25,6 +25,7 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    context.read<CallService>().removeListener(_onCallStateChanged);
     _localRenderer.dispose();
     for (var r in _remoteRenderers.values) {
       r.dispose();
@@ -52,6 +53,19 @@ class _CallScreenState extends State<CallScreen> {
       }
       return false;
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    context.read<CallService>().addListener(_onCallStateChanged);
+  }
+
+  void _onCallStateChanged() {
+    final cs = context.read<CallService>();
+    if (cs.state == CallState.idle && mounted) {
+      Navigator.of(context).popUntil((r) => r.isFirst || r.settings.name == '/');
+    }
   }
 
   @override
@@ -138,36 +152,61 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Widget _buildControls(BuildContext context, CallService callService) {
+    final isRingingIncoming =
+        callService.state == CallState.ringing && callService.isIncomingCall;
+
     return Positioned(
       bottom: 40,
       left: 0,
       right: 0,
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _CallActionButton(
-                icon: callService.isMuted ? Icons.mic_off : Icons.mic,
-                onTap: () => callService.toggleMute(),
-                active: !callService.isMuted,
-              ),
-              if (callService.callType == CallType.video)
+          if (isRingingIncoming)
+            // Incoming call: Accept / Decline
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
                 _CallActionButton(
-                  icon: callService.isCameraOff ? Icons.videocam_off : Icons.videocam,
-                  onTap: () => callService.toggleCamera(),
-                  active: !callService.isCameraOff,
+                  icon: Icons.call_end,
+                  onTap: () {
+                    callService.endCall();
+                    Navigator.pop(context);
+                  },
+                  color: Colors.red,
                 ),
-              _CallActionButton(
-                icon: Icons.call_end,
-                onTap: () {
-                  callService.endCall();
-                  Navigator.pop(context);
-                },
-                color: Colors.red,
-              ),
-            ],
-          ),
+                _CallActionButton(
+                  icon: Icons.call,
+                  onTap: () => callService.acceptCall(),
+                  color: Colors.green,
+                ),
+              ],
+            )
+          else
+            // Active or outgoing call controls
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _CallActionButton(
+                  icon: callService.isMuted ? Icons.mic_off : Icons.mic,
+                  onTap: () => callService.toggleMute(),
+                  active: !callService.isMuted,
+                ),
+                if (callService.callType == CallType.video)
+                  _CallActionButton(
+                    icon: callService.isCameraOff ? Icons.videocam_off : Icons.videocam,
+                    onTap: () => callService.toggleCamera(),
+                    active: !callService.isCameraOff,
+                  ),
+                _CallActionButton(
+                  icon: Icons.call_end,
+                  onTap: () {
+                    callService.endCall();
+                    Navigator.pop(context);
+                  },
+                  color: Colors.red,
+                ),
+              ],
+            ),
         ],
       ),
     );

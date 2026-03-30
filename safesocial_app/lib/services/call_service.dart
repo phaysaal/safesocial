@@ -37,6 +37,7 @@ class CallService extends ChangeNotifier {
   bool _isCameraOff = false;
   bool _isSpeakerOn = false;
   bool _isIncomingCall = false;
+  RTCSessionDescription? _pendingOffer; // stored until callee accepts
   
   // Getters
   CallState get state => _state;
@@ -65,9 +66,7 @@ class CallService extends ChangeNotifier {
 
   void connectSignaling(String contactKey) {
     if (_myPublicKey == null) return;
-    _signaling.connect('call:$_myPublicKey', 'call:$contactKey', mySecretKey: _mySecretKey);
-    final sharedSecret = CryptoService.deriveSharedKey(_myPublicKey!, contactKey);
-    _rustCore.initiateSession(contactKey, base64Encode(utf8.encode(sharedSecret)));
+    _signaling.connect('call:$_myPublicKey', 'call:$contactKey', mySecretKey: _mySecretKey, authPublicKey: _myPublicKey);
   }
 
   /// Start a 1:1 call.
@@ -136,13 +135,25 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> acceptCall() async {
-    if (_remoteContactKey == null) return;
+    if (_remoteContactKey == null || _pendingOffer == null) return;
     _state = CallState.connecting;
     notifyListeners();
 
     await _requestPermissions(_callType);
     await _initLocalStream(_callType);
-    // Peer setup happens when we receive the offer
+    await _setupPeer(_remoteContactKey!, isInitiator: false);
+
+    final pc = _peerConnections[_remoteContactKey!]!;
+    await pc.setRemoteDescription(_pendingOffer!);
+    _pendingOffer = null;
+
+    final answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    _sendSignal(_remoteContactKey!, {
+      'type': 'call_answer',
+      'sdp': answer.sdp,
+      'sdp_type': answer.type,
+    });
   }
 
   Future<void> endCall() async {
@@ -157,6 +168,8 @@ class CallService extends ChangeNotifier {
     _localStream = null;
     _state = CallState.idle;
     _groupId = null;
+    _pendingOffer = null;
+    _isIncomingCall = false;
     notifyListeners();
   }
 
@@ -237,6 +250,8 @@ class CallService extends ChangeNotifier {
           if (_state == CallState.idle) {
             _remoteContactKey = senderKey;
             _remoteContactName = data['caller_name'];
+            _callType = data['call_type'] == 'video' ? CallType.video : CallType.audio;
+            _pendingOffer = RTCSessionDescription(data['sdp'], data['sdp_type']);
             _isIncomingCall = true;
             _state = CallState.ringing;
             onIncomingCall?.call(senderKey, _remoteContactName!, _callType);
