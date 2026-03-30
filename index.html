@@ -243,7 +243,7 @@
   <section class="hero">
     <div class="container">
       <h1>Your life. Your network.<br><span>Absolute privacy.</span></h1>
-      <p>Spheres v0.4.4: The "Circle of Trust" update is here. A decentralized social network designed for close-knit circles. No algorithms, no ads, and zero server-side storage.</p>
+      <p>Spheres v0.4.4: A private social network designed for close-knit circles. No algorithms, no ads, no phone number required, and your data never stored in plaintext on any server.</p>
       <a href="#download" class="btn btn-primary">Download Spheres v0.4.4</a>
     </div>
   </section>
@@ -278,15 +278,8 @@
               <td class="feature-col">Metadata Privacy</td>
               <td class="cross">None (Tracked)</td>
               <td class="cross">Poor (Leaks graph)</td>
-              <td class="check">High (Onion)</td>
-              <td class="highlight check">Maximum (Onion + P2P)</td>
-            </tr>
-            <tr>
-              <td class="feature-col">Onion Routing</td>
-              <td class="cross">❌</td>
-              <td class="cross">❌</td>
-              <td class="check">✅</td>
-              <td class="highlight check">✅ (Veilid)</td>
+              <td class="check">High</td>
+              <td class="highlight check">High (E2E + no plaintext)</td>
             </tr>
             <tr>
               <td class="feature-col">Phone / Email Req.</td>
@@ -296,11 +289,18 @@
               <td class="highlight check">Not Required</td>
             </tr>
             <tr>
-              <td class="feature-col">Forward Secrecy</td>
+              <td class="feature-col">E2E Encryption</td>
               <td class="cross">❌</td>
               <td class="check">✅</td>
               <td class="check">✅</td>
-              <td class="highlight check">✅ (Double Ratchet)</td>
+              <td class="highlight check">✅ (Ed25519 keys)</td>
+            </tr>
+            <tr>
+              <td class="feature-col">Open Source</td>
+              <td class="cross">❌</td>
+              <td class="cross">❌</td>
+              <td class="check">✅</td>
+              <td class="highlight check">✅ (Full stack)</td>
             </tr>
             <tr>
               <td class="feature-col">Audience Rings</td>
@@ -331,17 +331,17 @@
 
       <div class="security-grid">
         <div class="security-item">
-          <div class="security-icon">🛡️</div>
+          <div class="security-icon">🔑</div>
           <div>
-            <h4>Double Ratchet Forward Secrecy</h4>
-            <p>Every single message uses a unique, ephemeral key. Past message history remains unreadable even if current keys are compromised.</p>
+            <h4>Ed25519 Cryptographic Identity</h4>
+            <p>Your identity is a cryptographic keypair — no username, no password, no email. Only you hold your private key. All messages are signed and encrypted before leaving your device.</p>
           </div>
         </div>
         <div class="security-item">
-          <div class="security-icon">🧅</div>
+          <div class="security-icon">☁️</div>
           <div>
-            <h4>Onion Routing (Veilid)</h4>
-            <p>All traffic is masked by multiple peer nodes. Your IP address is never revealed to your contacts or the network infrastructure.</p>
+            <h4>Zero-Knowledge Relay</h4>
+            <p>Messages travel through an end-to-end encrypted relay. The relay sees only opaque encrypted blobs — no message content, no social graph, no plaintext metadata.</p>
           </div>
         </div>
         <div class="security-item">
@@ -398,7 +398,6 @@
       <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 10px;">Part of the <strong>SafeSelf</strong> project. Your data. Your network. Your rules.</p>
       <div class="footer-links">
         <a href="https://github.com/phaysaal/safesocial">GitHub</a>
-        <a href="https://veilid.com">Veilid</a>
       </div>
     </div>
   </footer>
