@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'rust_core_service.dart';
 import 'debug_log_service.dart';
@@ -12,26 +12,25 @@ import 'debug_log_service.dart';
 /// Handles creation and restoration of encrypted network backups.
 class BackupService extends ChangeNotifier {
   final RustCoreService _rustCore = RustCoreService();
-  static const _secureStorage = FlutterSecureStorage();
-  static const _secureSecretKey = 'spheres_identity_secret';
+  final _secureStorage = const FlutterSecureStorage();
 
   /// Create a full backup bundle and encrypt it with a passphrase.
   Future<String> createBackup({String? passphrase}) async {
     final prefs = await SharedPreferences.getInstance();
-
+    
     // 1. Collect all essential data
-    final identity = prefs.getString('spheres_identity_profile');
+    final profile = prefs.getString('spheres_identity_profile');
     final pubKey = prefs.getString('spheres_identity_pubkey');
+    final secretKey = await _secureStorage.read(key: 'spheres_identity_secret');
     final contacts = prefs.getString('spheres_contacts');
     final posts = prefs.getString('spheres_feed_posts');
-    // Secret key lives in FlutterSecureStorage, not SharedPreferences
-    final secretKey = await _secureStorage.read(key: _secureSecretKey);
 
     final payload = {
-      'identity': identity != null ? jsonDecode(identity) : null,
-      'keypair': (pubKey != null && secretKey != null)
-          ? {'publicKey': pubKey, 'secretKey': secretKey}
-          : null,
+      'identity': profile != null ? jsonDecode(profile) : null,
+      'keypair': {
+        'key': pubKey,
+        'secret': secretKey,
+      },
       'contacts': contacts != null ? jsonDecode(contacts) : [],
       'posts': posts != null ? jsonDecode(posts) : [],
       'version': 2,
@@ -94,24 +93,24 @@ class BackupService extends ChangeNotifier {
     }
 
     final data = jsonDecode(decryptedJson) as Map<String, dynamic>;
-
-    // 4. Restore to SharedPreferences and FlutterSecureStorage
+    
+    // 4. Restore to Storage
     final prefs = await SharedPreferences.getInstance();
-
+    
     if (data['identity'] != null) {
       await prefs.setString('spheres_identity_profile', jsonEncode(data['identity']));
     }
+    
     if (data['keypair'] != null) {
       final keypair = data['keypair'] as Map<String, dynamic>;
-      // Public key → SharedPreferences
-      if (keypair['publicKey'] != null) {
-        await prefs.setString('spheres_identity_pubkey', keypair['publicKey'] as String);
+      if (keypair['key'] != null) {
+        await prefs.setString('spheres_identity_pubkey', keypair['key']);
       }
-      // Secret key → FlutterSecureStorage (never SharedPreferences)
-      if (keypair['secretKey'] != null) {
-        await _secureStorage.write(key: _secureSecretKey, value: keypair['secretKey'] as String);
+      if (keypair['secret'] != null) {
+        await _secureStorage.write(key: 'spheres_identity_secret', value: keypair['secret']);
       }
     }
+
     if (data['contacts'] != null) {
       await prefs.setString('spheres_contacts', jsonEncode(data['contacts']));
     }
@@ -119,6 +118,6 @@ class BackupService extends ChangeNotifier {
       await prefs.setString('spheres_feed_posts', jsonEncode(data['posts']));
     }
 
-    DebugLogService().success('Backup', 'Data restored successfully from vault');
+    DebugLogService().success('Backup', 'Data restored successfully');
   }
 }
