@@ -80,22 +80,26 @@ class MediaService extends ChangeNotifier {
   }
 
   /// Encode a local image file as a base64 data URI for relay transfer.
-  /// Compresses to max 300KB for efficient relay transfer.
+  /// Resizes to max 1024px and compresses to JPEG quality 70 before encoding.
   static Future<String?> encodeImageForRelay(String filePath) async {
     try {
       final file = File(filePath);
       if (!file.existsSync()) return null;
 
       final bytes = await file.readAsBytes();
-      // Skip files larger than 2MB for relay (too large for WebSocket)
-      if (bytes.length > 2 * 1024 * 1024) {
-        DebugLogService().warn('Media', 'Image too large for relay: ${bytes.length} bytes');
-        return null;
-      }
+      final image = img.decodeImage(bytes);
+      if (image == null) return null;
 
-      final ext = filePath.split('.').last.toLowerCase();
-      final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
-      return 'data:$mime;base64,${base64Encode(bytes)}';
+      // Resize to max 1024px on the longest side
+      final resized = (image.width > image.height)
+          ? (image.width > 1024 ? img.copyResize(image, width: 1024) : image)
+          : (image.height > 1024 ? img.copyResize(image, height: 1024) : image);
+
+      // Encode as JPEG quality 70 (~50–150KB for typical photos)
+      final compressed = Uint8List.fromList(img.encodeJpg(resized, quality: 70));
+
+      DebugLogService().info('Media', 'Image compressed: ${bytes.length ~/ 1024}KB → ${compressed.length ~/ 1024}KB');
+      return 'data:image/jpeg;base64,${base64Encode(compressed)}';
     } catch (e) {
       DebugLogService().error('Media', 'Failed to encode image: $e');
       return null;
