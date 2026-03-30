@@ -1,13 +1,8 @@
 /**
- * Spheres Relay — Cloudflare Worker WebSocket relay
+ * Spheres Relay — Cloudflare Worker
  *
- * Zero-knowledge message relay. Passes encrypted blobs between peers.
- * No auth, no logs, no storage.
- *
- * Protocol:
- *   1. Client connects: wss://relay.spheres.dev/room/<room_id>
- *   2. Messages from one client are forwarded to all others in the room
- *   3. Undelivered messages held in memory for 5 minutes max
+ * Zero-knowledge message relay and state sync. Passes encrypted blobs.
+ * No auth, no logs.
  */
 
 export default {
@@ -19,24 +14,30 @@ export default {
       return new Response(JSON.stringify({
         service: "Spheres Relay",
         status: "ok",
-        version: "2.0",
+        version: "3.0",
       }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    // WebSocket upgrade for /room/<id>
-    const match = url.pathname.match(/^\/room\/([a-zA-Z0-9_-]+)$/);
-    if (!match) {
-      return new Response("Not found. Use /room/<room_id>", { status: 404 });
+    // State Sync Endpoint (replaces DHT)
+    // /state/<pubkey>/<key>
+    const stateMatch = url.pathname.match(/^\/state\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)$/);
+    if (stateMatch) {
+      // Use a separate DO or just the same room DO but keyed by pubkey
+      const pubkey = stateMatch[1];
+      const id = env.RELAY_ROOM.idFromName(`state_${pubkey}`);
+      const room = env.RELAY_ROOM.get(id);
+      return room.fetch(request);
     }
 
-    const upgradeHeader = request.headers.get("Upgrade");
-    if (!upgradeHeader || upgradeHeader !== "websocket") {
-      return new Response("Expected WebSocket", { status: 426 });
+    // Room endpoints (WebSocket or HTTP Sync)
+    const roomMatch = url.pathname.match(/^\/room\/([a-zA-Z0-9_-]+)(?:\/(sync|ack))?$/);
+    if (!roomMatch) {
+      return new Response("Not found.", { status: 404 });
     }
 
-    const roomId = match[1];
+    const roomId = roomMatch[1];
     const id = env.RELAY_ROOM.idFromName(roomId);
     const room = env.RELAY_ROOM.get(id);
     return room.fetch(request);
@@ -44,8 +45,7 @@ export default {
 };
 
 /**
- * Durable Object: one per room.
- * Uses the WebSocket Hibernation API so connections survive DO sleep cycles.
+ * Durable Object: handles WebSockets, Offline Mailbox, and State Sync.
  */
 export class RelayRoom {
   constructor(state, env) {
@@ -53,63 +53,89 @@ export class RelayRoom {
   }
 
   async fetch(request) {
+    const url = new URL(request.url);
+
+    // --- STATE SYNC LOGIC ---
+    if (url.pathname.startsWith('/state/')) {
+      const parts = url.pathname.split('/');
+      const key = parts[3]; // /state/pubkey/key
+      
+      if (request.method === 'GET') {
+        const data = await this.state.storage.get(`state_${key}`);
+        if (!data) return new Response(null, { status: 404 });
+        return new Response(data, { 
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      if (request.method === 'POST') {
+        const data = await request.text();
+        await this.state.storage.put(`state_${key}`, data);
+        return new Response('OK', { status: 200 });
+      }
+      return new Response('Method not allowed', { status: 405 });
+    }
+
+    // --- HTTP MAILBOX SYNC LOGIC ---
+    if (url.pathname.endsWith('/sync') && request.method === 'GET') {
+      const pending = await this.state.storage.get("mailbox") || [];
+      return new Response(JSON.stringify(pending), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (url.pathname.endsWith('/ack') && request.method === 'POST') {
+      const { ids } = await request.json();
+      let pending = await this.state.storage.get("mailbox") || [];
+      pending = pending.filter(m => !ids.includes(m.id));
+      await this.state.storage.put("mailbox", pending);
+      return new Response('OK', { status: 200 });
+    }
+
+    // --- WEBSOCKET LOGIC ---
+    const upgradeHeader = request.headers.get("Upgrade");
+    if (!upgradeHeader || upgradeHeader !== "websocket") {
+      return new Response("Expected WebSocket", { status: 426 });
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-
-    // Accept the WebSocket with hibernation support
     this.state.acceptWebSocket(server);
-
-    // Deliver any pending messages from storage
-    const pending = await this.state.storage.get("pending") || [];
-    for (const msg of pending) {
-      try {
-        server.send(msg.data);
-      } catch (_) {}
-    }
-    // Clear pending after delivery
-    if (pending.length > 0) {
-      await this.state.storage.delete("pending");
-    }
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws, message) {
-    // Get all connected WebSockets via the hibernation API
     const sockets = this.state.getWebSockets();
-
     let delivered = false;
+    
+    // Attempt real-time delivery
     for (const sock of sockets) {
       if (sock !== ws) {
         try {
           sock.send(message);
           delivered = true;
-        } catch (_) {
-          // Dead socket — will be cleaned up by webSocketClose
-        }
+        } catch (_) {}
       }
     }
 
-    // If no one else is connected, queue the message (max 50, 5 min TTL)
+    // If offline, store in mailbox (30 days TTL, max 1000)
     if (!delivered) {
-      const pending = await this.state.storage.get("pending") || [];
+      const pending = await this.state.storage.get("mailbox") || [];
+      
       pending.push({
-        data: message,
+        id: crypto.randomUUID(),
+        data: typeof message === 'string' ? message : btoa(String.fromCharCode(...new Uint8Array(message))),
         ts: Date.now(),
       });
 
-      // Remove old messages (> 5 min) and cap at 50
-      const cutoff = Date.now() - 5 * 60 * 1000;
-      const filtered = pending.filter(m => m.ts > cutoff).slice(-50);
-      await this.state.storage.put("pending", filtered);
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const filtered = pending.filter(m => m.ts > cutoff).slice(-1000);
+      
+      await this.state.storage.put("mailbox", filtered);
     }
   }
 
-  async webSocketClose(ws, code, reason, wasClean) {
-    // Nothing to do — hibernation API handles cleanup
-  }
-
-  async webSocketError(ws, error) {
-    // Nothing to do
-  }
+  async webSocketClose(ws, code, reason, wasClean) {}
+  async webSocketError(ws, error) {}
 }

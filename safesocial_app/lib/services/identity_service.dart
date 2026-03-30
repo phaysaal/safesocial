@@ -1,55 +1,59 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:veilid/veilid.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
+import 'package:convert/convert.dart';
 
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
-import 'veilid_service.dart';
+import 'relay_service.dart';
 import 'rust_core_service.dart';
+
+class IdentityKeyPair {
+  final String publicKey;
+  final String secretKey;
+
+  IdentityKeyPair({required this.publicKey, required this.secretKey});
+}
 
 /// Manages the user's cryptographic identity and profile.
 class IdentityService extends ChangeNotifier {
   static const _prefsProfileKey = 'spheres_identity_profile';
   static const _prefsKeypairKey = 'spheres_identity_keypair';
 
-  final VeilidService veilidService;
   final RustCoreService _rustCore = RustCoreService();
   UserProfile? _currentIdentity;
-  KeyPair? _keypair;
+  IdentityKeyPair? _keypair;
 
-  IdentityService({required this.veilidService});
+  IdentityService();
 
   UserProfile? get currentIdentity => _currentIdentity;
-  String? get publicKey => _keypair?.key.toString();
+  String? get publicKey => _keypair?.publicKey;
   bool get isOnboarded => _currentIdentity != null && _keypair != null;
 
   /// Generate a new identity keypair and profile.
   Future<void> createIdentity(String displayName, {String? bio}) async {
     try {
-      // Ensure backend is ready
-      final ok = await veilidService.waitForInit();
-      if (!ok) throw Exception('Veilid backend failed to initialize in time');
-
-      final crypto = await Veilid.instance.getCryptoSystem(
-        bestCryptoKind,
+      final keyPair = ed.generateKey();
+      final pubKeyHex = hex.encode(keyPair.publicKey.bytes);
+      final privKeyHex = hex.encode(keyPair.privateKey.bytes);
+      
+      _keypair = IdentityKeyPair(
+        publicKey: pubKeyHex,
+        secretKey: privKeyHex,
       );
       
-      _keypair = await crypto.generateKeyPair();
-      
       _currentIdentity = UserProfile(
-        publicKey: _keypair!.key.toString(),
+        publicKey: pubKeyHex,
         displayName: displayName,
         bio: bio ?? '',
         updatedAt: DateTime.now(),
       );
 
       await _persistIdentity();
-      await _publishProfileToDHT();
       notifyListeners();
     } catch (e) {
       DebugLogService().error('Identity', 'Failed to create identity: $e');
@@ -66,7 +70,6 @@ class IdentityService extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _persistIdentity();
-    await _publishProfileToDHT();
     notifyListeners();
   }
 
@@ -78,7 +81,6 @@ class IdentityService extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await _persistIdentity();
-    await _publishProfileToDHT();
     notifyListeners();
   }
 
@@ -88,8 +90,8 @@ class IdentityService extends ChangeNotifier {
     
     // Create the bundle
     final payload = jsonEncode({
-      'key': _keypair!.key.toString(),
-      'secret': _keypair!.secret.toString(),
+      'key': _keypair!.publicKey,
+      'secret': _keypair!.secretKey,
       'profile': _currentIdentity?.toJson(),
     });
 
@@ -109,7 +111,6 @@ class IdentityService extends ChangeNotifier {
         if (result == null) return false;
         decrypted = result;
       } else {
-        // Fallback for plaintext (not recommended)
         decrypted = blob;
       }
 
@@ -117,9 +118,9 @@ class IdentityService extends ChangeNotifier {
       final keyStr = data['key'] as String;
       final secretStr = data['secret'] as String;
       
-      _keypair = KeyPair(
-        key: PublicKey.fromString(keyStr),
-        secret: SecretKey.fromString(secretStr),
+      _keypair = IdentityKeyPair(
+        publicKey: keyStr,
+        secretKey: secretStr,
       );
 
       if (data['profile'] != null) {
@@ -146,13 +147,13 @@ class IdentityService extends ChangeNotifier {
         _currentIdentity = UserProfile.fromJson(jsonDecode(profileJson));
       }
       
-      // Load KeyPair (Issue #1 & #2 Fix)
+      // Load KeyPair
       final keypairJson = prefs.getString(_prefsKeypairKey);
       if (keypairJson != null) {
         final data = jsonDecode(keypairJson);
-        _keypair = KeyPair(
-          key: PublicKey.fromString(data['key']),
-          secret: SecretKey.fromString(data['secret']),
+        _keypair = IdentityKeyPair(
+          publicKey: data['key'],
+          secretKey: data['secret'],
         );
         DebugLogService().success('Identity', 'Cryptographic identity restored');
       }
@@ -164,21 +165,18 @@ class IdentityService extends ChangeNotifier {
   }
 
   /// PERSISTENT MEMORY: Reset everything.
-  /// Clears all local storage, deletes all files, and ensures Android Backup is updated.
+  /// Clears all local storage, deletes all files.
   Future<void> resetEverything() async {
-    // 1. Shutdown Veilid first to release file locks
-    await veilidService.shutdown();
-
-    // 2. Wipe SharedPreferences and ENSURE it commits (for Android Backup)
+    // 1. Wipe SharedPreferences and ENSURE it commits (for Android Backup)
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     
-    // 3. Clear in-memory state
+    // 2. Clear in-memory state
     _currentIdentity = null;
     _keypair = null;
 
     try {
-      // 4. Wipe all app files by deleting directory contents
+      // 3. Wipe all app files by deleting directory contents
       final appDir = await getApplicationDocumentsDirectory();
       if (appDir.existsSync()) {
         final items = appDir.listSync();
@@ -207,10 +205,17 @@ class IdentityService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _publishProfileToDHT() async {
+  Future<void> publishProfileToRelay(RelayService relay) async {
     if (_keypair == null || _currentIdentity == null) return;
-    // FUTURE: Write _currentIdentity to a DHT record owned by _keypair
-    DebugLogService().info('Identity', 'Profile publication to DHT scheduled');
+    
+    final payload = jsonEncode(_currentIdentity!.toJson());
+    final success = await relay.pushState(publicKey!, 'profile', payload);
+    
+    if (success) {
+      DebugLogService().success('Identity', 'Profile published to Relay state store');
+    } else {
+      DebugLogService().error('Identity', 'Failed to publish profile to Relay');
+    }
   }
 
   Future<void> _persistIdentity() async {
@@ -218,8 +223,8 @@ class IdentityService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       if (_keypair != null) {
         await prefs.setString(_prefsKeypairKey, jsonEncode({
-          'key': _keypair!.key.toString(),
-          'secret': _keypair!.secret.toString(),
+          'key': _keypair!.publicKey,
+          'secret': _keypair!.secretKey,
         }));
       }
       if (_currentIdentity != null) {

@@ -1,87 +1,12 @@
+import '../../services/relay_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/identity_service.dart';
 import '../../services/debug_log_service.dart';
+import '../../services/relay_service.dart';
 
-/// Compact scrolling log panel shown during Veilid initialization.
-class _InitLogPanel extends StatefulWidget {
-  const _InitLogPanel();
-
-  @override
-  State<_InitLogPanel> createState() => _InitLogPanelState();
-}
-
-class _InitLogPanelState extends State<_InitLogPanel> {
-  final _scroll = ScrollController();
-
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return ListenableBuilder(
-      listenable: DebugLogService(),
-      builder: (context, _) {
-        final logs = DebugLogService().logs;
-        _scrollToBottom();
-        return Container(
-          height: 140,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.7),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: cs.outline.withValues(alpha: 0.3)),
-          ),
-          padding: const EdgeInsets.all(8),
-          child: logs.isEmpty
-              ? Center(
-                  child: Text('Waiting for logs…',
-                      style: TextStyle(
-                          color: cs.onSurface.withValues(alpha: 0.4),
-                          fontSize: 11,
-                          fontFamily: 'monospace')))
-              : ListView.builder(
-                  controller: _scroll,
-                  itemCount: logs.length,
-                  itemBuilder: (context, i) {
-                    final e = logs[i];
-                    final color = switch (e.level) {
-                      LogLevel.error => Colors.red.shade300,
-                      LogLevel.warning => Colors.orange.shade300,
-                      LogLevel.success => Colors.green.shade300,
-                      LogLevel.info => Colors.grey.shade400,
-                    };
-                    return Text(
-                      '${e.timeStr} [${e.tag}] ${e.message}',
-                      style: TextStyle(
-                          color: color, fontSize: 10, fontFamily: 'monospace'),
-                    );
-                  },
-                ),
-        );
-      },
-    );
-  }
-}
-
-/// Onboarding screen for new users to create their cryptographic identity.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
 
@@ -108,8 +33,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _isCreating = true);
 
     try {
-      await context.read<IdentityService>().createIdentity(name);
+      final idService = context.read<IdentityService>();
+      await idService.createIdentity(name);
+      
       if (mounted) {
+        final relay = context.read<RelayService>();
+        await idService.publishProfileToRelay(relay);
         context.go('/');
       }
     } catch (e) {
@@ -181,7 +110,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   textCapitalization: TextCapitalization.words,
                   autofocus: true,
                   onFieldSubmitted: (_) => _handleOnboarding(),
-                  // Fix Issue #10: Validation logic
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter a name';
@@ -199,89 +127,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
-                const _InitLogPanel(),
-                const SizedBox(height: 12),
-
-                ListenableBuilder(
-                  listenable: context.watch<IdentityService>().veilidService,
-                  builder: (context, _) {
-                    final vs = context.read<IdentityService>().veilidService;
-
-                    if (vs.isFailed) {
-                      return Column(
-                        children: [
-                          Text(
-                            vs.error ?? 'Backend failed to start',
-                            style: TextStyle(color: cs.error, fontSize: 12),
-                            textAlign: TextAlign.center,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 8),
-                          ElevatedButton(
-                            onPressed: () async {
-                              await context.read<IdentityService>().veilidService.retryInitialize();
-                            },
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.all(18),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            child: const Text(
-                              'Retry',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          if (vs.isProtectedStoreError) ...[
-                            const SizedBox(height: 8),
-                            OutlinedButton(
-                              onPressed: () async {
-                                await context.read<IdentityService>().veilidService.clearStateAndRetry();
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.all(16),
-                                side: BorderSide(color: cs.error),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                              child: Text(
-                                'Clear Corrupted Data & Retry',
-                                style: TextStyle(fontSize: 14, color: cs.error),
-                              ),
-                            ),
-                          ],
-                        ],
-                      );
-                    }
-
-                    return ElevatedButton(
-                      onPressed: (_isCreating || !vs.isInitialized) ? null : _handleOnboarding,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.all(18),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                ElevatedButton(
+                  onPressed: _isCreating ? null : _handleOnboarding,
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.all(18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: _isCreating
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        )
+                      : const Text(
+                          'Start Networking',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
-                      ),
-                      child: _isCreating
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2.5),
-                            )
-                          : Text(
-                              vs.isInitialized ? 'Start Networking' : 'Initializing Backend…',
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                    );
-                  },
                 ),
                 const SizedBox(height: 16),
                 TextButton(
-                  onPressed: () {
-                    // TODO: Implement "Import existing identity"
-                  },
+                  onPressed: () {},
                   child: Text(
                     'Import existing identity',
                     style: TextStyle(color: cs.onSurfaceVariant),

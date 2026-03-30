@@ -32,9 +32,23 @@ class ContactService extends ChangeNotifier {
   Future<void> addContact(String publicKey, String displayName, {bool isPending = false}) async {
     if (_contacts.any((c) => c.publicKey == publicKey)) return;
 
+    // Try to fetch their profile from Relay to get avatar/bio/latest name
+    String finalName = displayName;
+    try {
+      final profileStr = await _handshakeRelay.pullState(publicKey, 'profile');
+      if (profileStr != null) {
+        final profile = jsonDecode(profileStr);
+        if (profile['displayName'] != null) {
+          finalName = profile['displayName'];
+        }
+      }
+    } catch (_) {
+      // Fallback to provided name
+    }
+
     final contact = Contact(
       publicKey: publicKey,
-      displayName: displayName,
+      displayName: finalName,
       addedAt: DateTime.now(),
       isPending: isPending,
     );

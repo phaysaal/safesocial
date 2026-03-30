@@ -14,7 +14,6 @@ import '../../services/contact_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/call_service.dart';
 import '../../services/media_service.dart';
-import '../../services/veilid_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
@@ -219,12 +218,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Builder(builder: (ctx) {
-                    final veilidOk = ctx.watch<VeilidService>().isAttached;
                     final relayOk = chatService.isRelayConnected(widget.conversationId);
-                    final connected = veilidOk || relayOk;
+                    final connected = relayOk;
                     return Text(
                       connected
-                          ? (veilidOk ? 'P2P Connected' : 'Relay Connected')
+                          ? 'Relay Connected'
                           : 'Not connected',
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontSize: 11,

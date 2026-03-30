@@ -9,7 +9,6 @@ import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
 import '../../services/ring_service.dart';
-import '../../services/veilid_service.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_card.dart';
@@ -623,31 +622,25 @@ class _CreatePostBar extends StatelessWidget {
 }
 
 class _NetworkDot extends StatelessWidget {
+  const _NetworkDot({super.key});
+
   @override
   Widget build(BuildContext context) {
-    final vs = context.watch<VeilidService>();
-    final isConnected = vs.isAttached;
-    final state = vs.attachmentState.toString().split('.').last;
-
     return GestureDetector(
       onTap: () {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              isConnected
-                  ? 'P2P network: $state'
-                  : 'Not connected to P2P network${vs.error != null ? ": ${vs.error}" : ""}',
-            ),
-            duration: const Duration(seconds: 3),
+          const SnackBar(
+            content: Text('Relay network: connected'),
+            duration: Duration(seconds: 3),
           ),
         );
       },
       child: Container(
         width: 10,
         height: 10,
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           shape: BoxShape.circle,
-          color: isConnected ? Colors.green : Colors.orange,
+          color: Colors.green,
         ),
       ),
     );

@@ -3,20 +3,17 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:veilid/veilid.dart';
 
 import '../models/contact.dart';
 import '../models/post.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
-import 'veilid_service.dart';
 
 /// Manages the social feed with P2P sync via Veilid DHT and fallback relay.
 class FeedService extends ChangeNotifier {
   static const _postsKey = 'spheres_feed_posts';
   static const _hiddenKey = 'spheres_hidden_posts';
 
-  VeilidService? _veilidService;
   final List<Post> _posts = [];
   final Set<String> _hiddenPostIds = {};
   bool _isRefreshing = false;
@@ -59,9 +56,6 @@ class FeedService extends ChangeNotifier {
   bool get isRefreshing => _isRefreshing;
   Set<String> get hiddenPostIds => Set.unmodifiable(_hiddenPostIds);
 
-  void attachVeilidService(VeilidService vs) {
-    _veilidService = vs;
-  }
 
   void initSync(String myPublicKey, List<Contact> contacts) {
     _myPublicKey = myPublicKey;
@@ -160,9 +154,6 @@ class FeedService extends ChangeNotifier {
     }
   }
 
-  void handleValueChange(RecordKey key, List<ValueSubkeyRange> subkeys) {
-    // DHT update handling
-  }
 
   void _mergePost(Post post) {
     if (_posts.any((p) => p.id == post.id)) return;

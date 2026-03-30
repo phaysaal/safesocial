@@ -5,7 +5,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
-import 'services/veilid_service.dart';
 import 'services/identity_service.dart';
 import 'services/chat_service.dart';
 import 'services/feed_service.dart';
@@ -24,8 +23,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final themeService = ThemeService();
-  final veilidService = VeilidService();
-  final identityService = IdentityService(veilidService: veilidService);
+  final identityService = IdentityService();
   final chatService = ChatService();
   final feedService = FeedService();
   final contactService = ContactService();
@@ -41,14 +39,8 @@ void main() async {
   await themeService.load();
 
   // Wire services
-  chatService.attachVeilidService(veilidService);
-  feedService.attachVeilidService(veilidService);
-  syncService.attachServices(identityService, veilidService);
+  syncService.attachServices(identityService);
   
-  veilidService.onValueChange = (key, subkeys) {
-    chatService.handleValueChange(key, subkeys);
-    feedService.handleValueChange(key, subkeys);
-  };
 
   // Load local data (SharedPreferences — always available)
   await identityService.loadIdentity();
@@ -74,24 +66,7 @@ void main() async {
       // Initialize Rust Core (Double Ratchet brain)
       await rustCoreService.init();
 
-      // Initialize Veilid
-      final statePath = '${appDir.path}/veilid';
-      // Ensure Veilid state directories exist
-      await Directory(statePath).create(recursive: true);
-      await Directory('$statePath/protected_store').create(recursive: true);
-      await Directory('$statePath/table_store').create(recursive: true);
-      await Directory('$statePath/block_store').create(recursive: true);
 
-      await veilidService.initialize(statePath);
-      await identityService.loadIdentity();
-      await chatService.loadConversations();
-
-      // Refresh contact service info if identity changed
-      if (identityService.publicKey != null) {
-        contactService.setMyInfo(identityService.publicKey!, identityService.currentIdentity?.displayName ?? 'User');
-      }
-
-      // Reconnect relay with any new identity from Veilid
       _connectRelay(identityService, chatService, feedService, groupService, contactService, callService, albumService);
     } catch (e) {
       DebugLogService().error('Main', 'Backend startup failed: $e');
@@ -102,7 +77,6 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: themeService),
-        ChangeNotifierProvider.value(value: veilidService),
         ChangeNotifierProvider.value(value: identityService),
         ChangeNotifierProvider.value(value: chatService),
         ChangeNotifierProvider.value(value: feedService),

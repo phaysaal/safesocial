@@ -4,13 +4,11 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:veilid/veilid.dart';
 
 import '../models/message.dart';
 import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
-import 'veilid_service.dart';
 import 'rust_core_service.dart';
 
 /// Manages chat conversations via Veilid DHT.
@@ -18,22 +16,17 @@ class ChatService extends ChangeNotifier {
   static const _prefsConversationsKey = 'spheres_conversations';
   static const _prefsMsgPrefix = 'spheres_msgs_';
 
-  VeilidService? _veilidService;
   final RelayService _relayService = RelayService();
   final RustCoreService _rustCore = RustCoreService();
   String? _myPublicKey;
 
   final Map<String, List<Message>> _conversations = {};
-  final Map<String, RecordKey> _conversationDhtKeys = {};
   final Map<String, String> _conversationRoles = {}; 
   String? _activeConversation;
 
   Map<String, List<Message>> get conversations => Map.unmodifiable(_conversations);
   String? get activeConversation => _activeConversation;
 
-  void attachVeilidService(VeilidService vs) {
-    _veilidService = vs;
-  }
 
   void setActiveConversation(String? conversationId) {
     _activeConversation = conversationId;
@@ -77,17 +70,10 @@ class ChatService extends ChangeNotifier {
     final encrypted = CryptoService.encrypt(jsonEncode(message.toJson()), sharedKey);
     _relayService.sendViaRelay(contactPublicKey, encrypted);
 
-    // 2. Send via DHT
-    final dhtKey = _conversationDhtKeys[contactPublicKey];
-    if (dhtKey != null && _veilidService != null) {
-      final rc = _veilidService!.routingContext;
-      // DHT implementation would go here
-    }
+
   }
 
-  void handleValueChange(RecordKey key, List<ValueSubkeyRange> subkeys) {
-    // DHT update handling
-  }
+
 
   void _handleRelayMessage(String contactKey, String encryptedMsg) {
     try {
@@ -143,7 +129,7 @@ class ChatService extends ChangeNotifier {
 
   void removeConversation(String contactKey) {
     _conversations.remove(contactKey);
-    _conversationDhtKeys.remove(contactKey);
+    
     _persistConversationKeys();
     notifyListeners();
   }
@@ -160,7 +146,7 @@ class ChatService extends ChangeNotifier {
     await prefs.setString(_prefsConversationsKey, jsonEncode(Map.fromIterable(keys)));
   }
 
-  Future<void> createConversation(String contactPublicKey, [KeyPair? writerKeypair]) async {
+  Future<void> createConversation(String contactPublicKey) async {
     _conversations.putIfAbsent(contactPublicKey, () => []);
     notifyListeners();
   }

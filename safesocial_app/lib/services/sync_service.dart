@@ -4,14 +4,12 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:veilid/veilid.dart';
 
 import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'identity_service.dart';
 import 'relay_service.dart';
 import 'rust_core_service.dart';
-import 'veilid_service.dart';
 
 /// Manages multi-device synchronization and secure identity cloning.
 class SyncService extends ChangeNotifier {
@@ -19,14 +17,12 @@ class SyncService extends ChangeNotifier {
   final RelayService _syncRelay = RelayService();
   
   IdentityService? _identityService;
-  VeilidService? _veilidService;
 
   bool _isLinking = false;
   bool get isLinking => _isLinking;
 
-  void attachServices(IdentityService iserv, VeilidService vs) {
+  void attachServices(IdentityService iserv) {
     _identityService = iserv;
-    _veilidService = vs;
   }
 
   /// Start the linking process as the PRIMARY device.

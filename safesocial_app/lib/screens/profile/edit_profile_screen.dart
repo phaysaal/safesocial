@@ -6,6 +6,8 @@ import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
 import '../../widgets/avatar.dart';
 
+import '../../services/relay_service.dart';
+
 /// Screen to edit user display name and bio.
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -40,15 +42,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     setState(() => _isSaving = true);
     try {
-      await context.read<IdentityService>().updateProfile(
+      final idService = context.read<IdentityService>();
+      await idService.updateProfile(
         displayName: name,
         bio: _bioController.text.trim(),
       );
-      if (mounted) context.pop();
+      
+      // Sync to relay
+      if (mounted) {
+        final relay = context.read<RelayService>();
+        await idService.publishProfileToRelay(relay);
+        context.pop();
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update profile: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update profile: $e')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -58,7 +69,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final mediaService = context.read<MediaService>();
     final picked = await mediaService.pickAndStoreImage();
     if (picked != null && mounted) {
-      await context.read<IdentityService>().updateAvatar(picked);
+      final idService = context.read<IdentityService>();
+      await idService.updateAvatar(picked);
+      
+      if (mounted) {
+        final relay = context.read<RelayService>();
+        await idService.publishProfileToRelay(relay);
+      }
     }
   }
 
