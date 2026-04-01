@@ -93,7 +93,7 @@ class ContactService extends ChangeNotifier {
       'publicKey': _myPublicKey,
     });
     
-    _handshakeRelay.connect('handshake:$_myPublicKey', 'handshake:$targetKey').then((_) {
+    _handshakeRelay.connect('handshake:$_myPublicKey', 'handshake:$targetKey', authPublicKey: _myPublicKey).then((_) {
       _handshakeRelay.sendViaRelay('handshake:$targetKey', payload);
     });
   }

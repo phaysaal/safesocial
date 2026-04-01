@@ -164,7 +164,7 @@ class SettingsScreen extends StatelessWidget {
               showAboutDialog(
                 context: context,
                 applicationName: 'Spheres',
-                applicationVersion: '0.1.0',
+                applicationVersion: '0.4.5',
                 applicationLegalese:
                     'Your data. Your network. Your rules.\n\n'
                     'Spheres is a private, end-to-end encrypted social network '
@@ -176,7 +176,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(Icons.code, color: cs.primary),
             title: const Text('Version'),
-            subtitle: const Text('0.3.0 (development)'),
+            subtitle: const Text('0.4.5 (alpha)'),
           ),
           const Divider(indent: 56),
 
