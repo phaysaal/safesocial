@@ -4,19 +4,28 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../crypto/envelope.dart';
+import '../crypto/session_manager.dart';
 import '../models/message.dart';
-import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
-import 'rust_core_service.dart';
 
-/// Manages chat conversations via Veilid DHT.
+/// Manages chat conversations over the relay.
+///
+/// Messages are sealed with [SealMode.chain]: each one uses a fresh ratcheted
+/// key, and the sender is proven by an Ed25519 signature over the envelope
+/// header rather than taken from a self-declared field.
 class ChatService extends ChangeNotifier {
   static const _prefsConversationsKey = 'spheres_conversations';
   static const _prefsMsgPrefix = 'spheres_msgs_';
 
   final RelayService _relayService = RelayService();
-  final RustCoreService _rustCore = RustCoreService();
+  SessionManager? _sessions;
+
+  /// Resolves a contact's X25519 public key by their identity key. Supplied by
+  /// the app so ChatService does not need to depend on ContactService.
+  String? Function(String identityKey)? _resolveExchangeKey;
+
   String? _myPublicKey;
   String? _mySecretKey;
 
@@ -32,19 +41,24 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setMyInfo(String publicKey, String secretKey) {
+  void setMyInfo(
+    String publicKey,
+    String secretKey, {
+    SessionManager? sessions,
+    String? Function(String identityKey)? resolveExchangeKey,
+  }) {
     _myPublicKey = publicKey;
     _mySecretKey = secretKey;
-    _relayService.onMessageReceived = (contactKey, encryptedMsg) {
-      _handleRelayMessage(contactKey, encryptedMsg);
+    if (sessions != null) _sessions = sessions;
+    if (resolveExchangeKey != null) _resolveExchangeKey = resolveExchangeKey;
+    _relayService.onMessageReceived = (contactKey, raw) {
+      _handleRelayMessage(contactKey, raw);
     };
   }
 
   void connectRelay(String contactPublicKey) {
     if (_myPublicKey != null) {
       _relayService.connect(_myPublicKey!, contactPublicKey, mySecretKey: _mySecretKey!);
-      final sharedSecret = CryptoService.deriveSharedKey(_myPublicKey!, contactPublicKey);
-      _rustCore.initiateSession(contactPublicKey, base64Encode(utf8.encode(sharedSecret)));
     }
   }
 
@@ -52,10 +66,22 @@ class ChatService extends ChangeNotifier {
 
   List<String> getConversationIds() => _conversations.keys.toList();
 
-  Future<void> sendMessage(String contactPublicKey, String content, {List<String>? mediaRefs, String? audioRef}) async {
+  /// Send a message to a contact.
+  ///
+  /// Throws [NoSessionException] when the contact's key exchange key is not
+  /// known yet. The message is not stored locally in that case — showing it as
+  /// sent when it was never encrypted or delivered is what made the old
+  /// behaviour misleading.
+  Future<void> sendMessage(String contactPublicKey, String content,
+      {List<String>? mediaRefs, String? audioRef}) async {
+    final sessions = _sessions;
+    if (sessions == null || !sessions.isReady) {
+      throw StateError('ChatService has no identity yet');
+    }
+
     final message = Message(
       id: const Uuid().v4(),
-      senderId: _myPublicKey ?? 'self',
+      senderId: _myPublicKey!,
       recipientId: contactPublicKey,
       content: content,
       timestamp: DateTime.now(),
@@ -63,24 +89,50 @@ class ChatService extends ChangeNotifier {
       audioRef: audioRef,
     );
 
+    final sealed = await sessions.seal(
+      peerIdentityKey: contactPublicKey,
+      peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactPublicKey),
+      type: 'chat',
+      plaintext: jsonEncode(message.toJson()),
+    );
+
     _addMessageLocally(contactPublicKey, message);
-
-    // 1. Send via Relay
-    final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactPublicKey);
-    final encrypted = CryptoService.encrypt(jsonEncode(message.toJson()), sharedKey);
-    _relayService.sendViaRelay(contactPublicKey, encrypted);
-
-
+    _relayService.sendViaRelay(contactPublicKey, sealed);
   }
 
+  Future<void> _handleRelayMessage(String contactKey, String raw) async {
+    final sessions = _sessions;
+    if (sessions == null) return;
 
-
-  void _handleRelayMessage(String contactKey, String encryptedMsg) {
     try {
-      final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactKey);
-      final decrypted = CryptoService.decrypt(encryptedMsg, sharedKey);
-      final msg = Message.fromJson(jsonDecode(decrypted));
-      _addMessageLocally(contactKey, msg);
+      final opened = await sessions.open(
+        raw: raw,
+        resolveExchangeKey: (key) => _resolveExchangeKey?.call(key),
+      );
+
+      if (opened.type != 'chat') {
+        DebugLogService()
+            .warn('Chat', 'Ignoring envelope of type "${opened.type}"');
+        return;
+      }
+
+      final msg = Message.fromJson(jsonDecode(opened.plaintext));
+
+      // Authorship comes from the verified signature, not the payload. A peer
+      // cannot attribute a message to someone else by setting senderId.
+      if (msg.senderId != opened.from) {
+        DebugLogService().warn(
+          'Chat',
+          'Dropping message: payload claims ${msg.senderId} but it is signed by ${opened.from}',
+        );
+        return;
+      }
+
+      _addMessageLocally(opened.from, msg);
+    } on EnvelopeException catch (e) {
+      DebugLogService().error('Chat', 'Rejected message from $contactKey: $e');
+    } on NoSessionException catch (e) {
+      DebugLogService().warn('Chat', 'Cannot decrypt yet: $e');
     } catch (e) {
       DebugLogService().error('Chat', 'Failed to handle relay message: $e');
     }
@@ -127,10 +179,16 @@ class ChatService extends ChangeNotifier {
     await prefs.setString(_prefsConversationsKey, jsonEncode(Map.fromIterable(keys)));
   }
 
-  void removeConversation(String contactKey) {
+  Future<void> removeConversation(String contactKey) async {
     _conversations.remove(contactKey);
-    
-    _persistConversationKeys();
+    _sessions?.forget(contactKey);
+
+    // Actually delete the stored messages. Previously only the index entry was
+    // removed, leaving the message history readable on disk indefinitely.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_prefsMsgPrefix$contactKey');
+
+    await _persistConversationKeys();
     notifyListeners();
   }
 

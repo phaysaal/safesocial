@@ -3,11 +3,27 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
-/// Simple content encryption service.
+/// DEPRECATED placeholder cipher. Do not use for new code.
 ///
-/// Placeholder implementation using XOR + random nonce.
-/// When Veilid is fully active, this will be replaced with
-/// XChaCha20-Poly1305 from the Veilid crypto system.
+/// [encrypt]/[decrypt] are XOR against a repeating key, and [deriveSharedKey]
+/// returns SHA-256 of the two *public* keys — derivable by anyone who knows
+/// both, including the relay operator. This is not encryption.
+///
+/// Real cryptography lives in `lib/crypto/`: use `SessionManager.seal` and
+/// `SessionManager.open`, which give authenticated encryption with X25519 key
+/// agreement and per-message ratcheted keys.
+///
+/// Chat has been migrated. Still on this placeholder, tracked as the remainder
+/// of Phase 1 in `docs/rebuild_plan.md`:
+///   * `group_service` — needs a per-sphere key, which arrives with the sphere
+///     model in Phase 3
+///   * `call_service` — signalling payloads
+///   * `feed_service`/`album_service` — currently send plaintext, so they need
+///     sealing rather than migrating
+///
+/// [deriveRelayRoomId] is separate: it is an addressing scheme, not a cipher,
+/// and is replaced by derived rotating mailboxes in Phase 2.
+@Deprecated('Use SessionManager (lib/crypto/) — this is a placeholder cipher')
 class CryptoService {
   static const _roomSalt = 'spheres-relay-v2-salt-secret-';
 

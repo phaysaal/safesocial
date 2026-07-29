@@ -2,7 +2,16 @@ import 'package:equatable/equatable.dart';
 
 /// Represents a user's public profile in the Sphere network.
 class UserProfile with EquatableMixin {
+  /// Ed25519 identity key, hex. Signs everything this user sends.
   final String publicKey;
+
+  /// X25519 key-exchange public key, hex.
+  ///
+  /// Published so contacts can derive a pairwise secret with us. Null for
+  /// profiles created before key exchange existed; those contacts cannot be
+  /// messaged securely until they publish an updated profile.
+  final String? keyExchangePublicKey;
+
   final String displayName;
   final String bio;
   final String? avatarRef;
@@ -10,6 +19,7 @@ class UserProfile with EquatableMixin {
 
   UserProfile({
     required this.publicKey,
+    this.keyExchangePublicKey,
     required this.displayName,
     required this.bio,
     this.avatarRef,
@@ -19,6 +29,7 @@ class UserProfile with EquatableMixin {
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
       publicKey: json['publicKey'] as String,
+      keyExchangePublicKey: json['keyExchangePublicKey'] as String?,
       displayName: json['displayName'] as String,
       bio: json['bio'] as String,
       avatarRef: json['avatarRef'] as String?,
@@ -29,6 +40,7 @@ class UserProfile with EquatableMixin {
   Map<String, dynamic> toJson() {
     return {
       'publicKey': publicKey,
+      'keyExchangePublicKey': keyExchangePublicKey,
       'displayName': displayName,
       'bio': bio,
       'avatarRef': avatarRef,
@@ -38,6 +50,7 @@ class UserProfile with EquatableMixin {
 
   UserProfile copyWith({
     String? publicKey,
+    String? keyExchangePublicKey,
     String? displayName,
     String? bio,
     String? avatarRef,
@@ -45,6 +58,7 @@ class UserProfile with EquatableMixin {
   }) {
     return UserProfile(
       publicKey: publicKey ?? this.publicKey,
+      keyExchangePublicKey: keyExchangePublicKey ?? this.keyExchangePublicKey,
       displayName: displayName ?? this.displayName,
       bio: bio ?? this.bio,
       avatarRef: avatarRef ?? this.avatarRef,
@@ -53,5 +67,6 @@ class UserProfile with EquatableMixin {
   }
 
   @override
-  List<Object?> get props => [publicKey, displayName, bio, avatarRef, updatedAt];
+  List<Object?> get props =>
+      [publicKey, keyExchangePublicKey, displayName, bio, avatarRef, updatedAt];
 }

@@ -2,7 +2,17 @@ import 'package:equatable/equatable.dart';
 
 /// A contact in the user's address book, identified by public key.
 class Contact with EquatableMixin {
+  /// Ed25519 identity key, hex. How this contact is addressed and verified.
   final String publicKey;
+
+  /// X25519 key-exchange public key, hex.
+  ///
+  /// Required to derive a pairwise secret with this contact. Null means we
+  /// have not learned it yet (added before Phase 1, or from an invite that
+  /// predates it) — messages to them cannot be encrypted until it arrives via
+  /// a handshake or profile fetch.
+  final String? keyExchangePublicKey;
+
   final String displayName;
   final String? nickname;
   final DateTime addedAt;
@@ -15,6 +25,7 @@ class Contact with EquatableMixin {
 
   const Contact({
     required this.publicKey,
+    this.keyExchangePublicKey,
     required this.displayName,
     this.nickname,
     required this.addedAt,
@@ -29,6 +40,7 @@ class Contact with EquatableMixin {
   factory Contact.fromJson(Map<String, dynamic> json) {
     return Contact(
       publicKey: json['publicKey'] as String,
+      keyExchangePublicKey: json['keyExchangePublicKey'] as String?,
       displayName: json['displayName'] as String,
       nickname: json['nickname'] as String?,
       addedAt: DateTime.parse(json['addedAt'] as String),
@@ -44,6 +56,7 @@ class Contact with EquatableMixin {
   Map<String, dynamic> toJson() {
     return {
       'publicKey': publicKey,
+      'keyExchangePublicKey': keyExchangePublicKey,
       'displayName': displayName,
       'nickname': nickname,
       'addedAt': addedAt.toIso8601String(),
@@ -58,6 +71,7 @@ class Contact with EquatableMixin {
 
   Contact copyWith({
     String? publicKey,
+    String? keyExchangePublicKey,
     String? displayName,
     String? nickname,
     DateTime? addedAt,
@@ -70,6 +84,7 @@ class Contact with EquatableMixin {
   }) {
     return Contact(
       publicKey: publicKey ?? this.publicKey,
+      keyExchangePublicKey: keyExchangePublicKey ?? this.keyExchangePublicKey,
       displayName: displayName ?? this.displayName,
       nickname: nickname ?? this.nickname,
       addedAt: addedAt ?? this.addedAt,
@@ -85,6 +100,7 @@ class Contact with EquatableMixin {
   @override
   List<Object?> get props => [
         publicKey,
+        keyExchangePublicKey,
         displayName,
         nickname,
         addedAt,

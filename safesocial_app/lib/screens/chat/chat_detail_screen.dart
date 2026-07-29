@@ -7,6 +7,7 @@ import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../crypto/session_manager.dart';
 import '../../models/message.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
@@ -65,11 +66,36 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (text.isEmpty) return;
 
     _messageController.clear();
-    await context
+    await _send(() => context
         .read<ChatService>()
-        .sendMessage(widget.conversationId, text);
+        .sendMessage(widget.conversationId, text));
+  }
 
-    _scrollToBottom();
+  /// Run a send, surfacing the reason if it could not be encrypted.
+  ///
+  /// A message that cannot be sealed is not shown as sent — the user is told
+  /// why instead, which is the difference between "not delivered" and
+  /// "silently delivered in the clear".
+  Future<void> _send(Future<void> Function() action) async {
+    try {
+      await action();
+      _scrollToBottom();
+    } on NoSessionException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cannot encrypt to this contact yet — their encryption key has not '
+            'arrived. Ask them to open the app, then try again.',
+          ),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not send: $e')));
+    }
   }
 
   void _scrollToBottom() {
@@ -109,12 +135,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       });
 
       if (path != null) {
-        await context.read<ChatService>().sendMessage(
-          widget.conversationId,
-          '[Voice Note]',
-          audioRef: path,
-        );
-        _scrollToBottom();
+        await _send(() => context.read<ChatService>().sendMessage(
+              widget.conversationId,
+              '[Voice Note]',
+              audioRef: path,
+            ));
       }
     } catch (e) {
       debugPrint('[VoiceNote] Error stopping recording: $e');
@@ -152,12 +177,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Future<void> _attachMedia() async {
     final path = await context.read<MediaService>().pickAndStoreImage();
     if (path != null && mounted) {
-      await context.read<ChatService>().sendMessage(
+      await _send(() => context.read<ChatService>().sendMessage(
             widget.conversationId,
             '[Image]',
             mediaRefs: [path],
-          );
-      _scrollToBottom();
+          ));
     }
   }
 

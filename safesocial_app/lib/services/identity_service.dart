@@ -7,6 +7,9 @@ import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:convert/convert.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'package:cryptography/cryptography.dart';
+
+import '../crypto/spheres_crypto.dart';
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
@@ -19,15 +22,29 @@ class IdentityKeyPair {
 }
 
 /// Manages the user's cryptographic identity and profile.
+///
+/// An identity is two key pairs with separate jobs:
+///
+/// * **Ed25519** — signs everything. This is the public key others know you by,
+///   the one in your QR code, and the one that has to stay stable.
+/// * **X25519** — key agreement only, for deriving pairwise secrets.
+///
+/// They are separate rather than one converted into the other: the Ed25519 →
+/// X25519 birational map is easy to get subtly wrong (the previous Rust
+/// implementation returned 32 zero bytes), and publishing a distinct key costs
+/// nothing since profiles are signed anyway.
 class IdentityService extends ChangeNotifier {
   static const _prefsProfileKey = 'spheres_identity_profile';
   static const _prefsPubKeyKey = 'spheres_identity_pubkey';
   static const _secureSecretKey = 'spheres_identity_secret';
+  static const _secureExchangeSecretKey = 'spheres_identity_x25519_secret';
 
   final _secureStorage = const FlutterSecureStorage();
-  
+
   UserProfile? _currentIdentity;
   IdentityKeyPair? _keypair;
+  SimpleKeyPair? _exchangeKeyPair;
+  String? _exchangePublicKeyHex;
 
   IdentityService();
 
@@ -36,20 +53,76 @@ class IdentityService extends ChangeNotifier {
   String? get secretKey => _keypair?.secretKey;
   bool get isOnboarded => _currentIdentity != null && _keypair != null;
 
+  /// Our X25519 key pair, used to derive pairwise secrets with contacts.
+  SimpleKeyPair? get exchangeKeyPair => _exchangeKeyPair;
+
+  /// Our X25519 public key as hex, as published in the profile.
+  String? get exchangePublicKey => _exchangePublicKeyHex;
+
+  /// Create the X25519 key pair if this identity does not have one yet.
+  ///
+  /// Identities created before Phase 1 have only an Ed25519 key, so this runs
+  /// on load as a migration. The Ed25519 key is never regenerated — that would
+  /// change the user's identity and break every existing contact.
+  Future<void> _ensureExchangeKeyPair() async {
+    if (_exchangeKeyPair != null) return;
+
+    final stored = await _secureStorage.read(key: _secureExchangeSecretKey);
+    if (stored != null) {
+      try {
+        _exchangeKeyPair = await SpheresCrypto.keyExchangeKeyPairFromPrivateBytes(
+          hex.decode(stored),
+        );
+        _exchangePublicKeyHex =
+            hex.encode((await _exchangeKeyPair!.extractPublicKey()).bytes);
+        return;
+      } catch (e) {
+        DebugLogService()
+            .error('Identity', 'Stored exchange key unreadable, regenerating: $e');
+      }
+    }
+
+    final pair = await SpheresCrypto.newKeyExchangeKeyPair();
+    final privateBytes = await pair.extractPrivateKeyBytes();
+    await _secureStorage.write(
+      key: _secureExchangeSecretKey,
+      value: hex.encode(privateBytes),
+    );
+
+    _exchangeKeyPair = pair;
+    _exchangePublicKeyHex = hex.encode((await pair.extractPublicKey()).bytes);
+    DebugLogService().info('Identity', 'Key exchange keypair ready');
+
+    // Publish it so contacts can start encrypting to us.
+    if (_currentIdentity != null &&
+        _currentIdentity!.keyExchangePublicKey != _exchangePublicKeyHex) {
+      _currentIdentity = _currentIdentity!.copyWith(
+        keyExchangePublicKey: _exchangePublicKeyHex,
+        updatedAt: DateTime.now(),
+      );
+      await _persistIdentity();
+    }
+  }
+
   /// Generate a new identity keypair and profile.
   Future<void> createIdentity(String displayName, {String? bio}) async {
     try {
       final keyPair = ed.generateKey();
       final pubKeyHex = hex.encode(keyPair.publicKey.bytes);
       final privKeyHex = hex.encode(keyPair.privateKey.bytes);
-      
+
       _keypair = IdentityKeyPair(
         publicKey: pubKeyHex,
         secretKey: privKeyHex,
       );
-      
+
+      // Must exist before the profile is built, so the profile carries it.
+      _exchangeKeyPair = null;
+      await _ensureExchangeKeyPair();
+
       _currentIdentity = UserProfile(
         publicKey: pubKeyHex,
+        keyExchangePublicKey: _exchangePublicKeyHex,
         displayName: displayName,
         bio: bio ?? '',
         updatedAt: DateTime.now(),
@@ -130,6 +203,12 @@ class IdentityService extends ChangeNotifier {
         _currentIdentity = UserProfile.fromJson(data['profile']);
       }
 
+      // A restored identity may predate key exchange, or its X25519 secret may
+      // not have travelled with it. Either way, establish one now.
+      _exchangeKeyPair = null;
+      _exchangePublicKeyHex = null;
+      await _ensureExchangeKeyPair();
+
       await _persistIdentity();
       notifyListeners();
       return true;
@@ -154,6 +233,7 @@ class IdentityService extends ChangeNotifier {
 
       if (pubKey != null && secretKey != null) {
         _keypair = IdentityKeyPair(publicKey: pubKey, secretKey: secretKey);
+        await _ensureExchangeKeyPair();
         DebugLogService().success('Identity', 'Secure identity restored');
       } else {
         // Migration from old SharedPreferences keypair if exists
@@ -161,6 +241,7 @@ class IdentityService extends ChangeNotifier {
         if (legacyJson != null) {
           final data = jsonDecode(legacyJson);
           _keypair = IdentityKeyPair(publicKey: data['key'], secretKey: data['secret']);
+          await _ensureExchangeKeyPair();
           await _persistIdentity(); // This will move it to secure storage
           await prefs.remove('spheres_identity_keypair');
           DebugLogService().info('Identity', 'Migrated identity to secure storage');
@@ -181,6 +262,8 @@ class IdentityService extends ChangeNotifier {
     
     _currentIdentity = null;
     _keypair = null;
+    _exchangeKeyPair = null;
+    _exchangePublicKeyHex = null;
 
     try {
       final appDir = await getApplicationDocumentsDirectory();

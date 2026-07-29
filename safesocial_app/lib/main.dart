@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
+import 'app_wiring.dart';
+import 'crypto/session_manager.dart';
 import 'services/identity_service.dart';
 import 'services/chat_service.dart';
 import 'services/feed_service.dart';
@@ -37,6 +39,8 @@ void main() async {
   // Load theme
   await themeService.load();
 
+  final sessionManager = SessionManager();
+
   // Wire services
   syncService.attachServices(identityService);
 
@@ -49,15 +53,18 @@ void main() async {
   await albumService.loadAlbums();
   await chatService.loadConversations();
 
-  // Set my info for contact handshakes and chat
-  if (identityService.isOnboarded) {
-    contactService.setMyInfo(identityService.publicKey!, identityService.currentIdentity!.displayName);
-    chatService.setMyInfo(identityService.publicKey!, identityService.secretKey!);
-    callService.setMyInfo(identityService.publicKey!, identityService.secretKey!);
-  }
-
-  // Set up relay for existing contacts
-  _connectRelay(identityService, chatService, feedService, groupService, contactService, callService, albumService);
+  // Connect the identity to every service that needs it. Onboarding calls the
+  // same function, so a freshly created identity works without a restart.
+  await wireIdentity(
+    identityService: identityService,
+    sessionManager: sessionManager,
+    contactService: contactService,
+    chatService: chatService,
+    callService: callService,
+    feedService: feedService,
+    groupService: groupService,
+    albumService: albumService,
+  );
 
   // Start Rust Core in the background (non-blocking)
   WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -84,38 +91,10 @@ void main() async {
         ChangeNotifierProvider.value(value: ringService),
         ChangeNotifierProvider.value(value: albumService),
         ChangeNotifierProvider.value(value: relayService),
+        Provider<SessionManager>.value(value: sessionManager),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),
     ),
   );
-}
-
-/// Connect relay for all existing contacts.
-void _connectRelay(
-  IdentityService identityService,
-  ChatService chatService,
-  FeedService feedService,
-  GroupService groupService,
-  ContactService contactService,
-  CallService callService,
-  AlbumService albumService,
-) {
-  if (!identityService.isOnboarded) return;
-
-  final pubKey = identityService.publicKey!;
-  final secretKey = identityService.secretKey!;
-
-  for (final contact in contactService.contacts) {
-    if (contact.blocked) continue;
-    chatService.connectRelay(contact.publicKey);
-    callService.connectSignaling(contact.publicKey);
-  }
-  
-  // Feed, Group, and Album services would be updated to use Relay too
-  feedService.initSync(pubKey, secretKey, contactService.contacts);
-  groupService.initSync(pubKey, secretKey);
-  albumService.initSync(pubKey, secretKey);
-
-  DebugLogService().success('Main', 'Relay connected for ${contactService.contacts.length} contacts');
 }

@@ -2,6 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../app_wiring.dart';
+import '../../crypto/session_manager.dart';
+import '../../services/album_service.dart';
+import '../../services/call_service.dart';
+import '../../services/chat_service.dart';
+import '../../services/contact_service.dart';
+import '../../services/feed_service.dart';
+import '../../services/group_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/relay_service.dart';
 import '../../services/debug_log_service.dart';
@@ -34,12 +42,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       final idService = context.read<IdentityService>();
       await idService.createIdentity(name);
-      
+
+      if (!mounted) return;
+      await _wire();
+
       if (mounted) {
         final relay = context.read<RelayService>();
         await idService.publishProfileToRelay(relay);
-        context.go('/');
       }
+      if (mounted) context.go('/');
     } catch (e) {
       DebugLogService().error('Onboarding', 'Failed to create identity: $e');
       if (mounted) {
@@ -50,6 +61,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } finally {
       if (mounted) setState(() => _isCreating = false);
     }
+  }
+
+  /// Connect the new identity to every service.
+  ///
+  /// Without this the first session after onboarding has no identity wired
+  /// anywhere: no handshakes, no relay, no crypto sessions, and a crash on
+  /// creating a group. It used to take an app restart to recover.
+  Future<void> _wire() async {
+    await wireIdentity(
+      identityService: context.read<IdentityService>(),
+      sessionManager: context.read<SessionManager>(),
+      contactService: context.read<ContactService>(),
+      chatService: context.read<ChatService>(),
+      callService: context.read<CallService>(),
+      feedService: context.read<FeedService>(),
+      groupService: context.read<GroupService>(),
+      albumService: context.read<AlbumService>(),
+    );
   }
 
   Future<void> _showImportDialog(BuildContext context) async {
@@ -90,9 +119,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 final ok = await idService.importIdentity(blob);
                 if (!mounted) return;
                 if (ok) {
+                  await _wire();
+                  if (!mounted) return;
                   final relay = context.read<RelayService>();
                   await idService.publishProfileToRelay(relay);
-                  context.go('/');
+                  if (mounted) context.go('/');
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Import failed — the backup data is not a valid identity')),

@@ -354,6 +354,37 @@ a tracked backlog); 12 tests pass.
 **Exit:** every wire payload is authenticated-encrypted under a key an observer cannot derive;
 tampering and forgery are rejected by tests, not by inspection.
 
+**Progress — foundation and direct messages done.**
+
+Landed:
+
+- `lib/crypto/spheres_crypto.dart` — X25519, HKDF-SHA256, XChaCha20-Poly1305, with
+  domain-separated derivation. The only place in the app that touches a cipher.
+- `lib/crypto/pairwise_session.dart` — symmetric KDF chains giving forward secrecy, with
+  bounded skipped-key handling so out-of-order relay delivery still decrypts.
+- `lib/crypto/envelope.dart` — versioned wire format, Ed25519-signed, header bound as AEAD
+  associated data. Signature is verified before any decryption is attempted.
+- `lib/crypto/session_manager.dart` — per-contact sessions, persistence, replay rejection.
+- Identity gains an X25519 subkey (generated for existing identities on load, published in
+  the signed profile). The Ed25519 key is untouched, so identities stay valid.
+- `Contact` and the handshake carry the peer's X25519 key; the profile pull that always
+  missed `displayName` (it read the wrong nesting level) is fixed and now also learns the
+  exchange key.
+- `ChatService` uses sealed envelopes. Authorship comes from the verified signature, and a
+  payload whose `senderId` disagrees with the signature is dropped.
+- `lib/app_wiring.dart` — identity wiring now runs after onboarding as well as at startup,
+  so the first session works without an app restart.
+- 34 tests pass, including forgery, tamper, replay, out-of-order, and cross-peer misuse.
+
+Remaining before the exit criterion is met:
+
+- `call_service` signalling payloads still use the placeholder cipher.
+- `group_service` still derives its key from the local user's own public key. A correct fix
+  needs a per-sphere key, so this is best done together with Phase 3 rather than twice.
+- `feed_service` and `album_service` send plaintext today; they need sealing (wrap mode) plus
+  audience enforcement, which is also Phase 3 work.
+- `crypto_service.dart` is marked `@Deprecated` and cannot be deleted until the above land.
+
 ### Phase 2 — Stable messaging *(2–3 weeks)*
 
 Everything in §6. This is the phase that fixes the complaint that messaging is unreliable.
