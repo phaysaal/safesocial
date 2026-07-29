@@ -624,7 +624,10 @@ Remaining in Phase 4:
   and relay selection. The relay host is now user-configurable (`RelayConfig`), which is
   what makes the self-hosting story in `relay/README.md` real rather than theoretical.
   Notification preferences are still absent because notifications themselves are.
-- **Stories**: view receipts and replies — still outstanding.
+- ~~**Story view receipts**~~ — done, and deliberately narrower than the mainstream
+  version: a receipt goes to the author alone rather than to the sphere, so members do not
+  learn who else is watching, and it can be switched off in settings. Story *replies* are
+  still outstanding.
 - ~~**TURN**~~ — now configurable (`CallConfig`): custom STUN/TURN servers, or TURN off
   entirely so calls only connect over a direct path. The default is still the free public
   `openrelay.metered.ca`, which is stated plainly in the UI along with what a TURN server

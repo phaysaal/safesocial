@@ -11,6 +11,7 @@ import '../../services/contact_service.dart';
 import '../../services/call_config.dart';
 import '../../services/relay_config.dart';
 import '../../services/backup_service.dart';
+import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/theme_service.dart';
 
@@ -186,6 +187,21 @@ class SettingsScreen extends StatelessWidget {
                   ? 'Nobody is blocked'
                   : '${blocked.length} blocked'),
               onTap: () => _showBlockedDialog(context),
+            );
+          }),
+          const Divider(indent: 56),
+          Builder(builder: (context) {
+            final feed = context.watch<FeedService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.visibility_outlined, color: cs.primary),
+              title: const Text('Story View Receipts'),
+              subtitle: const Text(
+                'Let authors see that you watched their story. Turning this '
+                'off means you watch without telling them.',
+              ),
+              isThreeLine: true,
+              value: feed.sendViewReceipts,
+              onChanged: feed.setSendViewReceipts,
             );
           }),
           const Divider(indent: 56),

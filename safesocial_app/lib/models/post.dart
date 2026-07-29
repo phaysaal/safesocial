@@ -17,6 +17,13 @@ class Post with EquatableMixin {
   final bool isStory;
   final DateTime? expiresAt;
 
+  /// Identity keys of sphere members who have viewed this story.
+  ///
+  /// Only ever populated on the author's own copy: a view receipt is sent to
+  /// the author alone, not fanned out to the sphere, so members do not learn
+  /// who else is watching.
+  final List<String> viewedBy;
+
   const Post({
     required this.id,
     required this.authorId,
@@ -31,6 +38,7 @@ class Post with EquatableMixin {
     required this.sphereId,
     this.isStory = false,
     this.expiresAt,
+    this.viewedBy = const [],
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -60,6 +68,10 @@ class Post with EquatableMixin {
               .toList() ??
           [],
       sphereId: json['sphereId'] as String? ?? '',
+      viewedBy: (json['viewedBy'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          [],
       isStory: json['isStory'] as bool? ?? false,
       expiresAt: json['expiresAt'] != null
           ? DateTime.parse(json['expiresAt'] as String)
@@ -80,6 +92,7 @@ class Post with EquatableMixin {
       'likes': likes,
       'comments': comments.map((c) => c.toJson()).toList(),
       'sphereId': sphereId,
+      'viewedBy': viewedBy,
       'isStory': isStory,
       'expiresAt': expiresAt?.toIso8601String(),
     };
@@ -109,6 +122,7 @@ class Post with EquatableMixin {
     List<String>? likes,
     List<Comment>? comments,
     String? sphereId,
+    List<String>? viewedBy,
     bool? isStory,
     DateTime? expiresAt,
   }) {
@@ -124,6 +138,7 @@ class Post with EquatableMixin {
       likes: likes ?? this.likes,
       comments: comments ?? this.comments,
       sphereId: sphereId ?? this.sphereId,
+      viewedBy: viewedBy ?? this.viewedBy,
       isStory: isStory ?? this.isStory,
       expiresAt: expiresAt ?? this.expiresAt,
     );
@@ -142,6 +157,7 @@ class Post with EquatableMixin {
         likes,
         comments,
         sphereId,
+        viewedBy,
         isStory,
         expiresAt,
       ];

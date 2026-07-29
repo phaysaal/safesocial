@@ -170,6 +170,9 @@ class FeedService extends ChangeNotifier {
   }
 
   Future<void> loadPosts() async {
+    final prefs0 = await SharedPreferences.getInstance();
+    _sendViewReceipts = prefs0.getBool('spheres_story_view_receipts') ?? true;
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final json = prefs.getString(_postsKey);
@@ -300,6 +303,18 @@ class FeedService extends ChangeNotifier {
         _posts[index] = post.copyWith(likes: newLikes);
         _persistPosts();
         notifyListeners();
+      } else if (json['type'] == 'story_view') {
+        final postId = json['post_id'] as String;
+        final index = _posts.indexWhere((p) => p.id == postId);
+        // Only meaningful on our own story, and each viewer counts once.
+        if (index != -1 &&
+            _posts[index].authorId == _myPublicKey &&
+            !_posts[index].viewedBy.contains(authorId)) {
+          _posts[index] = _posts[index]
+              .copyWith(viewedBy: [..._posts[index].viewedBy, authorId]);
+          await _persistPosts();
+          notifyListeners();
+        }
       } else if (json['type'] == 'comment') {
         final comment = Comment.fromJson(json['comment']);
         if (comment.authorId != authorId) {
@@ -411,6 +426,82 @@ class FeedService extends ChangeNotifier {
         'liked': nowLiked,
       }),
     );
+  }
+
+  /// Seal to the sphere but deliver to a single member.
+  ///
+  /// Used for view receipts: the author is entitled to know who watched, but
+  /// the rest of the sphere is not, so this must not fan out.
+  Future<void> _publishToMember({
+    required String sphereId,
+    required String recipient,
+    required String type,
+    required String payloadJson,
+  }) async {
+    final spheres = _spheres;
+    if (spheres == null || recipient == _myPublicKey) return;
+
+    final sphere = spheres.sphere(sphereId);
+    if (sphere == null || !sphere.contains(recipient)) return;
+
+    try {
+      final sealed = await spheres.sealContent(
+        sphereId: sphereId,
+        type: type,
+        plaintext: payloadJson,
+      );
+      _feedRelay.sendViaRelay(recipient, sealed);
+    } catch (e) {
+      DebugLogService().warn('Feed', 'Could not send $type: $e');
+    }
+  }
+
+  /// Whether this device tells authors that we watched their stories.
+  ///
+  /// A view receipt is a disclosure — it tells someone you looked, and when.
+  /// Mainstream apps make that unconditional; here it is a choice, defaulting
+  /// on so the feature behaves as people expect.
+  bool _sendViewReceipts = true;
+  bool get sendViewReceipts => _sendViewReceipts;
+
+  Future<void> setSendViewReceipts(bool value) async {
+    _sendViewReceipts = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('spheres_story_view_receipts', value);
+    notifyListeners();
+  }
+
+  /// Record that we watched a story, and tell its author.
+  ///
+  /// Idempotent: re-opening a story does not send a second receipt.
+  Future<void> markStoryViewed(String postId) async {
+    final me = _myPublicKey;
+    if (me == null) return;
+
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return;
+
+    final post = _posts[index];
+    if (!post.isStory || post.authorId == me) return;
+    if (post.viewedBy.contains(me)) return;
+
+    _posts[index] = post.copyWith(viewedBy: [...post.viewedBy, me]);
+    await _persistPosts();
+
+    if (!_sendViewReceipts) return;
+    await _publishToMember(
+      sphereId: post.sphereId,
+      recipient: post.authorId,
+      type: 'story_view',
+      payloadJson: jsonEncode({'type': 'story_view', 'post_id': postId}),
+    );
+  }
+
+  /// Who has watched one of our stories.
+  List<String> viewersOf(String postId) {
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return const [];
+    return _posts[index].viewedBy;
   }
 
   /// Add a comment, save it, and send it to the sphere.

@@ -1,8 +1,13 @@
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
 import '../../models/post.dart';
+import '../../services/contact_service.dart';
+import '../../services/feed_service.dart';
+import '../../services/identity_service.dart';
 import '../../widgets/avatar.dart';
 
 /// Full-screen viewer for 24-hour ephemeral stories.
@@ -41,6 +46,15 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
       }
     });
     _animController.forward();
+    _recordView(_currentIndex);
+  }
+
+  /// Tell the author we watched, once per story.
+  void _recordView(int index) {
+    if (index < 0 || index >= widget.stories.length) return;
+    final story = widget.stories[index];
+    // Fire and forget: a receipt must never hold up the viewer.
+    context.read<FeedService>().markStoryViewed(story.id);
   }
 
   @override
@@ -78,9 +92,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
   void _onPageChanged(int index) {
     setState(() {
       _currentIndex = index;
+      _recordView(index);
     });
     _animController.reset();
     _animController.forward();
+    _recordView(_currentIndex);
   }
 
   @override
@@ -153,6 +169,75 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
     );
   }
 
+  /// Viewer count, shown only on our own stories.
+  ///
+  /// Sphere members do not learn who else watched — a receipt goes to the
+  /// author alone.
+  Widget _buildViewerBar() {
+    final me = context.watch<IdentityService>().publicKey;
+    final story = widget.stories[_currentIndex];
+    if (me == null || story.authorId != me) return const SizedBox.shrink();
+
+    final viewers = context.watch<FeedService>().viewersOf(story.id);
+
+    return GestureDetector(
+      onTap: viewers.isEmpty ? null : () => _showViewers(viewers),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Row(
+          children: [
+            const Icon(Icons.visibility_outlined,
+                color: Colors.white70, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              viewers.isEmpty
+                  ? 'No views yet'
+                  : '${viewers.length} view${viewers.length == 1 ? '' : 's'}',
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showViewers(List<String> viewers) {
+    _animController.stop();
+    final contacts = context.read<ContactService>().contacts;
+
+    String nameFor(String key) {
+      for (final contact in contacts) {
+        if (contact.publicKey == key) return contact.displayName;
+      }
+      return '${key.substring(0, 8)}…';
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Viewed by',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            ...viewers.map((key) => ListTile(
+                  dense: true,
+                  leading: UserAvatar(
+                      displayName: nameFor(key), size: AvatarSize.small),
+                  title: Text(nameFor(key)),
+                )),
+          ],
+        ),
+      ),
+    ).whenComplete(() {
+      if (mounted) _animController.forward();
+    });
+  }
+
   Widget _buildOverlays() {
     return SafeArea(
       child: Column(
@@ -204,6 +289,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
                   ),
                 ),
                 const Spacer(),
+          _buildViewerBar(),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white, shadows: [Shadow(color: Colors.black54, blurRadius: 4)]),
                   onPressed: () => context.pop(),
