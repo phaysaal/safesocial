@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
+import '../../services/identity_service.dart';
 import '../../widgets/avatar.dart';
 
 /// Facebook-style notifications screen showing activity on posts.
@@ -13,14 +15,27 @@ class NotificationsScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final feedService = context.watch<FeedService>();
+    final contacts = context.watch<ContactService>();
 
-    // Build notification items from reactions and comments on the user's posts.
+    // Our own posts are identified by our public key. This used to compare
+    // against the literal string 'self', which createPost stopped writing once
+    // an identity existed — so for any onboarded user the screen was
+    // permanently empty.
+    final me = context.watch<IdentityService>().publicKey;
+
+    String nameFor(String key) {
+      for (final contact in contacts.contacts) {
+        if (contact.publicKey == key) return contact.displayName;
+      }
+      return key.length > 8 ? '${key.substring(0, 8)}…' : key;
+    }
+
     final notifications = <_NotificationItem>[];
-    for (final post in feedService.posts.where((p) => p.authorId == 'self')) {
+    for (final post in feedService.posts.where((p) => p.authorId == me)) {
       for (final r in post.reactions) {
-        if (r.reactorId != 'self') {
+        if (r.reactorId != me) {
           notifications.add(_NotificationItem(
-            actorName: r.reactorId,
+            actorName: nameFor(r.reactorId),
             action: 'reacted ${r.emoji} to your post',
             postPreview: post.content,
             timestamp: r.timestamp,
@@ -30,9 +45,10 @@ class NotificationsScreen extends StatelessWidget {
         }
       }
       for (final c in post.comments) {
-        if (c.authorId != 'self') {
+        if (c.authorId != me) {
           notifications.add(_NotificationItem(
-            actorName: c.authorName.isNotEmpty ? c.authorName : c.authorId,
+            actorName:
+                c.authorName.isNotEmpty ? c.authorName : nameFor(c.authorId),
             action: 'commented on your post',
             postPreview: c.text,
             timestamp: c.createdAt,
@@ -42,9 +58,9 @@ class NotificationsScreen extends StatelessWidget {
         }
       }
       for (final like in post.likes) {
-        if (like != 'self') {
+        if (like != me) {
           notifications.add(_NotificationItem(
-            actorName: like,
+            actorName: nameFor(like),
             action: 'liked your post',
             postPreview: post.content,
             timestamp: post.createdAt,

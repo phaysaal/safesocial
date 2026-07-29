@@ -8,6 +8,7 @@ import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/message.dart';
 import 'debug_log_service.dart';
+import 'media_service.dart';
 import 'outbox_service.dart';
 import 'relay_service.dart';
 
@@ -129,13 +130,19 @@ class ChatService extends ChangeNotifier {
       audioRef: audioRef,
     );
 
+    // Send the image itself, not a path into our own sandbox. Chat previously
+    // serialised mediaRefs as local filesystem paths, so a photo sent to a
+    // contact arrived as a dead reference they could never open.
+    final wireMessage = await _encodeMedia(message);
+
     final sealed = await sessions.seal(
       peerIdentityKey: contactPublicKey,
       peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactPublicKey),
       type: 'chat',
-      plaintext: jsonEncode(message.toJson()),
+      plaintext: jsonEncode(wireMessage.toJson()),
     );
 
+    // Keep the local copy pointing at the local file.
     _addMessageLocally(contactPublicKey, message);
 
     // Durable hand-off. If the socket is down the message waits here and is
@@ -150,6 +157,30 @@ class ChatService extends ChangeNotifier {
     } else {
       await _relayService.sendViaRelay(contactPublicKey, sealed);
     }
+  }
+
+  /// Swap local media paths for transferable data before sending.
+  Future<Message> _encodeMedia(Message message) async {
+    if (message.mediaRefs.isEmpty) return message;
+
+    final encoded = <String>[];
+    for (final ref in message.mediaRefs) {
+      final data = await MediaService.encodeImageForRelay(ref);
+      if (data != null) encoded.add(data);
+    }
+    return message.copyWith(mediaRefs: encoded);
+  }
+
+  /// Turn received media back into files on this device.
+  Future<Message> _decodeMedia(Message message) async {
+    if (message.mediaRefs.isEmpty) return message;
+
+    final saved = <String>[];
+    for (final ref in message.mediaRefs) {
+      final path = await MediaService.decodeAndSaveImage(ref);
+      if (path != null) saved.add(path);
+    }
+    return message.copyWith(mediaRefs: saved);
   }
 
   /// Tell a sender we have their message, so their copy stops showing as unsent.
@@ -209,7 +240,7 @@ class ChatService extends ChangeNotifier {
         return;
       }
 
-      _addMessageLocally(opened.from, msg);
+      _addMessageLocally(opened.from, await _decodeMedia(msg));
       await _sendReceipt(opened.from, msg.id);
     } on EnvelopeException catch (e) {
       DebugLogService().error('Chat', 'Rejected message from $contactKey: $e');

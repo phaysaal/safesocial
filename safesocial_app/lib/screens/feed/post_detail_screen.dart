@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/post.dart';
 import '../../services/feed_service.dart';
+import '../../services/identity_service.dart';
 import '../../widgets/avatar.dart';
 
 /// Full post detail screen with complete comment thread.
@@ -42,7 +43,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       );
     }
 
-    final authorName = post.authorId == 'self'
+    final myKey = context.watch<IdentityService>().publicKey;
+    final authorName = post.authorId == myKey
         ? 'You'
         : (post.authorName.isNotEmpty ? post.authorName : post.authorId);
 
@@ -121,11 +123,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 Row(
                   children: [
                     _ActionButton(
-                      icon: post.isLikedBySelf
+                      icon: post.isLikedBy(myKey)
                           ? Icons.thumb_up
                           : Icons.thumb_up_outlined,
                       label: 'Like',
-                      color: post.isLikedBySelf
+                      color: post.isLikedBy(myKey)
                           ? cs.primary
                           : cs.onSurfaceVariant,
                       onTap: () =>

@@ -22,6 +22,9 @@ class CallService extends ChangeNotifier {
   SessionManager? _sessions;
   String? Function(String identityKey)? _resolveExchangeKey;
 
+  /// Members named in a group call invite, so accepting can announce to them.
+  List<String> _pendingGroupMembers = const [];
+
   /// ICE candidates that arrived before we had a peer connection for them.
   final Map<String, List<RTCIceCandidate>> _pendingCandidates = {};
   static const int _maxPendingCandidates = 64;
@@ -160,13 +163,14 @@ class CallService extends ChangeNotifier {
         'group_id': groupId,
         'call_type': type.name,
         'caller_name': 'Group Call',
+        'members': members,
       });
     }
   }
 
   /// Join an existing Group Call.
   Future<void> joinGroupCall(String groupId, List<String> members, CallType type) async {
-    if (_state != CallState.idle) return;
+    if (_state != CallState.idle && _state != CallState.ringing) return;
     _groupId = groupId;
     _callType = type;
     _state = CallState.connected;
@@ -186,8 +190,27 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> acceptCall() async {
-    if (_remoteContactKey == null || _pendingOffer == null) {
-      DebugLogService().warn('Call', 'acceptCall ignored — remoteKey=$_remoteContactKey pendingOffer=$_pendingOffer');
+    if (_remoteContactKey == null) {
+      DebugLogService().warn('Call', 'acceptCall ignored — no remote key');
+      return;
+    }
+
+    // A group invite carries no SDP offer — the joiner announces itself and
+    // the existing participants offer to it. Accepting one previously fell
+    // through the pendingOffer guard and did nothing at all.
+    if (_pendingOffer == null) {
+      final groupId = _groupId;
+      if (groupId == null) {
+        DebugLogService()
+            .warn('Call', 'acceptCall ignored — no pending offer and no group');
+        return;
+      }
+      final members = _pendingGroupMembers.isNotEmpty
+          ? _pendingGroupMembers
+          : [_remoteContactKey!];
+      _pendingGroupMembers = const [];
+      _isIncomingCall = false;
+      await joinGroupCall(groupId, members, _callType);
       return;
     }
     DebugLogService().info('Call', 'Accepting call from $_remoteContactName ($_remoteContactKey)');
@@ -233,6 +256,7 @@ class CallService extends ChangeNotifier {
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream = null;
     _pendingCandidates.clear();
+    _pendingGroupMembers = const [];
     _state = CallState.idle;
     _groupId = null;
     _pendingOffer = null;
@@ -451,9 +475,15 @@ class CallService extends ChangeNotifier {
             _groupId = data['group_id'];
             _remoteContactKey = senderKey;
             _remoteContactName = data['caller_name'];
+            // The invite says whether it is audio or video. This was ignored,
+            // so a video call was joined as audio.
+            _callType =
+                data['call_type'] == 'video' ? CallType.video : CallType.audio;
+            _pendingGroupMembers = (data['members'] as List<dynamic>? ?? [])
+                .whereType<String>()
+                .toList();
             _isIncomingCall = true;
             _state = CallState.ringing;
-            DebugLogService().info('Call', 'Group call invite from $senderKey — group: ${data['group_id']}');
             onIncomingCall?.call(senderKey, 'Group Call', _callType);
           }
           break;

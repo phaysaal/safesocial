@@ -579,6 +579,37 @@ Carried into later phases:
 **Exit:** a user can do everything they expect from a mainstream social app, entirely within
 spheres, with no path that produces unscoped content.
 
+**Progress — the data-loss and dead-feature bugs are fixed.**
+
+- **Comments** are persisted and broadcast to the sphere, and verified against the
+  signature on receipt. They previously updated an in-memory list and nothing else, so
+  they vanished on restart and never reached anyone — including the post's author.
+- **Chat media** carries the image instead of a local filesystem path. A photo sent to a
+  contact used to arrive as a dead reference into the sender's own sandbox.
+- **Likes and reactions** are stored under the real identity key. They were written
+  locally as the literal string `'self'` while the wire carried the real key, so own
+  reactions were not portable and self-detection broke for anything received.
+- **Notifications** work. The screen filtered on `authorId == 'self'`, which `createPost`
+  stopped writing once an identity existed, so it was permanently empty for every
+  onboarded user. Actor names now resolve to contact names.
+- **Group calls are reachable and acceptable.** Accepting an invite fell through a
+  `pendingOffer` guard and did nothing; a group invite carries no SDP, so accepting now
+  joins the call instead. The invite also carries the member list and the call type, which
+  was ignored so video invites were joined as audio. A call entry point was added to the
+  sphere screen — after the old group screens were retired the mesh code was unreachable.
+- 102 tests pass.
+
+Remaining in Phase 4:
+
+- **Media pipeline**: chunked encrypted blobs, thumbnails, video compression. Images are
+  re-encoded and inlined, which works but does not scale and leaves video unsendable.
+- **Push notifications**: nothing exists. Needs a privacy decision — prefer content-free
+  wakeups, and document what a push provider necessarily sees.
+- **Search** over messages and posts; today it covers contact names only.
+- **Settings**: block list management, storage/cache, relay selection, notification prefs.
+- **Stories**: view receipts and replies.
+- **TURN**: still the public `openrelay.metered.ca` with shared credentials.
+
 ### Phase 5 — Decentralisation and recovery *(4–6 weeks)*
 
 - Multi-relay support, user-configurable relay, published self-host image.

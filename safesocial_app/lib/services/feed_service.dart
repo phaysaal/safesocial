@@ -299,6 +299,14 @@ class FeedService extends ChangeNotifier {
         _posts[index] = post.copyWith(likes: newLikes);
         _persistPosts();
         notifyListeners();
+      } else if (json['type'] == 'comment') {
+        final comment = Comment.fromJson(json['comment']);
+        if (comment.authorId != authorId) {
+          DebugLogService()
+              .warn('Feed', 'Dropping comment: author disagrees with signature');
+          return;
+        }
+        _applyComment(json['post_id'] as String, comment);
       } else if (json['type'] == 'reaction') {
         final postId = json['post_id'] as String;
         final emoji = json['emoji'] as String;
@@ -377,11 +385,13 @@ class FeedService extends ChangeNotifier {
     if (index == -1) return;
     final post = _posts[index];
     final newLikes = List<String>.from(post.likes);
-    final nowLiked = !post.isLikedBySelf;
-    if (post.isLikedBySelf) {
-      newLikes.remove('self');
+    final me = _myPublicKey;
+    if (me == null) return;
+    final nowLiked = !post.isLikedBy(me);
+    if (!nowLiked) {
+      newLikes.remove(me);
     } else {
-      newLikes.add('self');
+      newLikes.add(me);
     }
     _posts[index] = post.copyWith(likes: newLikes);
     _persistPosts();
@@ -399,42 +409,74 @@ class FeedService extends ChangeNotifier {
     );
   }
 
-  void commentOnPost(String postId, String text, {String? replyToId}) {
+  /// Add a comment, save it, and send it to the sphere.
+  ///
+  /// This previously did none of those last two things: it updated the list in
+  /// memory and called notifyListeners, so comments vanished on restart and
+  /// were never seen by anyone else, including the post's author.
+  Future<void> commentOnPost(String postId, String text,
+      {String? replyToId, String authorName = 'You'}) async {
     final index = _posts.indexWhere((p) => p.id == postId);
-    if (index != -1) {
-      final post = _posts[index];
-      final newComments = List<Comment>.from(post.comments);
-      newComments.add(Comment(
-        id: const Uuid().v4(),
-        authorId: _myPublicKey ?? 'self',
-        authorName: 'You',
-        text: text,
-        createdAt: DateTime.now(),
-        replyToId: replyToId,
-      ));
-      _posts[index] = post.copyWith(comments: newComments);
-      notifyListeners();
-    }
+    if (index == -1) return;
+
+    final post = _posts[index];
+    final comment = Comment(
+      id: const Uuid().v4(),
+      authorId: _myPublicKey ?? 'self',
+      authorName: authorName,
+      text: text,
+      createdAt: DateTime.now(),
+      replyToId: replyToId,
+    );
+
+    _posts[index] = post.copyWith(comments: [...post.comments, comment]);
+    await _persistPosts();
+    notifyListeners();
+
+    await _publishToSphere(
+      sphereId: post.sphereId,
+      type: 'comment',
+      payloadJson: jsonEncode({
+        'type': 'comment',
+        'post_id': postId,
+        'comment': comment.toJson(),
+      }),
+    );
+  }
+
+  void _applyComment(String postId, Comment comment) {
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return;
+    if (_posts[index].comments.any((c) => c.id == comment.id)) return;
+
+    _posts[index] = _posts[index].copyWith(
+      comments: [..._posts[index].comments, comment]
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt)),
+    );
+    _persistPosts();
+    notifyListeners();
   }
 
   void reactToPost(String postId, String emoji) {
-    if (_myPublicKey == null) return;
+    final me = _myPublicKey;
+    if (me == null) return;
     final index = _posts.indexWhere((p) => p.id == postId);
     if (index == -1) return;
 
     final post = _posts[index];
     final newReactions = List<Reaction>.from(post.reactions);
-    // Use 'self' as reactorId for local storage so the UI can identify own reactions
+    // Reactions are stored under our real key so they survive a restart and
+    // match what peers see.
     final existing = newReactions.indexWhere(
-        (r) => r.reactorId == 'self' && r.emoji == emoji);
+        (r) => r.reactorId == me && r.emoji == emoji);
 
     if (existing != -1) {
       // Toggle off — remove reaction
       newReactions.removeAt(existing);
     } else {
       // Remove any previous reaction from self before adding new one
-      newReactions.removeWhere((r) => r.reactorId == 'self');
-      newReactions.add(Reaction(reactorId: 'self', emoji: emoji, timestamp: DateTime.now()));
+      newReactions.removeWhere((r) => r.reactorId == me);
+      newReactions.add(Reaction(reactorId: me, emoji: emoji, timestamp: DateTime.now()));
     }
 
     _posts[index] = post.copyWith(reactions: newReactions);

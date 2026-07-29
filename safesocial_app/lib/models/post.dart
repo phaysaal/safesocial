@@ -85,7 +85,17 @@ class Post with EquatableMixin {
     };
   }
 
-  bool get isLikedBySelf => likes.contains('self');
+  /// Whether [identityKey] has liked this post.
+  ///
+  /// Own likes used to be stored as the literal string 'self' while the wire
+  /// carried the real key, so they were not portable and self-detection broke
+  /// for anything received from another device.
+  bool isLikedBy(String? identityKey) =>
+      identityKey != null && likes.contains(identityKey);
+
+  bool hasReactionFrom(String? identityKey, String emoji) =>
+      identityKey != null &&
+      reactions.any((r) => r.reactorId == identityKey && r.emoji == emoji);
 
   Post copyWith({
     String? id,

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/post.dart';
 import '../services/contact_service.dart';
 import '../services/feed_service.dart';
+import '../services/identity_service.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
 
@@ -23,7 +24,7 @@ class _PostCardState extends State<PostCard> {
   bool _showHeart = false;
 
   void _onDoubleTap() {
-    if (!widget.post.isLikedBySelf) {
+    if (!widget.post.isLikedBy(context.read<IdentityService>().publicKey)) {
       context.read<FeedService>().toggleLike(widget.post.id);
     }
     setState(() => _showHeart = true);
@@ -46,8 +47,10 @@ class _PostCardState extends State<PostCard> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final post = widget.post;
-    final authorName =
-        post.authorId == 'self' ? 'You' : (post.authorName.isNotEmpty ? post.authorName : post.authorId);
+    final myKey = context.watch<IdentityService>().publicKey;
+    final authorName = post.authorId == myKey
+        ? 'You'
+        : (post.authorName.isNotEmpty ? post.authorName : post.authorId);
 
     return Container(
       color: cs.surface,
@@ -118,7 +121,7 @@ class _PostCardState extends State<PostCard> {
                   onSelected: (value) => _handlePostMenu(context, value, post),
                   itemBuilder: (ctx) => [
                     const PopupMenuItem(value: 'hide', child: Text('Hide post')),
-                    if (post.authorId != 'self') ...[
+                    if (post.authorId != myKey) ...[
                       const PopupMenuItem(value: 'mute', child: Text('Mute this person')),
                       const PopupMenuItem(value: 'unfollow', child: Text('Unfollow')),
                     ],
@@ -213,14 +216,14 @@ class _PostCardState extends State<PostCard> {
                   child: GestureDetector(
                     onLongPress: () => _showReactionPicker(context, post),
                     child: _ActionButton(
-                      icon: _selfReactionIcon(post),
-                      label: _selfReactionLabel(post),
-                      color: _hasSelfReaction(post)
+                      icon: _selfReactionIcon(post, myKey),
+                      label: _selfReactionLabel(post, myKey),
+                      color: _hasSelfReaction(post, myKey)
                           ? cs.primary
                           : cs.onSurfaceVariant,
                       onTap: () {
                         final selfReaction = post.reactions
-                            .where((r) => r.reactorId == 'self')
+                            .where((r) => r.reactorId == myKey)
                             .toList();
                         if (selfReaction.isNotEmpty && selfReaction.first.emoji == '👍') {
                           // Already liked with 👍 — toggle off
@@ -408,18 +411,17 @@ class _PostCardState extends State<PostCard> {
     return sorted;
   }
 
-  bool _hasSelfReaction(Post post) =>
-      post.reactions.any((r) => r.reactorId == 'self');
+  bool _hasSelfReaction(Post post, String? myKey) =>
+      myKey != null && post.reactions.any((r) => r.reactorId == myKey);
 
-  IconData _selfReactionIcon(Post post) {
-    if (_hasSelfReaction(post)) return Icons.emoji_emotions;
+  IconData _selfReactionIcon(Post post, String? myKey) {
+    if (_hasSelfReaction(post, myKey)) return Icons.emoji_emotions;
     return Icons.thumb_up_outlined;
   }
 
-  String _selfReactionLabel(Post post) {
-    final selfReaction = post.reactions
-        .where((r) => r.reactorId == 'self')
-        .toList();
+  String _selfReactionLabel(Post post, String? myKey) {
+    final selfReaction =
+        post.reactions.where((r) => r.reactorId == myKey).toList();
     if (selfReaction.isNotEmpty) {
       final emoji = selfReaction.first.emoji;
       final match = _reactions.where((r) => r.$1 == emoji).toList();
