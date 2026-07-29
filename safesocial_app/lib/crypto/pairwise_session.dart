@@ -12,6 +12,7 @@ class _Info {
   static const messageKey = 'spheres-msgkey-v1';
   static const chainStep = 'spheres-chainstep-v1';
   static const wrap = 'spheres-wrap-v1';
+  static const mailbox = 'spheres-mailbox-root-v1';
 }
 
 /// A symmetric KDF chain, advanced once per message.
@@ -184,6 +185,13 @@ class PairwiseSession {
   /// directly encrypts user content.
   Future<Uint8List> wrappingKey() =>
       SpheresCrypto.hkdf(secret: _root, info: _Info.wrap);
+
+  /// Secret from which relay mailbox addresses for this pair are derived.
+  ///
+  /// Separate from [wrappingKey] so that learning a mailbox address — which
+  /// the relay necessarily knows — reveals nothing about content keys.
+  Future<Uint8List> mailboxSecret() =>
+      SpheresCrypto.hkdf(secret: _root, info: _Info.mailbox);
 
   Map<String, dynamic> toJson() => {
         'v': 1,

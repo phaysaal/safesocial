@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../crypto/mailbox.dart';
 import 'debug_log_service.dart';
 import 'identity_service.dart';
 import 'relay_service.dart';
@@ -42,18 +43,30 @@ class SyncService extends ChangeNotifier {
     }
     final secretB64 = base64Encode(secretBytes);
 
-    // Derive a temporary room ID for the handshake
-    final roomId = _computeHandshakeRoomId(secretB64);
-    
-    _syncRelay.onMessageReceived = (contactKey, data) {
+    _syncRelay.onMessageReceived = (channelKey, data) {
       _handlePrimaryHandshake(data, secretB64);
     };
 
-    // Connect to handshake room
-    _syncRelay.connect('primary', roomId);
-    
-    DebugLogService().info('Sync', 'Primary linking started. Room: $roomId');
+    // Both devices derive the same address from the pairing secret. Previously
+    // one joined deriveRelayRoomId('primary', roomId) and the other
+    // deriveRelayRoomId('secondary', roomId) — two different rooms — and then
+    // sent to channel keys that were never registered, so linking could never
+    // complete.
+    _connectPairing(secretB64);
+
+    DebugLogService().info('Sync', 'Primary linking started');
     return secretB64;
+  }
+
+  /// Channel key for the pairing session. Local handle only.
+  static const _pairingChannel = 'device-pairing';
+
+  Future<void> _connectPairing(String secretB64) async {
+    final mailbox = await Mailbox.fromLocalSecret(
+      secret: secretB64,
+      purpose: 'device-pairing',
+    );
+    await _syncRelay.connectMailbox(_pairingChannel, mailbox);
   }
 
   /// Start the linking process as the SECONDARY device.
@@ -61,13 +74,11 @@ class SyncService extends ChangeNotifier {
     _isLinking = true;
     notifyListeners();
 
-    final roomId = _computeHandshakeRoomId(secretB64);
-    
-    _syncRelay.onMessageReceived = (contactKey, data) {
+    _syncRelay.onMessageReceived = (channelKey, data) {
       _handleSecondaryHandshake(data, secretB64);
     };
 
-    await _syncRelay.connect('secondary', roomId);
+    await _connectPairing(secretB64);
     
     // Send join request
     final request = jsonEncode({
@@ -75,8 +86,8 @@ class SyncService extends ChangeNotifier {
       'device_name': 'New Device',
     });
     
-    _syncRelay.sendViaRelay('primary', request);
-    DebugLogService().info('Sync', 'Secondary linking started. Joining room: $roomId');
+    await _syncRelay.sendViaRelay(_pairingChannel, request);
+    DebugLogService().info('Sync', 'Secondary linking started');
   }
 
   void _handlePrimaryHandshake(String data, String secretB64) async {
@@ -92,7 +103,7 @@ class SyncService extends ChangeNotifier {
             'type': 'identity_transfer',
             'data': wrappedIdentity,
           });
-          _syncRelay.sendViaRelay('secondary', response);
+          await _syncRelay.sendViaRelay(_pairingChannel, response);
           DebugLogService().success('Sync', 'Encrypted identity transferred to new device');
         }
       }
@@ -118,16 +129,6 @@ class SyncService extends ChangeNotifier {
     } catch (e) {
       DebugLogService().error('Sync', 'Handshake error: $e');
     }
-  }
-
-  String _computeHandshakeRoomId(String secret) {
-    // Salted hash of the secret to find the meeting room
-    final combined = 'spheres-sync-handshake-v1-$secret';
-    var hash = 0;
-    for (var i = 0; i < combined.length; i++) {
-      hash = ((hash << 5) - hash + combined.codeUnitAt(i)) & 0xFFFFFFFF;
-    }
-    return hash.toRadixString(36).padLeft(12, '0');
   }
 
   void stopLinking() {

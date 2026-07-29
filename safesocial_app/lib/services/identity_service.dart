@@ -289,25 +289,46 @@ class IdentityService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Publish the minimum a stranger needs in order to encrypt to us.
+  ///
+  /// Only the identity key, the X25519 key, and a signature binding them
+  /// together. Display name, bio and avatar are deliberately excluded: they
+  /// used to be published to an unauthenticated endpoint, so anyone holding a
+  /// public key could read them. Names now travel through the handshake, which
+  /// only the intended recipient can read.
   Future<void> publishProfileToRelay(RelayService relay) async {
-    if (_keypair == null || _currentIdentity == null) return;
-    
-    // Sign the profile to prove ownership (Issue #2 Fix)
-    final profileJson = jsonEncode(_currentIdentity!.toJson());
+    if (_keypair == null) return;
+    await _ensureExchangeKeyPair();
+    final exchangeKey = _exchangePublicKeyHex;
+    if (exchangeKey == null) return;
+
+    final bundle = {
+      'publicKey': _keypair!.publicKey,
+      'keyExchangePublicKey': exchangeKey,
+      'updatedAt': DateTime.now().toIso8601String(),
+    };
+    final bundleJson = jsonEncode(bundle);
+
+    // Sign so a relay operator cannot substitute their own exchange key and
+    // machine-in-the-middle new contacts.
     final privKey = ed.PrivateKey(hex.decode(_keypair!.secretKey));
-    final signature = ed.sign(privKey, utf8.encode(profileJson));
-    
+    final signature = ed.sign(privKey, utf8.encode(bundleJson));
+
     final payload = jsonEncode({
-      'profile': _currentIdentity!.toJson(),
+      'bundle': bundle,
       'signature': hex.encode(signature),
     });
 
-    final success = await relay.pushState(publicKey!, secretKey!, 'profile', payload);
-    
+    final success = await relay.publishPrekey(
+      _keypair!.publicKey,
+      _keypair!.secretKey,
+      payload,
+    );
+
     if (success) {
-      DebugLogService().success('Identity', 'Signed profile published to Relay');
+      DebugLogService().success('Identity', 'Prekey bundle published');
     } else {
-      DebugLogService().error('Identity', 'Failed to publish signed profile');
+      DebugLogService().error('Identity', 'Failed to publish prekey bundle');
     }
   }
 

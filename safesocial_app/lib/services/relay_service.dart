@@ -2,24 +2,25 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:convert/convert.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
-import 'package:convert/convert.dart';
 
-import 'crypto_service.dart';
+import '../crypto/mailbox.dart';
 import 'debug_log_service.dart';
 
-/// Whether a room is usable right now.
+/// Whether a channel is usable right now.
 enum RelayConnectionState { disconnected, connecting, connected }
 
-/// Per-room connection bookkeeping.
+/// Per-channel connection bookkeeping.
 class _Conn {
+  final Mailbox mailbox;
   WebSocketChannel? channel;
   RelayConnectionState state = RelayConnectionState.connecting;
 
-  /// Set when the app closes the socket on purpose, so [onDone] does not
+  /// Set when the app closes the socket on purpose, so onDone does not
   /// resurrect it. Without this, disconnecting a blocked contact or leaving a
   /// group reconnected five seconds later, forever.
   bool closedIntentionally = false;
@@ -33,9 +34,17 @@ class _Conn {
   /// fetched, held back so ordering is preserved.
   final List<String> buffer = [];
   bool syncing = true;
+
+  _Conn(this.mailbox);
 }
 
-/// WebSocket and HTTP relay client for messaging and state sync.
+/// Client for the v2 relay protocol.
+///
+/// Addresses are Ed25519 public keys derived from a secret the participants
+/// share, and every operation is signed with the matching private key. The
+/// relay therefore cannot compute an address from public keys, cannot map
+/// traffic onto the social graph, and cannot be convinced by a throwaway
+/// keypair that it should hand over someone else's mail.
 class RelayService extends ChangeNotifier {
   static const _defaultRelayHost = 'relay.spheres.dev';
   static const _fallbackRelayHost = 'spheres-relay.phaysaal.workers.dev';
@@ -43,26 +52,27 @@ class RelayService extends ChangeNotifier {
   static const Duration _baseRetryDelay = Duration(seconds: 2);
   static const Duration _maxRetryDelay = Duration(minutes: 2);
 
+  /// Payloads are padded up to the next bucket, so the operator learns a size
+  /// class rather than an exact length.
+  static const List<int> _paddingBuckets = [512, 2048, 8192, 32768, 131072];
+
   final Map<String, _Conn> _conns = {};
   final _log = DebugLogService();
   final Random _jitter = Random();
 
-  void Function(String contactPublicKey, String encryptedMessage)? onMessageReceived;
+  void Function(String channelKey, String payload)? onMessageReceived;
 
-  /// Called whenever a room becomes usable, so queued work can be flushed.
-  void Function(String contactPublicKey)? onConnected;
+  /// Called whenever a channel becomes usable, so queued work can be flushed.
+  void Function(String channelKey)? onConnected;
 
-  /// Get the base URL for HTTP or WS.
-  String _getBaseUrl(bool isFallback, bool isWs) {
-    final host = isFallback ? _fallbackRelayHost : _defaultRelayHost;
-    return isWs ? 'wss://$host' : 'https://$host';
-  }
+  String _host(bool isFallback) =>
+      isFallback ? _fallbackRelayHost : _defaultRelayHost;
 
-  RelayConnectionState stateFor(String contactPublicKey) =>
-      _conns[contactPublicKey]?.state ?? RelayConnectionState.disconnected;
+  RelayConnectionState stateFor(String channelKey) =>
+      _conns[channelKey]?.state ?? RelayConnectionState.disconnected;
 
-  bool isConnected(String contactPublicKey) =>
-      _conns[contactPublicKey]?.state == RelayConnectionState.connected;
+  bool isConnected(String channelKey) =>
+      _conns[channelKey]?.state == RelayConnectionState.connected;
 
   void _setState(String key, RelayConnectionState state) {
     final conn = _conns[key];
@@ -71,42 +81,35 @@ class RelayService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Connect to a relay room for a specific contact and sync offline messages.
+  // -- Sealed mailboxes -------------------------------------------------------
+
+  /// Open a channel on [mailbox], identified locally by [channelKey].
   ///
-  /// [authPublicKey] is the raw hex Ed25519 public key used for mailbox auth.
-  /// If omitted, [myPublicKey] is used (fine when it has no namespace prefix).
-  Future<void> connect(String myPublicKey, String contactPublicKey,
-      {String? mySecretKey,
-      String? authPublicKey,
-      bool isFallback = false}) async {
+  /// [channelKey] is only a local handle (usually a contact's public key); it
+  /// never reaches the relay.
+  Future<void> connectMailbox(
+    String channelKey,
+    Mailbox mailbox, {
+    bool isFallback = false,
+  }) async {
     // Claim the slot before the first await. The previous version checked for
-    // an existing channel at the top but only recorded one after `await
-    // channel.ready`, so two rapid calls opened two sockets and the second
-    // wiped the first's buffered messages.
-    final existing = _conns[contactPublicKey];
-    if (existing != null &&
-        (existing.state == RelayConnectionState.connected ||
-            (existing.state == RelayConnectionState.connecting &&
-                existing.channel != null))) {
-      return;
-    }
-    if (existing != null && existing.state == RelayConnectionState.connecting) {
+    // an existing channel at the top but only recorded one after
+    // `await channel.ready`, so two rapid calls opened two sockets and the
+    // second wiped the first's buffered messages.
+    final existing = _conns[channelKey];
+    if (existing != null && existing.state != RelayConnectionState.disconnected) {
       return;
     }
 
-    final conn = existing ?? _Conn();
-    conn.closedIntentionally = false;
-    conn.retryTimer?.cancel();
-    conn.syncing = true;
-    conn.buffer.clear();
-    _conns[contactPublicKey] = conn;
-    _setState(contactPublicKey, RelayConnectionState.connecting);
+    final conn = _Conn(mailbox);
+    _conns[channelKey] = conn;
+    _setState(channelKey, RelayConnectionState.connecting);
 
-    final roomId = CryptoService.deriveRelayRoomId(myPublicKey, contactPublicKey);
-    final wsUrl = '${_getBaseUrl(isFallback, true)}/room/$roomId';
-    final httpUrl = '${_getBaseUrl(isFallback, false)}/room/$roomId';
-
-    _log.info('Relay', 'Connecting to $wsUrl');
+    final host = _host(isFallback);
+    final path = '/mbx/${mailbox.id}';
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final signature = mailbox.sign('WS', path, '', timestamp);
+    final wsUrl = 'wss://$host$path?ts=$timestamp&sig=$signature';
 
     try {
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
@@ -118,88 +121,62 @@ class RelayService extends ChangeNotifier {
         conn.channel = null;
         _log.error('Relay', 'WebSocket handshake failed: $e');
         if (!isFallback) {
-          _log.warn('Relay', 'Primary relay failed, trying fallback...');
-          _setState(contactPublicKey, RelayConnectionState.disconnected);
-          _conns.remove(contactPublicKey);
-          return connect(myPublicKey, contactPublicKey,
-              mySecretKey: mySecretKey,
-              authPublicKey: authPublicKey,
-              isFallback: true);
+          _conns.remove(channelKey);
+          return connectMailbox(channelKey, mailbox, isFallback: true);
         }
-        _scheduleRetry(myPublicKey, contactPublicKey,
-            mySecretKey: mySecretKey,
-            authPublicKey: authPublicKey,
-            isFallback: isFallback);
+        _scheduleRetry(channelKey, mailbox, isFallback);
         return;
       }
 
       conn.attempt = 0;
-      _log.success('Relay', 'Connected to room $roomId (buffering)');
 
       channel.stream.listen(
         (data) {
+          final payload = _unpad(data as String);
+          if (payload == null) return;
           if (conn.syncing) {
-            conn.buffer.add(data as String);
+            conn.buffer.add(payload);
           } else {
-            onMessageReceived?.call(contactPublicKey, data as String);
+            onMessageReceived?.call(channelKey, payload);
           }
         },
-        onError: (e) {
-          _log.error('Relay', 'WebSocket stream error: $e');
-        },
+        onError: (e) => _log.error('Relay', 'WebSocket stream error: $e'),
         onDone: () {
           conn.channel = null;
-          _setState(contactPublicKey, RelayConnectionState.disconnected);
+          _setState(channelKey, RelayConnectionState.disconnected);
           if (conn.closedIntentionally) {
-            _log.info('Relay', 'Room closed for $contactPublicKey');
-            _conns.remove(contactPublicKey);
+            _conns.remove(channelKey);
             return;
           }
-          _scheduleRetry(myPublicKey, contactPublicKey,
-              mySecretKey: mySecretKey,
-              authPublicKey: authPublicKey,
-              isFallback: isFallback);
+          _scheduleRetry(channelKey, mailbox, isFallback);
         },
       );
 
-      // Fetch offline messages before releasing buffered real-time frames, so
+      // Drain the offline mailbox before releasing buffered live frames, so
       // the caller sees them in order.
-      if (mySecretKey != null) {
-        final pubKeyForAuth = authPublicKey ?? myPublicKey;
-        await _syncOfflineMessages(
-            httpUrl, contactPublicKey, pubKeyForAuth, mySecretKey);
-      } else {
-        _log.warn('Relay',
-            'No secret key provided; skipping offline mailbox sync for $roomId');
-      }
+      await _syncMailbox(host, path, mailbox, channelKey);
 
       conn.syncing = false;
       if (conn.buffer.isNotEmpty) {
-        _log.info('Relay', 'Flushing ${conn.buffer.length} buffered messages');
         for (final msg in conn.buffer) {
-          onMessageReceived?.call(contactPublicKey, msg);
+          onMessageReceived?.call(channelKey, msg);
         }
         conn.buffer.clear();
       }
 
-      _setState(contactPublicKey, RelayConnectionState.connected);
-      onConnected?.call(contactPublicKey);
+      _setState(channelKey, RelayConnectionState.connected);
+      onConnected?.call(channelKey);
     } catch (e) {
       _log.error('Relay', 'Failed to connect: $e');
-      _scheduleRetry(myPublicKey, contactPublicKey,
-          mySecretKey: mySecretKey,
-          authPublicKey: authPublicKey,
-          isFallback: isFallback);
+      _scheduleRetry(channelKey, mailbox, isFallback);
     }
   }
 
   /// Reconnect after a delay that grows with consecutive failures.
   ///
-  /// Jittered so that a relay restart does not bring every client back in the
-  /// same instant.
-  void _scheduleRetry(String myPublicKey, String contactPublicKey,
-      {String? mySecretKey, String? authPublicKey, bool isFallback = false}) {
-    final conn = _conns[contactPublicKey];
+  /// Jittered so a relay restart does not bring every client back at once.
+  void _scheduleRetry(String channelKey, Mailbox mailbox, bool isFallback) {
+    final conn = _conns[channelKey];
     if (conn == null || conn.closedIntentionally) return;
 
     conn.attempt++;
@@ -208,148 +185,90 @@ class RelayService extends ChangeNotifier {
       _baseRetryDelay.inMilliseconds,
       _maxRetryDelay.inMilliseconds,
     );
-    final delay = Duration(
-      milliseconds: cappedMs + _jitter.nextInt(1000),
-    );
+    final delay = Duration(milliseconds: cappedMs + _jitter.nextInt(1000));
 
-    _setState(contactPublicKey, RelayConnectionState.disconnected);
+    _setState(channelKey, RelayConnectionState.disconnected);
     _log.info('Relay',
-        'Reconnecting to $contactPublicKey in ${delay.inSeconds}s (attempt ${conn.attempt})');
+        'Reconnecting $channelKey in ${delay.inSeconds}s (attempt ${conn.attempt})');
 
     conn.retryTimer?.cancel();
     conn.retryTimer = Timer(delay, () {
       if (conn.closedIntentionally) return;
-      _conns.remove(contactPublicKey);
-      connect(myPublicKey, contactPublicKey,
-          mySecretKey: mySecretKey,
-          authPublicKey: authPublicKey,
-          isFallback: isFallback);
+      _conns.remove(channelKey);
+      connectMailbox(channelKey, mailbox, isFallback: isFallback);
     });
   }
 
-  /// Sync offline messages via HTTP GET and acknowledge receipt.
-  Future<void> _syncOfflineMessages(String baseUrl, String contactPublicKey, String myPublicKey, String mySecretKey) async {
+  Future<void> _syncMailbox(
+    String host,
+    String path,
+    Mailbox mailbox,
+    String channelKey,
+  ) async {
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      
-      // Request format: GET /room/<id>/sync
-      // Message to sign: METHOD + PATH + BODY + TIMESTAMP
-      final message = 'GET${Uri.parse(baseUrl).path}/sync$timestamp';
-      final signature = _signMessage(message, mySecretKey);
+      final signature = mailbox.sign('GET', '$path/sync', '', timestamp);
 
       final response = await http.get(
-        Uri.parse('$baseUrl/sync'),
+        Uri.parse('https://$host$path/sync'),
         headers: {
-          'X-Spheres-PubKey': myPublicKey,
           'X-Spheres-Signature': signature,
           'X-Spheres-Timestamp': timestamp,
         },
       );
 
-      if (response.statusCode == 200) {
-        final List<dynamic> pending = jsonDecode(response.body);
-        if (pending.isEmpty) return;
-
-        _log.info('Relay', 'Found ${pending.length} offline messages');
-
-        final List<String> processedIds = [];
-        for (final msg in pending) {
-          try {
-            onMessageReceived?.call(contactPublicKey, msg['data'] as String);
-            processedIds.add(msg['id'] as String);
-          } catch (e) {
-            _log.error('Relay', 'Error processing offline message: $e');
-          }
-        }
-
-        if (processedIds.isNotEmpty) {
-          final body = jsonEncode({'ids': processedIds});
-          final ackTimestamp = DateTime.now().millisecondsSinceEpoch.toString();
-          final ackMsg = 'POST${Uri.parse(baseUrl).path}/ack$body$ackTimestamp';
-          final ackSig = _signMessage(ackMsg, mySecretKey);
-
-          await http.post(
-            Uri.parse('$baseUrl/ack'),
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Spheres-PubKey': myPublicKey,
-              'X-Spheres-Signature': ackSig,
-              'X-Spheres-Timestamp': ackTimestamp,
-            },
-            body: body,
-          );
-          _log.success('Relay', 'Cleared ${processedIds.length} offline messages');
-        }
-      } else if (response.statusCode == 401) {
-        _log.error('Relay', 'Sync failed: Unauthorized');
+      if (response.statusCode == 401) {
+        _log.error('Relay', 'Mailbox sync rejected: unauthorized');
+        return;
       }
-    } catch (e) {
-      _log.error('Relay', 'Failed to sync offline messages: $e');
-    }
-  }
+      if (response.statusCode != 200) return;
 
-  /// Push encrypted state to the relay Key-Value store.
-  Future<bool> pushState(String myPublicKey, String mySecretKey, String key, String encryptedData) async {
-    try {
-      final baseUrl = _getBaseUrl(false, false);
-      final path = '/state/$myPublicKey/$key';
-      final url = Uri.parse('$baseUrl$path');
-      final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      
-      final message = 'POST$path$encryptedData$timestamp';
-      final signature = _signMessage(message, mySecretKey);
+      final pending = jsonDecode(response.body) as List<dynamic>;
+      if (pending.isEmpty) return;
 
-      final response = await http.post(
-        url,
+      final processed = <String>[];
+      for (final msg in pending) {
+        try {
+          final payload = _unpad(msg['data'] as String);
+          if (payload != null) onMessageReceived?.call(channelKey, payload);
+          processed.add(msg['id'] as String);
+        } catch (e) {
+          _log.error('Relay', 'Could not process queued message: $e');
+        }
+      }
+
+      if (processed.isEmpty) return;
+
+      final body = jsonEncode({'ids': processed});
+      final ackTs = DateTime.now().millisecondsSinceEpoch.toString();
+      await http.post(
+        Uri.parse('https://$host$path/ack'),
         headers: {
-          'X-Spheres-Signature': signature,
-          'X-Spheres-Timestamp': timestamp,
+          'Content-Type': 'application/json',
+          'X-Spheres-Signature': mailbox.sign('POST', '$path/ack', body, ackTs),
+          'X-Spheres-Timestamp': ackTs,
         },
-        body: encryptedData,
+        body: body,
       );
-      return response.statusCode == 200;
     } catch (e) {
-      _log.error('Relay', 'Failed to push state ($key): $e');
-      return false;
+      _log.error('Relay', 'Failed to sync mailbox: $e');
     }
-  }
-
-  /// Pull encrypted state from the relay Key-Value store.
-  Future<String?> pullState(String contactPublicKey, String key) async {
-    try {
-      final url = Uri.parse('${_getBaseUrl(false, false)}/state/$contactPublicKey/$key');
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        return response.body;
-      }
-      return null;
-    } catch (e) {
-      _log.error('Relay', 'Failed to pull state ($key): $e');
-      return null;
-    }
-  }
-
-  /// Helper to sign a message using Ed25519.
-  String _signMessage(String message, String secretKeyHex) {
-    final privKey = ed.PrivateKey(hex.decode(secretKeyHex));
-    final sig = ed.sign(privKey, utf8.encode(message));
-    return hex.encode(sig);
   }
 
   /// Hand a message to the relay.
   ///
   /// Returns false when there is no live socket. Callers must not treat that
-  /// as delivered — [OutboxService] keeps the message queued and retries.
-  Future<bool> sendViaRelay(String contactPublicKey, String encryptedMessage) async {
-    final conn = _conns[contactPublicKey];
+  /// as delivered - OutboxService keeps the message queued and retries.
+  Future<bool> sendViaRelay(String channelKey, String payload) async {
+    final conn = _conns[channelKey];
     final channel = conn?.channel;
     if (channel == null || conn?.state != RelayConnectionState.connected) {
-      _log.warn('Relay', 'No active WS connection for $contactPublicKey');
+      _log.warn('Relay', 'No active connection for $channelKey');
       return false;
     }
 
     try {
-      channel.sink.add(encryptedMessage);
+      channel.sink.add(_pad(payload));
       return true;
     } catch (e) {
       _log.error('Relay', 'Send failed: $e');
@@ -357,22 +276,180 @@ class RelayService extends ChangeNotifier {
     }
   }
 
-  void disconnect(String contactPublicKey) {
-    final conn = _conns[contactPublicKey];
+  // -- Handshake inbox --------------------------------------------------------
+
+  /// Deliver a contact handshake to someone we share no secret with.
+  ///
+  /// Writes are unauthenticated by design - a stranger has no shared secret to
+  /// sign with. Reads are not: see [syncInbox].
+  Future<bool> postToInbox(String identityPublicKeyHex, String payload) async {
+    final inboxId = Mailbox.inboxIdFor(identityPublicKeyHex);
+    for (final fallback in [false, true]) {
+      try {
+        final response = await http.post(
+          Uri.parse('https://${_host(fallback)}/inbox/$inboxId'),
+          body: _pad(payload),
+        );
+        if (response.statusCode == 200) return true;
+      } catch (e) {
+        _log.warn('Relay', 'Inbox post failed on ${_host(fallback)}: $e');
+      }
+    }
+    return false;
+  }
+
+  /// Read and clear our own handshake inbox.
+  ///
+  /// Authorised with the identity key, whose public half is the inbox address,
+  /// so only the owner can read what arrived.
+  Future<List<String>> syncInbox(
+    String myIdentityPublicKeyHex,
+    String myIdentitySecretHex,
+  ) async {
+    final inboxId = Mailbox.inboxIdFor(myIdentityPublicKeyHex);
+    final path = '/inbox/$inboxId';
+    final host = _host(false);
+
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final response = await http.get(
+        Uri.parse('https://$host$path/sync'),
+        headers: {
+          'X-Spheres-Signature':
+              _signWithIdentity('GET$path/sync$timestamp', myIdentitySecretHex),
+          'X-Spheres-Timestamp': timestamp,
+        },
+      );
+      if (response.statusCode != 200) return const [];
+
+      final pending = jsonDecode(response.body) as List<dynamic>;
+      if (pending.isEmpty) return const [];
+
+      final payloads = <String>[];
+      final ids = <String>[];
+      for (final msg in pending) {
+        final payload = _unpad(msg['data'] as String);
+        if (payload != null) payloads.add(payload);
+        ids.add(msg['id'] as String);
+      }
+
+      final body = jsonEncode({'ids': ids});
+      final ackTs = DateTime.now().millisecondsSinceEpoch.toString();
+      await http.post(
+        Uri.parse('https://$host$path/ack'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Spheres-Signature':
+              _signWithIdentity('POST$path/ack$body$ackTs', myIdentitySecretHex),
+          'X-Spheres-Timestamp': ackTs,
+        },
+        body: body,
+      );
+
+      return payloads;
+    } catch (e) {
+      _log.error('Relay', 'Failed to sync inbox: $e');
+      return const [];
+    }
+  }
+
+  // -- Prekey bundle ----------------------------------------------------------
+
+  /// Publish the minimum a stranger needs to start encrypting to us.
+  ///
+  /// Only the X25519 key and a signature over it. Display name, bio and avatar
+  /// deliberately do not go here - v1 published the whole profile at an
+  /// unauthenticated endpoint, so anyone holding a public key could read it.
+  Future<bool> publishPrekey(
+    String myIdentityPublicKeyHex,
+    String myIdentitySecretHex,
+    String payload,
+  ) async {
+    final address = Mailbox.inboxIdFor(myIdentityPublicKeyHex);
+    final path = '/prekey/$address';
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final response = await http.post(
+        Uri.parse('https://${_host(false)}$path'),
+        headers: {
+          'X-Spheres-Signature': _signWithIdentity(
+              'POST$path$payload$timestamp', myIdentitySecretHex),
+          'X-Spheres-Timestamp': timestamp,
+        },
+        body: payload,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      _log.error('Relay', 'Failed to publish prekey: $e');
+      return false;
+    }
+  }
+
+  Future<String?> fetchPrekey(String identityPublicKeyHex) async {
+    final address = Mailbox.inboxIdFor(identityPublicKeyHex);
+    try {
+      final response =
+          await http.get(Uri.parse('https://${_host(false)}/prekey/$address'));
+      return response.statusCode == 200 ? response.body : null;
+    } catch (e) {
+      _log.error('Relay', 'Failed to fetch prekey: $e');
+      return null;
+    }
+  }
+
+  String _signWithIdentity(String message, String secretKeyHex) {
+    final privKey = ed.PrivateKey(hex.decode(secretKeyHex));
+    return hex.encode(ed.sign(privKey, utf8.encode(message)));
+  }
+
+  // -- Padding ----------------------------------------------------------------
+
+  /// Pad to the next size bucket so the relay sees a size class, not a length.
+  ///
+  /// Framed as `<length>:<payload><filler>` - cheap, and unambiguous to strip.
+  /// This blunts, but does not eliminate, size correlation; timing is still
+  /// visible.
+  String _pad(String payload) {
+    final framed = '${payload.length}:$payload';
+    for (final bucket in _paddingBuckets) {
+      if (framed.length <= bucket) return framed.padRight(bucket, ' ');
+    }
+    // Larger than the biggest bucket: send as-is rather than inflating further.
+    return framed;
+  }
+
+  String? _unpad(String raw) {
+    final separator = raw.indexOf(':');
+    if (separator <= 0) return raw;
+    final length = int.tryParse(raw.substring(0, separator));
+    if (length == null) return raw;
+
+    final start = separator + 1;
+    if (start + length > raw.length) {
+      _log.warn('Relay', 'Discarding truncated frame');
+      return null;
+    }
+    return raw.substring(start, start + length);
+  }
+
+  // -- Lifecycle --------------------------------------------------------------
+
+  void disconnect(String channelKey) {
+    final conn = _conns[channelKey];
     if (conn == null) return;
     conn.closedIntentionally = true;
     conn.retryTimer?.cancel();
     conn.channel?.sink.close();
     conn.channel = null;
-    _conns.remove(contactPublicKey);
+    _conns.remove(channelKey);
     notifyListeners();
   }
 
   void disconnectAll() {
-    for (final entry in _conns.entries.toList()) {
-      entry.value.closedIntentionally = true;
-      entry.value.retryTimer?.cancel();
-      entry.value.channel?.sink.close();
+    for (final conn in _conns.values.toList()) {
+      conn.closedIntentionally = true;
+      conn.retryTimer?.cancel();
+      conn.channel?.sink.close();
     }
     _conns.clear();
     notifyListeners();

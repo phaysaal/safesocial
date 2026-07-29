@@ -4,10 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../crypto/session_manager.dart';
 import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
-import 'rust_core_service.dart';
 
 /// Call state.
 enum CallState { idle, ringing, connecting, connected, ended }
@@ -18,9 +18,34 @@ enum CallType { audio, video }
 /// Manages WebRTC audio/video calls using a Full Mesh P2P architecture.
 class CallService extends ChangeNotifier {
   final RelayService _signaling = RelayService();
-  final RustCoreService _rustCore = RustCoreService();
   String? _myPublicKey;
-  String? _mySecretKey;
+  SessionManager? _sessions;
+  String? Function(String identityKey)? _resolveExchangeKey;
+
+  /// Supply the crypto context so signalling channels get pairwise addresses.
+  void attachCrypto(
+    SessionManager sessions,
+    String? Function(String identityKey) resolveExchangeKey,
+  ) {
+    _sessions = sessions;
+    _resolveExchangeKey = resolveExchangeKey;
+  }
+
+  Future<void> _connectSignalingMailbox(String contactKey) async {
+    final sessions = _sessions;
+    if (sessions == null) return;
+    try {
+      final mailbox = await sessions.mailboxFor(
+        peerIdentityKey: contactKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactKey),
+        purpose: 'call',
+      );
+      await _signaling.connectMailbox(contactKey, mailbox);
+    } on NoSessionException {
+      // Calls need the same pairwise secret as messages; without it there is
+      // no address to listen on.
+    }
+  }
 
   // WebRTC Mesh: Map of PeerPublicKey -> Connection/Stream
   final Map<String, RTCPeerConnection> _peerConnections = {};
@@ -74,18 +99,22 @@ class CallService extends ChangeNotifier {
 
   void setMyInfo(String key, String secretKey) {
     _myPublicKey = key;
-    _mySecretKey = secretKey;
     _signaling.onMessageReceived = _handleSignaling;
   }
 
   void connectSignaling(String contactKey) {
     if (_myPublicKey == null) return;
-    _signaling.connect('call:$_myPublicKey', 'call:$contactKey', mySecretKey: _mySecretKey, authPublicKey: _myPublicKey);
+    DebugLogService().info('Call', 'Connecting signaling channel → $contactKey');
+    _connectSignalingMailbox(contactKey);
   }
 
   /// Start a 1:1 call.
   Future<void> startCall(String contactKey, String contactName, CallType type) async {
-    if (_state != CallState.idle) return;
+    if (_state != CallState.idle) {
+      DebugLogService().warn('Call', 'startCall ignored — already in state $_state');
+      return;
+    }
+    DebugLogService().info('Call', 'Starting ${type.name} call → $contactName');
     _remoteContactKey = contactKey;
     _remoteContactName = contactName;
     _callType = type;
@@ -95,11 +124,15 @@ class CallService extends ChangeNotifier {
 
     try {
       await _requestPermissions(type);
+      DebugLogService().info('Call', 'Permissions granted');
       await _initLocalStream(type);
+      DebugLogService().info('Call', 'Local stream ready — tracks: ${_localStream?.getTracks().length}');
       await _setupPeer(contactKey, isInitiator: true);
       _state = CallState.ringing;
+      DebugLogService().info('Call', 'Offer sent — waiting for answer');
       notifyListeners();
     } catch (e) {
+      DebugLogService().error('Call', 'startCall failed: $e');
       await endCall();
     }
   }
@@ -149,7 +182,11 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> acceptCall() async {
-    if (_remoteContactKey == null || _pendingOffer == null) return;
+    if (_remoteContactKey == null || _pendingOffer == null) {
+      DebugLogService().warn('Call', 'acceptCall ignored — remoteKey=$_remoteContactKey pendingOffer=$_pendingOffer');
+      return;
+    }
+    DebugLogService().info('Call', 'Accepting call from $_remoteContactName ($_remoteContactKey)');
     _state = CallState.connecting;
     notifyListeners();
 
@@ -158,11 +195,14 @@ class CallService extends ChangeNotifier {
     await _setupPeer(_remoteContactKey!, isInitiator: false);
 
     final pc = _peerConnections[_remoteContactKey!]!;
+    DebugLogService().info('Call', 'Setting remote description (offer)');
     await pc.setRemoteDescription(_pendingOffer!);
     _pendingOffer = null;
 
+    DebugLogService().info('Call', 'Creating answer');
     final answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+    DebugLogService().info('Call', 'Answer sent → $_remoteContactKey');
     _sendSignal(_remoteContactKey!, {
       'type': 'call_answer',
       'sdp': answer.sdp,
@@ -171,8 +211,10 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> endCall() async {
+    DebugLogService().info('Call', 'endCall — closing ${_peerConnections.length} peer connection(s)');
     final targets = _peerConnections.keys.toList();
     for (var key in targets) {
+      DebugLogService().info('Call', 'Sending call_end → $key');
       _sendSignal(key, {'type': 'call_end'});
       await _peerConnections[key]?.close();
     }
@@ -184,6 +226,7 @@ class CallService extends ChangeNotifier {
     _groupId = null;
     _pendingOffer = null;
     _isIncomingCall = false;
+    DebugLogService().info('Call', 'Call ended — state reset to idle');
     notifyListeners();
   }
 
@@ -198,24 +241,50 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> _initLocalStream(CallType type) async {
-    if (_localStream != null) return;
+    if (_localStream != null) {
+      DebugLogService().info('Call', 'Local stream already initialized — skipping');
+      return;
+    }
+    DebugLogService().info('Call', 'Requesting ${type.name} media stream');
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': type == CallType.video ? {'facingMode': 'user'} : false,
     });
+    final tracks = _localStream!.getTracks();
+    DebugLogService().info('Call', 'Local stream ready — ${tracks.length} track(s): ${tracks.map((t) => '${t.kind}(${t.id})').join(', ')}');
   }
 
   Future<void> _setupPeer(String peerKey, {required bool isInitiator}) async {
-    if (_peerConnections.containsKey(peerKey)) return;
+    if (_peerConnections.containsKey(peerKey)) {
+      DebugLogService().warn('Call', '_setupPeer: already have connection for $peerKey');
+      return;
+    }
+    DebugLogService().info('Call', '_setupPeer: creating PeerConnection for $peerKey (initiator=$isInitiator)');
 
     final pc = await createPeerConnection({'iceServers': _iceServers, 'sdpSemantics': 'unified-plan'});
     _peerConnections[peerKey] = pc;
 
-    _localStream?.getTracks().forEach((track) {
+    pc.onConnectionState = (state) {
+      DebugLogService().info('Call', 'PeerConnection[$peerKey] connectionState → $state');
+    };
+    pc.onIceConnectionState = (state) {
+      DebugLogService().info('Call', 'PeerConnection[$peerKey] iceConnectionState → $state');
+    };
+    pc.onIceGatheringState = (state) {
+      DebugLogService().info('Call', 'PeerConnection[$peerKey] iceGatheringState → $state');
+    };
+    pc.onSignalingState = (state) {
+      DebugLogService().info('Call', 'PeerConnection[$peerKey] signalingState → $state');
+    };
+
+    final localTracks = _localStream?.getTracks() ?? [];
+    DebugLogService().info('Call', 'Adding ${localTracks.length} local track(s) to peer');
+    for (final track in localTracks) {
       pc.addTrack(track, _localStream!);
-    });
+    }
 
     pc.onTrack = (event) {
+      DebugLogService().info('Call', 'Remote track received from $peerKey — streams: ${event.streams.length}');
       if (event.streams.isNotEmpty) {
         _remoteStreams[peerKey] = event.streams[0];
         notifyListeners();
@@ -223,6 +292,7 @@ class CallService extends ChangeNotifier {
     };
 
     pc.onIceCandidate = (candidate) {
+      DebugLogService().info('Call', 'ICE candidate → $peerKey: ${candidate.candidate?.substring(0, candidate.candidate!.length > 60 ? 60 : candidate.candidate!.length)}...');
       _sendSignal(peerKey, {
         'type': 'ice_candidate',
         'candidate': candidate.candidate,
@@ -232,8 +302,10 @@ class CallService extends ChangeNotifier {
     };
 
     if (isInitiator) {
+      DebugLogService().info('Call', 'Creating offer for $peerKey');
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      DebugLogService().info('Call', 'Offer created — sending call_offer to $peerKey');
       _sendSignal(peerKey, {
         'type': 'call_offer',
         'call_type': _callType.name,
@@ -245,19 +317,22 @@ class CallService extends ChangeNotifier {
   }
 
   void _sendSignal(String contactKey, Map<String, dynamic> data) {
+    DebugLogService().info('Call', 'sendSignal [${data['type']}] → $contactKey');
     final plaintext = jsonEncode(data);
     final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactKey);
-    _signaling.sendViaRelay('call:$contactKey', CryptoService.encrypt(plaintext, sharedKey));
+    _signaling.sendViaRelay(contactKey, CryptoService.encrypt(plaintext, sharedKey));
   }
 
   void _handleSignaling(String contactKey, String rawData) async {
     final senderKey = contactKey.replaceFirst('call:', '');
+    DebugLogService().info('Call', 'handleSignaling: raw message from $senderKey (${rawData.length} chars)');
     final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', senderKey);
-    
+
     try {
       final decrypted = CryptoService.decrypt(rawData, sharedKey);
       final data = jsonDecode(decrypted) as Map<String, dynamic>;
       final type = data['type'];
+      DebugLogService().info('Call', 'handleSignaling: received [$type] from $senderKey — currentState=$_state');
 
       switch (type) {
         case 'call_offer':
@@ -268,9 +343,10 @@ class CallService extends ChangeNotifier {
             _pendingOffer = RTCSessionDescription(data['sdp'], data['sdp_type']);
             _isIncomingCall = true;
             _state = CallState.ringing;
+            DebugLogService().info('Call', 'Incoming ${_callType.name} call from $_remoteContactName — stored pending offer, firing onIncomingCall');
             onIncomingCall?.call(senderKey, _remoteContactName!, _callType);
           } else {
-            // Already in a call (group or other)
+            DebugLogService().info('Call', 'call_offer received while busy ($state) — auto-answering as mesh peer');
             await _setupPeer(senderKey, isInitiator: false);
             await _peerConnections[senderKey]!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
             final answer = await _peerConnections[senderKey]!.createAnswer();
@@ -279,10 +355,13 @@ class CallService extends ChangeNotifier {
           }
           break;
         case 'call_answer':
+          DebugLogService().info('Call', 'call_answer received from $senderKey — setting remote description');
           await _peerConnections[senderKey]?.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
           _state = CallState.connected;
+          DebugLogService().success('Call', 'Call connected with $senderKey');
           break;
         case 'ice_candidate':
+          DebugLogService().info('Call', 'ice_candidate from $senderKey — peerExists=${_peerConnections.containsKey(senderKey)}');
           await _peerConnections[senderKey]?.addCandidate(RTCIceCandidate(data['candidate'], data['sdpMid'], data['sdpMLineIndex']));
           break;
         case 'group_call_invite':
@@ -292,22 +371,29 @@ class CallService extends ChangeNotifier {
             _remoteContactName = data['caller_name'];
             _isIncomingCall = true;
             _state = CallState.ringing;
+            DebugLogService().info('Call', 'Group call invite from $senderKey — group: ${data['group_id']}');
             onIncomingCall?.call(senderKey, 'Group Call', _callType);
           }
           break;
         case 'group_call_join':
+          DebugLogService().info('Call', 'group_call_join from $senderKey — groupMatch=${_groupId == data['group_id']}');
           if (_state == CallState.connected || _groupId == data['group_id']) {
-            // New person joined the mesh, send them an offer
             await _setupPeer(senderKey, isInitiator: true);
           }
           break;
         case 'call_end':
+          DebugLogService().info('Call', 'call_end from $senderKey — closing connection');
           await _peerConnections[senderKey]?.close();
           _peerConnections.remove(senderKey);
           _remoteStreams.remove(senderKey);
-          if (_peerConnections.isEmpty) _state = CallState.idle;
+          if (_peerConnections.isEmpty) {
+            _state = CallState.idle;
+            DebugLogService().info('Call', 'All peers disconnected — state → idle');
+          }
           notifyListeners();
           break;
+        default:
+          DebugLogService().warn('Call', 'Unknown signaling message type: $type');
       }
       notifyListeners();
     } catch (e) {

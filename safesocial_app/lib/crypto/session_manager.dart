@@ -5,6 +5,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'envelope.dart';
+import 'mailbox.dart';
 import 'pairwise_session.dart';
 
 /// Raised when a contact cannot be messaged securely yet.
@@ -90,6 +91,25 @@ class SessionManager {
     );
     _sessions[peerIdentityKey] = session;
     return session;
+  }
+
+  /// Derive the relay mailbox shared with a contact for a given purpose.
+  ///
+  /// Distinct purposes ('chat', 'feed', 'call') give distinct addresses, so the
+  /// relay cannot tell that two channels belong to the same pair of people.
+  Future<Mailbox> mailboxFor({
+    required String peerIdentityKey,
+    required String? peerKeyExchangePublicKey,
+    required String purpose,
+  }) async {
+    final session = await sessionFor(
+      peerIdentityKey: peerIdentityKey,
+      peerKeyExchangePublicKey: peerKeyExchangePublicKey,
+    );
+    return Mailbox.fromSharedSecret(
+      secret: await session.mailboxSecret(),
+      purpose: purpose,
+    );
   }
 
   /// Encrypt [plaintext] for a contact.

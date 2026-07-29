@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/group.dart';
 import '../models/message.dart';
+import '../crypto/mailbox.dart';
 import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
@@ -19,20 +20,32 @@ class GroupService extends ChangeNotifier {
   final Map<String, List<Message>> _groupMessages = {};
   final RelayService _groupRelay = RelayService();
   String? _myPublicKey;
-  String? _mySecretKey;
 
   List<Group> get groups => List.unmodifiable(_groups);
   Map<String, List<Message>> get groupMessages => Map.unmodifiable(_groupMessages);
 
+  /// Open a group channel.
+  ///
+  /// The address is derived from the group id, a locally generated UUID that
+  /// never leaves the device — so this channel is effectively single-device,
+  /// exactly as it already was. A real per-sphere key arrives with the sphere
+  /// model in Phase 3.
+  Future<void> _connectGroupMailbox(String dhtKey) async {
+    final mailbox = await Mailbox.fromLocalSecret(
+      secret: dhtKey,
+      purpose: 'group',
+    );
+    await _groupRelay.connectMailbox('grp:$dhtKey', mailbox);
+  }
+
   void initSync(String myPublicKey, String mySecretKey) {
     _myPublicKey = myPublicKey;
-    _mySecretKey = mySecretKey;
     _groupRelay.onMessageReceived = (groupKey, data) {
       _handleGroupMessage(groupKey, data);
     };
 
     for (final group in _groups) {
-      _groupRelay.connect('grp:${group.dhtKey}', 'grp:${group.dhtKey}', mySecretKey: _mySecretKey!, authPublicKey: myPublicKey);
+      _connectGroupMailbox(group.dhtKey);
     }
   }
 
@@ -91,7 +104,7 @@ class GroupService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    _groupRelay.connect('grp:$dhtKey', 'grp:$dhtKey', mySecretKey: _mySecretKey!, authPublicKey: _myPublicKey);
+    _connectGroupMailbox(dhtKey);
   }
 
   Future<void> updateGroup(String dhtKey, {String? name, String? description}) async {

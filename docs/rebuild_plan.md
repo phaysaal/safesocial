@@ -415,13 +415,47 @@ Landed:
   "Relay network: connected" message that was true regardless.
 - 45 tests pass, 11 of them covering the outbox state machine.
 
+**Relay v2 landed** — the relay is now blind.
+
+- Addresses are Ed25519 public keys derived from the pairwise secret
+  (`lib/crypto/mailbox.dart`). The operator cannot compute one from public keys, so the
+  social graph is no longer reconstructible from traffic. Distinct purposes (chat, feed,
+  call) give distinct addresses, so channels between the same pair are unlinkable.
+- Access is granted by signing the request with the address's private key, verified
+  against the address itself. The worker keeps no membership list, and a throwaway keypair
+  proves nothing — closing the hole where anyone could read or delete any conversation's
+  mail.
+- The unauthenticated `/state` endpoint is gone. It served display names and bios to
+  anyone holding a public key. Only a signed prekey bundle (identity key + X25519 key) is
+  public now, and the client verifies its signature, so the operator cannot substitute
+  their own exchange key and sit in the middle.
+- Handshakes move to `/inbox/<identity>`: open to write (a stranger has no shared secret),
+  signed to read.
+- Quotas and limits where there were none: 256 KB bodies, 500 messages and 8 MB per
+  mailbox, 120 requests/minute, 4 KB prekeys.
+- Retention is swept on a Durable Object alarm rather than only on write, so an idle
+  mailbox actually expires.
+- Payloads are padded to size buckets before transmission.
+- Fixed while in there: `String.fromCharCode(...)` spread over a whole buffer, which threw
+  `RangeError` on binary frames over ~100 KB inside the storage transaction, so the message
+  was silently never queued. Also device pairing, where the two devices derived *different*
+  rooms and sent to channel keys that were never registered — they now derive one shared
+  address from the pairing secret.
+- `compatibility_date` raised to 2025-01-01: Ed25519 verification is now load-bearing, and
+  under the old pin a `crypto.subtle` failure would 401 every request with no other symptom.
+- 65 tests pass, 10 covering mailbox derivation and request-signature binding.
+
+**Deployment note:** the route names changed, so v1 and v2 do not interoperate. The worker
+must be deployed together with the client build.
+
 Remaining:
 
-- **Relay v2** (§6.1): derived rotating mailboxes, membership-bound auth, 256-bit IDs,
-  padding, quotas, a retention sweep, and removing the unauthenticated `/state` read. This
-  is a coordinated client + worker deployment, so it is worth doing as one change.
 - **One multiplexed connection**: seven `RelayService` instances still exist, one per
   service.
+- **Address rotation.** Addresses are secret-derived but stable, so an operator can still
+  see that *some* pair has been talking for months. Rotating on a schedule needs a lookback
+  window at least as long as the retention period, or mail queued to a retired address is
+  lost — deferred rather than shipped half-working.
 - **Sequence numbers and gap detection** for feed/group content; direct messages already
   get ordering from the ratchet index.
 - **SQLite encrypted at rest** (§7), which the outbox and message history both want.

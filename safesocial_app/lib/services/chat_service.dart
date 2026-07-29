@@ -29,7 +29,6 @@ class ChatService extends ChangeNotifier {
   String? Function(String identityKey)? _resolveExchangeKey;
 
   String? _myPublicKey;
-  String? _mySecretKey;
 
   final Map<String, List<Message>> _conversations = {};
   String? _activeConversation;
@@ -51,7 +50,6 @@ class ChatService extends ChangeNotifier {
     String? Function(String identityKey)? resolveExchangeKey,
   }) {
     _myPublicKey = publicKey;
-    _mySecretKey = secretKey;
     if (sessions != null) _sessions = sessions;
     if (resolveExchangeKey != null) _resolveExchangeKey = resolveExchangeKey;
 
@@ -70,9 +68,26 @@ class ChatService extends ChangeNotifier {
   /// Delivery state for a message we sent, or null if it is not tracked.
   OutboxState? deliveryState(String messageId) => _outbox?.stateOf(messageId);
 
-  void connectRelay(String contactPublicKey) {
-    if (_myPublicKey != null) {
-      _relayService.connect(_myPublicKey!, contactPublicKey, mySecretKey: _mySecretKey!);
+  /// Open the chat channel with a contact.
+  ///
+  /// The address is derived from the pairwise secret, so the relay cannot tell
+  /// which two identities it belongs to.
+  Future<void> connectRelay(String contactPublicKey) async {
+    final sessions = _sessions;
+    if (_myPublicKey == null || sessions == null) return;
+    try {
+      final mailbox = await sessions.mailboxFor(
+        peerIdentityKey: contactPublicKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactPublicKey),
+        purpose: 'chat',
+      );
+      await _relayService.connectMailbox(contactPublicKey, mailbox);
+    } on NoSessionException {
+      // No key exchange key yet — the channel opens once a handshake or prekey
+      // fetch supplies one. Staying disconnected is correct; there is nobody
+      // we could safely talk to.
+      DebugLogService().info(
+          'Chat', 'Waiting for $contactPublicKey to publish an encryption key');
     }
   }
 

@@ -53,6 +53,7 @@ Future<void> wireIdentity({
     publicKey,
     identityService.currentIdentity!.displayName,
     exchangeKey: identityService.exchangePublicKey,
+    secretKey: secretKey,
   );
   await contactService.listenForHandshakes();
 
@@ -67,6 +68,8 @@ Future<void> wireIdentity({
   outboxService.start();
   await outboxService.pruneCompleted();
   callService.setMyInfo(publicKey, secretKey);
+  callService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
+  feedService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
 
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;

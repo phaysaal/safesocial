@@ -1,13 +1,21 @@
 name = "spheres-relay"
 main = "worker.js"
-compatibility_date = "2024-01-01"
+
+# Ed25519 verification is load-bearing in v2: every mailbox read, ack and
+# WebSocket upgrade is authorised by it, so if crypto.subtle cannot import an
+# Ed25519 key the relay 401s everything and the only symptom is clients
+# reporting Unauthorized. The standard "Ed25519" algorithm name (as opposed to
+# the older "NODE-ED25519") needs a recent compatibility date, so this is
+# pinned well past that change.
+compatibility_date = "2025-01-01"
 
 # Custom domain
 routes = [
   { pattern = "relay.spheres.dev", custom_domain = true }
 ]
 
-# Durable Objects for room state
+# Durable Objects for mailbox state. Also provides the alarm API, used to
+# expire old mail on a timer rather than only when something is written.
 [durable_objects]
 bindings = [
   { name = "RELAY_ROOM", class_name = "RelayRoom" }

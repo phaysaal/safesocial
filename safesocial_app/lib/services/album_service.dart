@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/album.dart';
 import 'debug_log_service.dart';
+import '../crypto/mailbox.dart';
 import 'relay_service.dart';
 
 /// Manages collaborative shared photo albums.
@@ -14,19 +15,26 @@ class AlbumService extends ChangeNotifier {
   final List<Album> _albums = [];
   final RelayService _albumRelay = RelayService();
   String? _myPublicKey;
-  String? _mySecretKey;
 
   List<Album> get albums => List.unmodifiable(_albums);
 
+  /// Open an album channel. Same locality caveat as groups.
+  Future<void> _connectAlbumMailbox(String dhtKey) async {
+    final mailbox = await Mailbox.fromLocalSecret(
+      secret: dhtKey,
+      purpose: 'album',
+    );
+    await _albumRelay.connectMailbox('alb:$dhtKey', mailbox);
+  }
+
   void initSync(String myPublicKey, String mySecretKey) {
     _myPublicKey = myPublicKey;
-    _mySecretKey = mySecretKey;
     _albumRelay.onMessageReceived = (albumKey, data) {
       _handleIncomingContribution(albumKey, data);
     };
 
     for (final album in _albums) {
-      _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!, authPublicKey: myPublicKey);
+      _connectAlbumMailbox(album.dhtKey);
     }
   }
 
@@ -59,7 +67,7 @@ class AlbumService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    _albumRelay.connect('alb:${album.dhtKey}', 'alb:${album.dhtKey}', mySecretKey: _mySecretKey!, authPublicKey: _myPublicKey);
+    _connectAlbumMailbox(album.dhtKey);
     DebugLogService().success('Media', 'Shared album "$name" created');
   }
 

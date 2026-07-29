@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:convert/convert.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -30,29 +33,35 @@ class ContactService extends ChangeNotifier {
     return null;
   }
 
-  void setMyInfo(String publicKey, String displayName, {String? exchangeKey}) {
+  void setMyInfo(String publicKey, String displayName,
+      {String? exchangeKey, String? secretKey}) {
     _myPublicKey = publicKey;
     _myDisplayName = displayName;
     if (exchangeKey != null) _myExchangeKey = exchangeKey;
-
-    // Listen for incoming contact handshakes
-    _handshakeRelay.onMessageReceived = (contactKey, data) {
-      handleIncomingHandshake(contactKey, data);
-    };
+    if (secretKey != null) _mySecretKey = secretKey;
   }
 
-  /// Join our own inbound handshake room.
+  String? _mySecretKey;
+
+  /// Drain our handshake inbox.
   ///
-  /// Without this, the room was only ever joined while *sending* a handshake,
+  /// Handshakes are the one channel that cannot use a shared secret — a
+  /// stranger has none with us — so the inbox address is our identity key.
+  /// Writes to it are open, reads are signed with the identity secret, so only
+  /// we can see who asked.
+  ///
+  /// Previously the inbound room was joined only while *sending* a handshake,
   /// so an incoming request could not be received unless we happened to have
   /// sent one first in the same session.
   Future<void> listenForHandshakes() async {
-    if (_myPublicKey == null) return;
-    await _handshakeRelay.connect(
-      'handshake:$_myPublicKey',
-      'handshake:$_myPublicKey',
-      authPublicKey: _myPublicKey,
-    );
+    final publicKey = _myPublicKey;
+    final secretKey = _mySecretKey;
+    if (publicKey == null || secretKey == null) return;
+
+    final payloads = await _handshakeRelay.syncInbox(publicKey, secretKey);
+    for (final payload in payloads) {
+      handleIncomingHandshake(publicKey, payload);
+    }
   }
 
   /// Add a contact and send a handshake request.
@@ -65,19 +74,20 @@ class ContactService extends ChangeNotifier {
     String finalName = displayName;
     String? exchangeKey = keyExchangePublicKey;
     try {
-      final profileStr = await _handshakeRelay.pullState(publicKey, 'profile');
-      if (profileStr != null) {
-        final envelope = jsonDecode(profileStr);
-        // The published payload is {profile: {...}, signature: ...}; the old
-        // code read displayName off the top level, so it never found it.
-        final profile = envelope is Map && envelope['profile'] is Map
-            ? envelope['profile'] as Map
-            : envelope as Map;
-        if (profile['displayName'] is String) {
-          finalName = profile['displayName'] as String;
-        }
-        if (exchangeKey == null && profile['keyExchangePublicKey'] is String) {
-          exchangeKey = profile['keyExchangePublicKey'] as String;
+      // Only the key bundle is public now. Display name arrives through the
+      // handshake instead — publishing it at an unauthenticated endpoint made
+      // every user's name and bio readable by anyone holding a public key.
+      final prekeyStr = await _handshakeRelay.fetchPrekey(publicKey);
+      if (prekeyStr != null) {
+        final envelope = jsonDecode(prekeyStr) as Map<String, dynamic>;
+        final bundle = envelope['bundle'];
+        // Verify the bundle is signed by the identity it claims, so a relay
+        // operator cannot swap in their own exchange key.
+        if (bundle is Map<String, dynamic> &&
+            _prekeyIsAuthentic(publicKey, bundle, envelope['signature'])) {
+          if (exchangeKey == null && bundle['keyExchangePublicKey'] is String) {
+            exchangeKey = bundle['keyExchangePublicKey'] as String;
+          }
         }
       }
     } catch (_) {
@@ -136,6 +146,28 @@ class ContactService extends ChangeNotifier {
     }
   }
 
+  /// Check a prekey bundle really was signed by the identity it names.
+  ///
+  /// Without this the relay could hand out its own X25519 key for any contact
+  /// and sit in the middle of every conversation with them.
+  bool _prekeyIsAuthentic(
+    String identityPublicKeyHex,
+    Map<String, dynamic> bundle,
+    dynamic signatureHex,
+  ) {
+    if (signatureHex is! String) return false;
+    if (bundle['publicKey'] != identityPublicKeyHex) return false;
+    try {
+      return ed.verify(
+        ed.PublicKey(hex.decode(identityPublicKeyHex)),
+        utf8.encode(jsonEncode(bundle)),
+        Uint8List.fromList(hex.decode(signatureHex)),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Record a contact's X25519 key once we learn it.
   Future<void> setExchangeKey(String publicKey, String exchangeKey) async {
     final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
@@ -156,9 +188,7 @@ class ContactService extends ChangeNotifier {
       'keyExchangePublicKey': _myExchangeKey,
     });
     
-    _handshakeRelay.connect('handshake:$_myPublicKey', 'handshake:$targetKey', authPublicKey: _myPublicKey).then((_) {
-      _handshakeRelay.sendViaRelay('handshake:$targetKey', payload);
-    });
+    _handshakeRelay.postToInbox(targetKey, payload);
   }
 
   Future<void> removeContact(String publicKey) async {

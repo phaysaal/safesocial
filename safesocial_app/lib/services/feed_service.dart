@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../crypto/session_manager.dart';
 import '../models/contact.dart';
 import '../models/post.dart';
 import 'debug_log_service.dart';
@@ -21,7 +22,6 @@ class FeedService extends ChangeNotifier {
 
   final RelayService _feedRelay = RelayService();
   String? _myPublicKey;
-  String? _mySecretKey;
   List<Contact> _contacts = [];
 
   List<Post> get posts =>
@@ -59,9 +59,35 @@ class FeedService extends ChangeNotifier {
   Set<String> get hiddenPostIds => Set.unmodifiable(_hiddenPostIds);
 
 
+  SessionManager? _sessions;
+  String? Function(String identityKey)? _resolveExchangeKey;
+
+  /// Supply the crypto context so feed channels get pairwise addresses.
+  void attachCrypto(
+    SessionManager sessions,
+    String? Function(String identityKey) resolveExchangeKey,
+  ) {
+    _sessions = sessions;
+    _resolveExchangeKey = resolveExchangeKey;
+  }
+
+  Future<void> _connectFeedMailbox(String contactKey) async {
+    final sessions = _sessions;
+    if (sessions == null) return;
+    try {
+      final mailbox = await sessions.mailboxFor(
+        peerIdentityKey: contactKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactKey),
+        purpose: 'feed',
+      );
+      await _feedRelay.connectMailbox(contactKey, mailbox);
+    } on NoSessionException {
+      // Nothing to connect to until the contact publishes an encryption key.
+    }
+  }
+
   void initSync(String myPublicKey, String mySecretKey, List<Contact> contacts) {
     _myPublicKey = myPublicKey;
-    _mySecretKey = mySecretKey;
     _contacts = contacts;
 
     _feedRelay.onMessageReceived = (contactKey, data) {
@@ -69,7 +95,7 @@ class FeedService extends ChangeNotifier {
     };
 
     for (final contact in contacts.where((c) => !c.blocked)) {
-      _feedRelay.connect('feed:$myPublicKey', 'feed:${contact.publicKey}', mySecretKey: _mySecretKey!, authPublicKey: myPublicKey);
+      _connectFeedMailbox(contact.publicKey);
     }
   }
 
@@ -129,7 +155,7 @@ class FeedService extends ChangeNotifier {
       final relayPost = await _encodePostMedia(post);
       final postJson = jsonEncode({'type': 'post', 'post': relayPost.toJson()});
       for (final contact in _contacts.where((c) => !c.blocked)) {
-        _feedRelay.sendViaRelay('feed:${contact.publicKey}', postJson);
+        _feedRelay.sendViaRelay(contact.publicKey, postJson);
       }
     }
   }
@@ -265,7 +291,7 @@ class FeedService extends ChangeNotifier {
       'liked': nowLiked,
     });
     for (final contact in _contacts.where((c) => !c.blocked)) {
-      _feedRelay.sendViaRelay('feed:${contact.publicKey}', likeJson);
+      _feedRelay.sendViaRelay(contact.publicKey, likeJson);
     }
   }
 
@@ -294,14 +320,17 @@ class FeedService extends ChangeNotifier {
 
     final post = _posts[index];
     final newReactions = List<Reaction>.from(post.reactions);
+    // Use 'self' as reactorId for local storage so the UI can identify own reactions
     final existing = newReactions.indexWhere(
-        (r) => r.reactorId == _myPublicKey && r.emoji == emoji);
+        (r) => r.reactorId == 'self' && r.emoji == emoji);
 
     if (existing != -1) {
       // Toggle off — remove reaction
       newReactions.removeAt(existing);
     } else {
-      newReactions.add(Reaction(reactorId: _myPublicKey!, emoji: emoji, timestamp: DateTime.now()));
+      // Remove any previous reaction from self before adding new one
+      newReactions.removeWhere((r) => r.reactorId == 'self');
+      newReactions.add(Reaction(reactorId: 'self', emoji: emoji, timestamp: DateTime.now()));
     }
 
     _posts[index] = post.copyWith(reactions: newReactions);
@@ -316,7 +345,7 @@ class FeedService extends ChangeNotifier {
       'emoji': emoji,
     });
     for (final contact in _contacts.where((c) => !c.blocked)) {
-      _feedRelay.sendViaRelay('feed:${contact.publicKey}', reactionJson);
+      _feedRelay.sendViaRelay(contact.publicKey, reactionJson);
     }
   }
 
