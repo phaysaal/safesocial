@@ -109,6 +109,22 @@ class MembershipOp {
   }
 }
 
+/// Verified, decrypted sphere content.
+class OpenedSphereContent {
+  /// Author, proven by signature and confirmed to be a member.
+  final String from;
+  final String sphereId;
+  final String type;
+  final String plaintext;
+
+  const OpenedSphereContent({
+    required this.from,
+    required this.sphereId,
+    required this.type,
+    required this.plaintext,
+  });
+}
+
 /// An invitation waiting on the user's decision.
 class PendingInvite {
   final Sphere sphere;
@@ -582,7 +598,7 @@ class SphereService extends ChangeNotifier {
   /// The signature proves who wrote it; this additionally checks they were
   /// entitled to. Without it, a former member's replayed content, or a
   /// stranger's, would be displayed as legitimate sphere content.
-  Future<String> openContent(String raw) async {
+  Future<OpenedSphereContent> openContent(String raw) async {
     final envelope = Envelope.decode(raw);
     final sphereId = envelope.sphereId;
     if (sphereId == null) {
@@ -603,7 +619,12 @@ class SphereService extends ChangeNotifier {
           'No key for epoch ${envelope.sphereEpoch} of $sphereId');
     }
 
-    return utf8.decode(await envelope.openWithSphereKey(key));
+    return OpenedSphereContent(
+      from: envelope.from,
+      sphereId: sphereId,
+      type: envelope.type,
+      plaintext: utf8.decode(await envelope.openWithSphereKey(key)),
+    );
   }
 
   // ── Plumbing ───────────────────────────────────────────────────────────────

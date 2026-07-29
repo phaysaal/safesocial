@@ -10,6 +10,7 @@ import '../models/post.dart';
 import 'debug_log_service.dart';
 import 'media_service.dart';
 import 'relay_service.dart';
+import 'sphere_service.dart';
 
 /// Manages the social feed with P2P sync via Veilid DHT and fallback relay.
 class FeedService extends ChangeNotifier {
@@ -60,15 +61,59 @@ class FeedService extends ChangeNotifier {
 
 
   SessionManager? _sessions;
+  SphereService? _spheres;
   String? Function(String identityKey)? _resolveExchangeKey;
 
-  /// Supply the crypto context so feed channels get pairwise addresses.
+  /// Supply the crypto context so feed channels get pairwise addresses and
+  /// content can be sealed to a sphere.
   void attachCrypto(
     SessionManager sessions,
-    String? Function(String identityKey) resolveExchangeKey,
-  ) {
+    String? Function(String identityKey) resolveExchangeKey, {
+    SphereService? spheres,
+  }) {
     _sessions = sessions;
     _resolveExchangeKey = resolveExchangeKey;
+    if (spheres != null) _spheres = spheres;
+  }
+
+  /// Seal a payload to a sphere and deliver it to that sphere's members.
+  ///
+  /// Feed traffic used to go out as plain `jsonEncode`, so the relay operator
+  /// could read every post, like and reaction — including the base64 photos
+  /// inlined in posts.
+  Future<void> _publishToSphere({
+    required String sphereId,
+    required String type,
+    required String payloadJson,
+  }) async {
+    final spheres = _spheres;
+    if (spheres == null) return;
+
+    final sphere = spheres.sphere(sphereId);
+    if (sphere == null) {
+      DebugLogService()
+          .warn('Feed', 'Cannot publish to unknown sphere $sphereId');
+      return;
+    }
+
+    final String sealed;
+    try {
+      sealed = await spheres.sealContent(
+        sphereId: sphereId,
+        type: type,
+        plaintext: payloadJson,
+      );
+    } catch (e) {
+      DebugLogService().error('Feed', 'Could not seal $type: $e');
+      return;
+    }
+
+    final blocked =
+        _contacts.where((c) => c.blocked).map((c) => c.publicKey).toSet();
+    for (final member in sphere.members.map((m) => m.identityKey)) {
+      if (member == _myPublicKey || blocked.contains(member)) continue;
+      _feedRelay.sendViaRelay(member, sealed);
+    }
   }
 
   Future<void> _connectFeedMailbox(String contactKey) async {
@@ -161,13 +206,11 @@ class FeedService extends ChangeNotifier {
     if (_myPublicKey == null) return;
 
     final relayPost = await _encodePostMedia(post);
-    final postJson = jsonEncode({'type': 'post', 'post': relayPost.toJson()});
-
-    final blocked = _contacts.where((c) => c.blocked).map((c) => c.publicKey).toSet();
-    for (final member in audienceMembers) {
-      if (member == _myPublicKey || blocked.contains(member)) continue;
-      _feedRelay.sendViaRelay(member, postJson);
-    }
+    await _publishToSphere(
+      sphereId: sphereId,
+      type: 'post',
+      payloadJson: jsonEncode({'type': 'post', 'post': relayPost.toJson()}),
+    );
   }
 
   /// A 24-hour ephemeral post, scoped to a sphere like everything else.
@@ -190,14 +233,29 @@ class FeedService extends ChangeNotifier {
   }
 
   void _handleIncomingFeedItem(String contactKey, String data) async {
+    final spheres = _spheres;
+    if (spheres == null) return;
+
     try {
-      final json = jsonDecode(data);
+      // Verifies the signature, checks the author is a member of the sphere,
+      // and decrypts. Anything that fails throws rather than being displayed.
+      final opened = await spheres.openContent(data);
+      final authorId = opened.from;
+      final json = jsonDecode(opened.plaintext);
+
       if (json['type'] == 'post') {
         final post = await _decodePostMedia(Post.fromJson(json['post']));
+
+        // Authorship and audience both come from the verified envelope, not
+        // from fields in the payload that the sender could set freely.
+        if (post.authorId != authorId || post.sphereId != opened.sphereId) {
+          DebugLogService().warn(
+              'Feed', 'Dropping post: payload disagrees with signed envelope');
+          return;
+        }
         _mergePost(post);
       } else if (json['type'] == 'like') {
         final postId = json['post_id'] as String;
-        final authorId = json['author_id'] as String;
         final liked = json['liked'] as bool;
         final index = _posts.indexWhere((p) => p.id == postId);
         if (index == -1) return;
@@ -213,7 +271,6 @@ class FeedService extends ChangeNotifier {
         notifyListeners();
       } else if (json['type'] == 'reaction') {
         final postId = json['post_id'] as String;
-        final authorId = json['author_id'] as String;
         final emoji = json['emoji'] as String;
         final index = _posts.indexWhere((p) => p.id == postId);
         if (index == -1) return;
@@ -231,7 +288,7 @@ class FeedService extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      DebugLogService().warn('Feed', 'Malformed feed item');
+      DebugLogService().warn('Feed', 'Rejected feed item from $contactKey: $e');
     }
   }
 
@@ -300,15 +357,16 @@ class FeedService extends ChangeNotifier {
     _persistPosts();
     notifyListeners();
 
-    final likeJson = jsonEncode({
-      'type': 'like',
-      'post_id': postId,
-      'author_id': _myPublicKey,
-      'liked': nowLiked,
-    });
-    for (final contact in _contacts.where((c) => !c.blocked)) {
-      _feedRelay.sendViaRelay(contact.publicKey, likeJson);
-    }
+    // A reaction goes only to the sphere the post belongs to.
+    _publishToSphere(
+      sphereId: post.sphereId,
+      type: 'like',
+      payloadJson: jsonEncode({
+        'type': 'like',
+        'post_id': postId,
+        'liked': nowLiked,
+      }),
+    );
   }
 
   void commentOnPost(String postId, String text, {String? replyToId}) {
@@ -353,16 +411,15 @@ class FeedService extends ChangeNotifier {
     notifyListeners();
     _persistPosts();
 
-    // Broadcast reaction update to contacts
-    final reactionJson = jsonEncode({
-      'type': 'reaction',
-      'post_id': postId,
-      'author_id': _myPublicKey,
-      'emoji': emoji,
-    });
-    for (final contact in _contacts.where((c) => !c.blocked)) {
-      _feedRelay.sendViaRelay(contact.publicKey, reactionJson);
-    }
+    _publishToSphere(
+      sphereId: post.sphereId,
+      type: 'reaction',
+      payloadJson: jsonEncode({
+        'type': 'reaction',
+        'post_id': postId,
+        'emoji': emoji,
+      }),
+    );
   }
 
   Future<void> refreshFeed() async {

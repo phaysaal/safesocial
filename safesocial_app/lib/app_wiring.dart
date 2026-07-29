@@ -70,8 +70,6 @@ Future<void> wireIdentity({
   await outboxService.pruneCompleted();
   callService.setMyInfo(publicKey, secretKey);
   callService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
-  feedService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
-
   await sphereService.load();
   sphereService.configure(
     sessions: sessionManager,
@@ -87,6 +85,12 @@ Future<void> wireIdentity({
   // One-time conversion of legacy groups and rings. Runs after configure() so
   // the service can mint keys, and is a no-op on later launches.
   await SphereMigration.run(sphereService);
+
+  feedService.attachCrypto(
+    sessionManager,
+    contactService.exchangeKeyFor,
+    spheres: sphereService,
+  );
 
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;

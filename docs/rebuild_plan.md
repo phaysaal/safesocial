@@ -520,15 +520,21 @@ Landed:
   broadcasts nothing, because that membership was never agreed with anyone.
 - 91 tests pass.
 
+**Feed content is now sealed.** Posts, likes and reactions are encrypted to the sphere's
+epoch key before they leave the device, so the relay no longer sees post bodies or the
+base64 photos inlined in them. On receipt the signature is verified, the author is checked
+to be a member of the sphere, and the payload's `authorId`/`sphereId` must agree with the
+signed envelope — `author_id` was previously a field the sender could set to anything.
+Likes and reactions go only to the sphere the post belongs to, rather than to every contact.
+
 Remaining:
 
-- **Feed content is still plaintext on the wire.** Audience is now enforced in delivery, but
-  `FeedService` and `AlbumService` do not yet seal with `SealMode.sphere`. The machinery
-  exists (`SphereService.sealContent`/`openContent`); wiring it is the next step.
 - **Feed as the union over spheres** — the feed still merges whatever arrives rather than
   reading per sphere.
 - **Direct messages as spheres of two**, which retires the parallel chat path.
-- **Albums** are still their own thing rather than content inside a sphere.
+- **Albums** are still their own thing rather than content inside a sphere, and still send
+  plaintext.
+- **`call_service` is the last user of the placeholder cipher** — signalling payloads.
 - `Contact.closeFriend` still exists on the model, unused.
 
 ### Phase 4 — Feature parity inside spheres *(4–6 weeks)*

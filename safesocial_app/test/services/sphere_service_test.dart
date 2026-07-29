@@ -498,7 +498,7 @@ void main() {
         plaintext: 'hello sphere',
       );
 
-      expect(await service.openContent(sealed), 'hello sphere');
+      expect((await service.openContent(sealed)).plaintext, 'hello sphere');
     });
 
     test('sealing without the current epoch key fails loudly', () async {
