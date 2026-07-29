@@ -16,17 +16,14 @@ import 'screens/feed/feed_screen.dart';
 import 'screens/feed/memories_screen.dart';
 import 'screens/contacts/contact_list_screen.dart';
 import 'screens/contacts/add_contact_screen.dart';
-import 'screens/contacts/manage_rings_screen.dart';
 import 'screens/media/album_list_screen.dart';
 import 'screens/media/album_detail_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
-import 'screens/groups/group_list_screen.dart';
-import 'screens/groups/create_group_screen.dart';
-import 'screens/groups/group_detail_screen.dart';
-import 'screens/groups/group_settings_screen.dart';
-import 'screens/groups/add_group_member_screen.dart';
+import 'screens/spheres/sphere_list_screen.dart';
+import 'screens/spheres/create_sphere_screen.dart';
+import 'screens/spheres/sphere_detail_screen.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/settings/social_recovery_screen.dart';
@@ -149,10 +146,6 @@ class _SpheresAppState extends State<SpheresApp> {
           builder: (context, state) => const AddContactScreen(),
         ),
         GoRoute(
-          path: '/contacts/rings',
-          builder: (context, state) => const ManageRingsScreen(),
-        ),
-        GoRoute(
           path: '/profile/edit',
           builder: (context, state) => const EditProfileScreen(),
         ),
@@ -163,29 +156,17 @@ class _SpheresAppState extends State<SpheresApp> {
           ),
         ),
         GoRoute(
-          path: '/groups',
-          builder: (context, state) => const GroupListScreen(),
+          path: '/spheres',
+          builder: (context, state) => const SphereListScreen(),
         ),
         GoRoute(
-          path: '/groups/create',
-          builder: (context, state) => const CreateGroupScreen(),
+          path: '/spheres/create',
+          builder: (context, state) => const CreateSphereScreen(),
         ),
         GoRoute(
-          path: '/group/:dhtKey',
-          builder: (context, state) => GroupDetailScreen(
-            dhtKey: state.pathParameters['dhtKey']!,
-          ),
-        ),
-        GoRoute(
-          path: '/group/:dhtKey/settings',
-          builder: (context, state) => GroupSettingsScreen(
-            dhtKey: state.pathParameters['dhtKey']!,
-          ),
-        ),
-        GoRoute(
-          path: '/group/:dhtKey/add-members',
-          builder: (context, state) => AddGroupMemberScreen(
-            dhtKey: state.pathParameters['dhtKey']!,
+          path: '/sphere/:id',
+          builder: (context, state) => SphereDetailScreen(
+            sphereId: state.pathParameters['id']!,
           ),
         ),
         GoRoute(

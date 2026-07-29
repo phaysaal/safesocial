@@ -109,6 +109,40 @@ class MembershipOp {
   }
 }
 
+/// An invitation waiting on the user's decision.
+class PendingInvite {
+  final Sphere sphere;
+  final String invitedBy;
+  final DateTime receivedAt;
+
+  /// The epoch key offered with the invitation, held but not installed until
+  /// the invitation is accepted.
+  final Uint8List? sphereKey;
+
+  const PendingInvite({
+    required this.sphere,
+    required this.invitedBy,
+    required this.receivedAt,
+    required this.sphereKey,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'sphere': sphere.toJson(),
+        'invitedBy': invitedBy,
+        'receivedAt': receivedAt.toIso8601String(),
+        if (sphereKey != null) 'sphereKey': base64Encode(sphereKey!),
+      };
+
+  static PendingInvite fromJson(Map<String, dynamic> json) => PendingInvite(
+        sphere: Sphere.fromJson(json['sphere'] as Map<String, dynamic>),
+        invitedBy: json['invitedBy'] as String,
+        receivedAt: DateTime.parse(json['receivedAt'] as String),
+        sphereKey: json['sphereKey'] is String
+            ? Uint8List.fromList(base64Decode(json['sphereKey'] as String))
+            : null,
+      );
+}
+
 /// Owns spheres: creation, membership, and key distribution.
 ///
 /// Key distribution rides on the pairwise channels that already exist. When the
@@ -118,8 +152,17 @@ class MembershipOp {
 class SphereService extends ChangeNotifier {
   static const _prefsKey = 'spheres_spheres_v1';
 
+  static const _prefsInvitesKey = 'spheres_invites_v1';
+
   final SphereKeyring keyring = SphereKeyring();
   final Map<String, Sphere> _spheres = {};
+
+  /// Spheres we have been named in but have not agreed to join.
+  ///
+  /// Nothing is applied until the user accepts. Without this, anyone we have a
+  /// session with could silently add us to a sphere and start receiving our
+  /// posts to it.
+  final Map<String, PendingInvite> _invites = {};
 
   SessionManager? _sessions;
   String? _myIdentityKey;
@@ -133,6 +176,31 @@ class SphereService extends ChangeNotifier {
   List<Sphere> get spheres => List.unmodifiable(_spheres.values);
 
   Sphere? sphere(String id) => _spheres[id];
+
+  List<PendingInvite> get invites => List.unmodifiable(_invites.values);
+
+  /// Join a sphere we were invited to.
+  Future<void> acceptInvite(String sphereId) async {
+    final invite = _invites.remove(sphereId);
+    if (invite == null) return;
+
+    _spheres[invite.sphere.id] = invite.sphere;
+    if (invite.sphereKey != null) {
+      keyring.store(invite.sphere.id, invite.sphere.epoch, invite.sphereKey!);
+      await keyring.persist();
+    }
+    await _persist();
+    await _persistInvites();
+    notifyListeners();
+    DebugLogService().success('Sphere', 'Joined "${invite.sphere.name}"');
+  }
+
+  /// Decline, discarding the key we were sent along with it.
+  Future<void> declineInvite(String sphereId) async {
+    if (_invites.remove(sphereId) == null) return;
+    await _persistInvites();
+    notifyListeners();
+  }
 
   /// Spheres we can still publish to — i.e. we hold the current epoch key.
   List<Sphere> get writable => _spheres.values
@@ -374,10 +442,37 @@ class SphereService extends ChangeNotifier {
       // admin as of the state we hold. For a new one, only a create we are
       // named in is accepted.
       if (existing == null) {
-        if (op.op != MembershipOp.opCreate ||
-            !op.members.any((m) => m.identityKey == _myIdentityKey)) {
-          return;
+        if (!op.members.any((m) => m.identityKey == _myIdentityKey)) return;
+
+        // An unknown sphere is an invitation, not a fait accompli. Hold it
+        // until the user agrees to join.
+        Uint8List? offeredKey;
+        final keyB64 = payload['sphereKey'];
+        if (keyB64 is String) {
+          try {
+            offeredKey = Uint8List.fromList(base64Decode(keyB64));
+          } catch (_) {
+            offeredKey = null;
+          }
         }
+
+        _invites[op.sphereId] = PendingInvite(
+          sphere: Sphere(
+            id: op.sphereId,
+            name: op.name,
+            kind: op.kind,
+            createdBy: op.by,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(op.timestampMs),
+            epoch: op.epoch,
+            members: op.members,
+          ),
+          invitedBy: op.by,
+          receivedAt: DateTime.now(),
+          sphereKey: offeredKey,
+        );
+        await _persistInvites();
+        notifyListeners();
+        return;
       } else {
         if (!existing.isAdmin(op.by) && op.op != MembershipOp.opLeave) {
           DebugLogService()
@@ -397,9 +492,8 @@ class SphereService extends ChangeNotifier {
         id: op.sphereId,
         name: op.name,
         kind: op.kind,
-        createdBy: existing?.createdBy ?? op.by,
-        createdAt: existing?.createdAt ??
-            DateTime.fromMillisecondsSinceEpoch(op.timestampMs),
+        createdBy: existing.createdBy,
+        createdAt: existing.createdAt,
         epoch: op.epoch,
         members: op.members,
       );
@@ -531,6 +625,19 @@ class SphereService extends ChangeNotifier {
   Future<void> load() async {
     await keyring.load();
     final prefs = await SharedPreferences.getInstance();
+
+    final invitesRaw = prefs.getString(_prefsInvitesKey);
+    if (invitesRaw != null) {
+      try {
+        for (final item in jsonDecode(invitesRaw) as List<dynamic>) {
+          final invite = PendingInvite.fromJson(item as Map<String, dynamic>);
+          _invites[invite.sphere.id] = invite;
+        }
+      } catch (e) {
+        DebugLogService().error('Sphere', 'Could not read invites: $e');
+      }
+    }
+
     final raw = prefs.getString(_prefsKey);
     if (raw == null) return;
 
@@ -544,6 +651,14 @@ class SphereService extends ChangeNotifier {
     } catch (e) {
       DebugLogService().error('Sphere', 'Could not read spheres: $e');
     }
+  }
+
+  Future<void> _persistInvites() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _prefsInvitesKey,
+      jsonEncode(_invites.values.map((i) => i.toJson()).toList()),
+    );
   }
 
   Future<void> _persist() async {

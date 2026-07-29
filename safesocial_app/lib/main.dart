@@ -11,13 +11,11 @@ import 'services/chat_service.dart';
 import 'services/feed_service.dart';
 import 'services/contact_service.dart';
 import 'services/media_service.dart';
-import 'services/group_service.dart';
 import 'services/theme_service.dart';
 import 'services/call_service.dart';
 import 'services/debug_log_service.dart';
 import 'services/rust_core_service.dart';
 import 'services/sync_service.dart';
-import 'services/ring_service.dart';
 import 'services/album_service.dart';
 import 'services/relay_service.dart';
 
@@ -30,11 +28,9 @@ void main() async {
   final feedService = FeedService();
   final contactService = ContactService();
   final mediaService = MediaService();
-  final groupService = GroupService();
   final callService = CallService();
   final rustCoreService = RustCoreService();
   final syncService = SyncService();
-  final ringService = RingService();
   final albumService = AlbumService();
   final relayService = RelayService();
 
@@ -51,9 +47,7 @@ void main() async {
   // Load local data (Secure + SharedPrefs)
   await identityService.loadIdentity();
   await contactService.loadContacts();
-  await groupService.loadGroups();
   await feedService.loadPosts();
-  await ringService.loadRings();
   await albumService.loadAlbums();
   await chatService.loadConversations();
 
@@ -67,7 +61,6 @@ void main() async {
     outboxService: outboxService,
     callService: callService,
     feedService: feedService,
-    groupService: groupService,
     albumService: albumService,
     sphereService: sphereService,
   );
@@ -90,11 +83,9 @@ void main() async {
         ChangeNotifierProvider.value(value: feedService),
         ChangeNotifierProvider.value(value: contactService),
         ChangeNotifierProvider.value(value: mediaService),
-        ChangeNotifierProvider.value(value: groupService),
         ChangeNotifierProvider.value(value: callService),
         ChangeNotifierProvider.value(value: rustCoreService),
         ChangeNotifierProvider.value(value: syncService),
-        ChangeNotifierProvider.value(value: ringService),
         ChangeNotifierProvider.value(value: albumService),
         ChangeNotifierProvider.value(value: relayService),
         Provider<SessionManager>.value(value: sessionManager),

@@ -9,7 +9,6 @@ import '../../services/call_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
-import '../../services/group_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/sphere_service.dart';
@@ -79,7 +78,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       outboxService: context.read<OutboxService>(),
       callService: context.read<CallService>(),
       feedService: context.read<FeedService>(),
-      groupService: context.read<GroupService>(),
       albumService: context.read<AlbumService>(),
       sphereService: context.read<SphereService>(),
     );

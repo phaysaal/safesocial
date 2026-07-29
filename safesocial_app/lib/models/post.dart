@@ -1,8 +1,5 @@
 import 'package:equatable/equatable.dart';
 
-/// Post audience — who can see this post.
-enum PostAudience { everyone, closeFriends }
-
 /// A social feed post authored by a peer.
 class Post with EquatableMixin {
   final String id;
@@ -15,7 +12,8 @@ class Post with EquatableMixin {
   final List<Reaction> reactions;
   final List<String> likes;
   final List<Comment> comments;
-  final PostAudience audience;
+  /// The sphere this belongs to. Every post has one — there is no public feed.
+  final String sphereId;
   final bool isStory;
   final DateTime? expiresAt;
 
@@ -30,7 +28,7 @@ class Post with EquatableMixin {
     this.reactions = const [],
     this.likes = const [],
     this.comments = const [],
-    this.audience = PostAudience.everyone,
+    required this.sphereId,
     this.isStory = false,
     this.expiresAt,
   });
@@ -61,9 +59,7 @@ class Post with EquatableMixin {
               ?.map((e) => Comment.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
-      audience: json['audience'] == 'closeFriends'
-          ? PostAudience.closeFriends
-          : PostAudience.everyone,
+      sphereId: json['sphereId'] as String? ?? '',
       isStory: json['isStory'] as bool? ?? false,
       expiresAt: json['expiresAt'] != null
           ? DateTime.parse(json['expiresAt'] as String)
@@ -83,7 +79,7 @@ class Post with EquatableMixin {
       'reactions': reactions.map((r) => r.toJson()).toList(),
       'likes': likes,
       'comments': comments.map((c) => c.toJson()).toList(),
-      'audience': audience == PostAudience.closeFriends ? 'closeFriends' : 'everyone',
+      'sphereId': sphereId,
       'isStory': isStory,
       'expiresAt': expiresAt?.toIso8601String(),
     };
@@ -102,7 +98,7 @@ class Post with EquatableMixin {
     List<Reaction>? reactions,
     List<String>? likes,
     List<Comment>? comments,
-    PostAudience? audience,
+    String? sphereId,
     bool? isStory,
     DateTime? expiresAt,
   }) {
@@ -117,7 +113,7 @@ class Post with EquatableMixin {
       reactions: reactions ?? this.reactions,
       likes: likes ?? this.likes,
       comments: comments ?? this.comments,
-      audience: audience ?? this.audience,
+      sphereId: sphereId ?? this.sphereId,
       isStory: isStory ?? this.isStory,
       expiresAt: expiresAt ?? this.expiresAt,
     );
@@ -135,7 +131,7 @@ class Post with EquatableMixin {
         reactions,
         likes,
         comments,
-        audience,
+        sphereId,
         isStory,
         expiresAt,
       ];

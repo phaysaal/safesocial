@@ -165,6 +165,7 @@ void main() {
           members: [member(alice, SphereRole.admin), member(bob, SphereRole.member)],
         ),
       );
+      await bobService.acceptInvite(sphere.id);
 
       expect(
         () => bobService.removeMember(sphere.id, alice),
@@ -204,16 +205,67 @@ void main() {
           ],
         ),
       );
+      await service.acceptInvite(sphereId);
       return service;
     }
 
-    test('a signed create we are named in is accepted', () async {
+    test('a signed create arrives as an invitation, not a membership', () async {
+      final service = serviceFor(bob, secretOf(ed.generateKey()));
+      await service.handleIncomingOp(
+        alice,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 1,
+          op: MembershipOp.opCreate,
+          target: '',
+          author: alice,
+          authorSecret: aliceSecret,
+          members: [
+            member(alice, SphereRole.admin),
+            member(bob, SphereRole.member),
+          ],
+        ),
+      );
+
+      // Nobody joins a sphere without agreeing to.
+      expect(service.sphere(sphereId), isNull);
+      expect(service.invites.map((i) => i.sphere.id), [sphereId]);
+      expect(service.invites.single.invitedBy, alice);
+    });
+
+    test('accepting an invitation joins the sphere', () async {
       final service = await bobWithSphere();
 
       final sphere = service.sphere(sphereId);
       expect(sphere, isNotNull);
       expect(sphere!.name, 'Family');
       expect(sphere.isAdmin(alice), isTrue);
+      expect(service.invites, isEmpty);
+    });
+
+    test('declining discards the invitation and its key', () async {
+      final service = serviceFor(bob, secretOf(ed.generateKey()));
+      await service.handleIncomingOp(
+        alice,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 1,
+          op: MembershipOp.opCreate,
+          target: '',
+          author: alice,
+          authorSecret: aliceSecret,
+          members: [
+            member(alice, SphereRole.admin),
+            member(bob, SphereRole.member),
+          ],
+        ),
+      );
+
+      await service.declineInvite(sphereId);
+
+      expect(service.invites, isEmpty);
+      expect(service.sphere(sphereId), isNull);
+      expect(service.keyring.hasKey(sphereId, 1), isFalse);
     });
 
     test('a create we are not named in is ignored', () async {
@@ -232,6 +284,7 @@ void main() {
       );
 
       expect(service.sphere(sphereId), isNull);
+      expect(service.invites, isEmpty);
     });
 
     test('an op whose author disagrees with the sender is rejected', () async {
@@ -418,6 +471,7 @@ void main() {
           ],
         ),
       );
+      await mallorysService.acceptInvite(sphere.id);
       mallorysService.keyring
           .store(sphere.id, 1, alicesService.keyring.keyFor(sphere.id, 1)!);
 

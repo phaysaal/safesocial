@@ -15,8 +15,6 @@ import 'package:crypto/crypto.dart';
 ///
 /// Chat has been migrated. Still on this placeholder, tracked as the remainder
 /// of Phase 1 in `docs/rebuild_plan.md`:
-///   * `group_service` — needs a per-sphere key, which arrives with the sphere
-///     model in Phase 3
 ///   * `call_service` — signalling payloads
 ///   * `feed_service`/`album_service` — currently send plaintext, so they need
 ///     sealing rather than migrating

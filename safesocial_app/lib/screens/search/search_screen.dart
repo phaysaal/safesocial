@@ -94,7 +94,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   _QuickAction(
                     icon: Icons.group_add_outlined,
                     label: 'Create a group',
-                    onTap: () => context.push('/groups/create'),
+                    onTap: () => context.push('/spheres/create'),
                   ),
                   _QuickAction(
                     icon: Icons.qr_code_scanner,

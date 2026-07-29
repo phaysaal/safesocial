@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/post.dart';
 import '../services/contact_service.dart';
 import '../services/feed_service.dart';
+import '../services/sphere_service.dart';
 import 'avatar.dart';
 
 /// Instagram / Facebook style post card.
@@ -94,16 +95,24 @@ class _PostCardState extends State<PostCard> {
                     ],
                   ),
                 ),
-                if (post.audience == PostAudience.closeFriends)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                // Which sphere this went to. The old badge said "Close
+                // Friends" while delivery ignored the audience entirely; this
+                // names the sphere that actually received it.
+                Builder(builder: (context) {
+                  final sphere =
+                      context.watch<SphereService>().sphere(post.sphereId);
+                  if (sphere == null) return const SizedBox.shrink();
+                  return Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.15),
+                      color: cs.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Text('Close Friends',
-                        style: TextStyle(fontSize: 10, color: Colors.green)),
-                  ),
+                    child: Text(sphere.name,
+                        style: TextStyle(fontSize: 10, color: cs.primary)),
+                  );
+                }),
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz, color: cs.onSurfaceVariant),
                   onSelected: (value) => _handlePostMenu(context, value, post),
@@ -159,22 +168,26 @@ class _PostCardState extends State<PostCard> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Row(
                 children: [
-                  if (post.likes.isNotEmpty || post.reactions.isNotEmpty) ...[
-                    // Show emoji summary
-                    if (post.reactions.isNotEmpty) ...[
-                      for (final emoji in _uniqueEmojis(post))
-                        Text(emoji, style: const TextStyle(fontSize: 14)),
-                      const SizedBox(width: 4),
-                    ] else ...[
-                      Icon(Icons.thumb_up, size: 16, color: cs.primary),
-                      const SizedBox(width: 4),
-                    ],
-                    Text(
-                      '${post.likes.length + post.reactions.length}',
-                      style: theme.textTheme.bodySmall,
+                  if (post.reactions.isNotEmpty) ...[
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        children: _aggregatedReactions(post).entries.map((e) {
+                          return Text(
+                            '${e.key} ${e.value}',
+                            style: theme.textTheme.bodySmall,
+                          );
+                        }).toList(),
+                      ),
                     ),
+                  ] else if (post.likes.isNotEmpty) ...[
+                    Icon(Icons.thumb_up, size: 16, color: cs.primary),
+                    const SizedBox(width: 4),
+                    Text('${post.likes.length}', style: theme.textTheme.bodySmall),
+                    const Spacer(),
+                  ] else ...[
+                    const Spacer(),
                   ],
-                  const Spacer(),
                   if (post.comments.isNotEmpty)
                     Text(
                       '${post.comments.length} comment${post.comments.length == 1 ? '' : 's'}',
@@ -195,17 +208,28 @@ class _PostCardState extends State<PostCard> {
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Row(
               children: [
-                // Like button — tap to like, long-press for emoji picker
+                // Like button — tap to react 👍, long-press for full picker
                 Expanded(
                   child: GestureDetector(
-                    onLongPress: () => _showEmojiPicker(context, post),
+                    onLongPress: () => _showReactionPicker(context, post),
                     child: _ActionButton(
                       icon: _selfReactionIcon(post),
                       label: _selfReactionLabel(post),
-                      color: (post.isLikedBySelf || _hasSelfReaction(post))
+                      color: _hasSelfReaction(post)
                           ? cs.primary
                           : cs.onSurfaceVariant,
-                      onTap: () => context.read<FeedService>().toggleLike(post.id),
+                      onTap: () {
+                        final selfReaction = post.reactions
+                            .where((r) => r.reactorId == 'self')
+                            .toList();
+                        if (selfReaction.isNotEmpty && selfReaction.first.emoji == '👍') {
+                          // Already liked with 👍 — toggle off
+                          context.read<FeedService>().reactToPost(post.id, '👍');
+                        } else {
+                          // React with 👍
+                          context.read<FeedService>().reactToPost(post.id, '👍');
+                        }
+                      },
                     ),
                   ),
                 ),
@@ -362,22 +386,32 @@ class _PostCardState extends State<PostCard> {
 
   // ── Emoji / reaction helpers ──────────────────────────────
 
-  static const _emojis = ['👍', '❤️', '😂', '🔥', '👏', '💯'];
+  static const _reactions = [
+    ('👍', 'Like'),
+    ('❤️', 'Love'),
+    ('🤗', 'Care'),
+    ('✅', 'Agree'),
+    ('❌', 'Disagree'),
+    ('😢', 'Sad'),
+    ('😮', 'Wow'),
+  ];
 
-  List<String> _uniqueEmojis(Post post) {
-    final seen = <String>{};
+  Map<String, int> _aggregatedReactions(Post post) {
+    final counts = <String, int>{};
     for (final r in post.reactions) {
-      seen.add(r.emoji);
-      if (seen.length >= 3) break;
+      counts[r.emoji] = (counts[r.emoji] ?? 0) + 1;
     }
-    return seen.toList();
+    // Sort by count descending
+    final sorted = Map.fromEntries(
+      counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value)),
+    );
+    return sorted;
   }
 
   bool _hasSelfReaction(Post post) =>
       post.reactions.any((r) => r.reactorId == 'self');
 
   IconData _selfReactionIcon(Post post) {
-    if (post.isLikedBySelf) return Icons.thumb_up;
     if (_hasSelfReaction(post)) return Icons.emoji_emotions;
     return Icons.thumb_up_outlined;
   }
@@ -386,12 +420,17 @@ class _PostCardState extends State<PostCard> {
     final selfReaction = post.reactions
         .where((r) => r.reactorId == 'self')
         .toList();
-    if (selfReaction.isNotEmpty) return selfReaction.first.emoji;
+    if (selfReaction.isNotEmpty) {
+      final emoji = selfReaction.first.emoji;
+      final match = _reactions.where((r) => r.$1 == emoji).toList();
+      return match.isNotEmpty ? match.first.$2 : emoji;
+    }
     return 'Like';
   }
 
-  void _showEmojiPicker(BuildContext context, Post post) {
+  void _showReactionPicker(BuildContext context, Post post) {
     final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: cs.surface,
@@ -400,20 +439,30 @@ class _PostCardState extends State<PostCard> {
       ),
       builder: (ctx) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: _emojis
+            children: _reactions
                 .map(
-                  (emoji) => InkWell(
-                    borderRadius: BorderRadius.circular(24),
+                  ((String, String) reaction) => InkWell(
+                    borderRadius: BorderRadius.circular(12),
                     onTap: () {
-                      context.read<FeedService>().reactToPost(post.id, emoji);
+                      context.read<FeedService>().reactToPost(post.id, reaction.$1);
                       Navigator.pop(ctx);
                     },
                     child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(reaction.$1, style: const TextStyle(fontSize: 26)),
+                          const SizedBox(height: 4),
+                          Text(
+                            reaction.$2,
+                            style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 )

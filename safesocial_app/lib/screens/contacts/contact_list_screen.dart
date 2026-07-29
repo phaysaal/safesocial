@@ -27,7 +27,7 @@ class ContactListScreen extends StatelessWidget {
           IconButton(
             tooltip: 'Audience Rings',
             icon: const Icon(Icons.blur_circular),
-            onPressed: () => context.push('/contacts/rings'),
+            onPressed: () => context.push('/spheres'),
           ),
           IconButton(
             icon: const Icon(Icons.person_add_outlined),

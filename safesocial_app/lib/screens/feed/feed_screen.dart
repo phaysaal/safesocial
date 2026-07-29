@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../models/post.dart';
+import '../../models/sphere.dart';
 import '../../services/feed_service.dart';
+import '../../services/sphere_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
-import '../../services/ring_service.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_card.dart';
@@ -19,9 +19,12 @@ void _showCreatePostSheet(BuildContext context) {
   final controller = TextEditingController();
   final mediaRefs = <String>[];
   final identity = context.read<IdentityService>();
-  final ringService = context.read<RingService>();
-  
-  List<String> selectedRingIds = []; // Empty means "Everyone"
+  final sphereService = context.read<SphereService>();
+
+  // Every post belongs to a sphere. There is no "everyone" to fall back on.
+  Sphere? selectedSphere = sphereService.writable.isNotEmpty
+      ? sphereService.writable.first
+      : null;
 
   showModalBottomSheet(
     context: context,
@@ -59,33 +62,30 @@ void _showCreatePostSheet(BuildContext context) {
                             'Create Post',
                             style: theme.textTheme.titleLarge?.copyWith(fontSize: 18),
                           ),
-                          // Ring Selector
+                          // Sphere selector — a post has to go somewhere.
                           GestureDetector(
                             onTap: () async {
-                              final result = await _showRingSelectorDialog(context, ringService, selectedRingIds);
+                              final result = await _showSphereSelectorDialog(
+                                  context, sphereService, selectedSphere);
                               if (result != null) {
                                 setSheetState(() {
-                                  selectedRingIds = result;
+                                  selectedSphere = result;
                                 });
                               }
                             },
                             child: Row(
                               children: [
                                 Icon(
-                                  selectedRingIds.isEmpty ? Icons.public : Icons.blur_circular,
+                                  Icons.blur_on,
                                   size: 14,
-                                  color: selectedRingIds.isEmpty ? cs.onSurfaceVariant : cs.primary,
+                                  color: selectedSphere == null ? cs.error : cs.primary,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  selectedRingIds.isEmpty 
-                                    ? 'Everyone' 
-                                    : selectedRingIds.length == 1 
-                                      ? ringService.rings.firstWhere((r) => r.id == selectedRingIds.first).name
-                                      : '${selectedRingIds.length} Rings',
+                                  selectedSphere?.name ?? 'Choose a sphere',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: selectedRingIds.isEmpty ? cs.onSurfaceVariant : cs.primary,
+                                    color: selectedSphere == null ? cs.error : cs.primary,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -141,12 +141,24 @@ void _showCreatePostSheet(BuildContext context) {
                       onPressed: () {
                         final text = controller.text.trim();
                         if (text.isEmpty && mediaRefs.isEmpty) return;
-                        
+
+                        final sphere = selectedSphere;
+                        if (sphere == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Choose a sphere to post into'),
+                            ),
+                          );
+                          return;
+                        }
+
                         context.read<FeedService>().createPost(
                           text,
+                          sphereId: sphere.id,
+                          audienceMembers:
+                              sphere.members.map((m) => m.identityKey).toList(),
                           mediaRefs: mediaRefs.isNotEmpty ? mediaRefs : null,
                           authorName: identity.currentIdentity?.displayName ?? 'You',
-                          audience: selectedRingIds.isEmpty ? PostAudience.everyone : PostAudience.closeFriends,
                         );
                         Navigator.pop(ctx);
                       },
@@ -163,49 +175,64 @@ void _showCreatePostSheet(BuildContext context) {
   );
 }
 
-Future<List<String>?> _showRingSelectorDialog(BuildContext context, RingService service, List<String> current) async {
-  List<String> selected = List.from(current);
-  return showDialog<List<String>>(
-    context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setState) => AlertDialog(
-        title: const Text('Select Audience'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CheckboxListTile(
-                value: selected.isEmpty,
-                title: const Text('Everyone'),
-                subtitle: const Text('All your contacts'),
-                onChanged: (val) {
-                  if (val == true) setState(() => selected.clear());
-                },
-              ),
-              const Divider(),
-              ...service.rings.map((ring) => CheckboxListTile(
-                value: selected.contains(ring.id),
-                title: Text(ring.name),
-                secondary: CircleAvatar(backgroundColor: ring.color, radius: 8),
-                onChanged: (val) {
-                  setState(() {
-                    if (val == true) {
-                      selected.add(ring.id);
-                    } else {
-                      selected.remove(ring.id);
-                    }
-                  });
-                },
-              )),
-            ],
-          ),
+Future<Sphere?> _showSphereSelectorDialog(
+  BuildContext context,
+  SphereService service,
+  Sphere? current,
+) async {
+  final choices = service.writable;
+
+  if (choices.isEmpty) {
+    return showDialog<Sphere>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No spheres yet'),
+        content: const Text(
+          'Posts belong to a sphere — a named group of people. Create one '
+          'first, then choose it here.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, selected), child: const Text('Done')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.push('/spheres/create');
+            },
+            child: const Text('Create sphere'),
+          ),
         ],
       ),
+    );
+  }
+
+  return showDialog<Sphere>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Post into'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ListView(
+          shrinkWrap: true,
+          children: choices
+              .map((sphere) => RadioListTile<String>(
+                    value: sphere.id,
+                    groupValue: current?.id,
+                    title: Text(sphere.name),
+                    subtitle: Text('${sphere.members.length} members'),
+                    onChanged: (_) => Navigator.pop(ctx, sphere),
+                  ))
+              .toList(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancel'),
+        ),
+      ],
     ),
   );
 }
@@ -363,7 +390,7 @@ class _QuickAccessRow extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     final items = [
-      (Icons.group_outlined, 'Groups', '/groups'),
+      (Icons.blur_on, 'Spheres', '/spheres'),
       (Icons.photo_album_outlined, 'Albums', '/albums'),
       (Icons.auto_awesome_outlined, 'Memories', '/memories'),
       (Icons.search_outlined, 'Search', '/search'),
@@ -505,10 +532,23 @@ class _StoriesRow extends StatelessWidget {
                   ),
                 );
               } else {
+                final sphereService = context.read<SphereService>();
+                final sphere = await _showSphereSelectorDialog(
+                    context, sphereService, null);
+                if (sphere == null || !context.mounted) return;
+
                 final path = await context.read<MediaService>().pickAndStoreImage();
                 if (path != null && context.mounted) {
-                  await context.read<FeedService>().createStory('', mediaRefs: [path], authorName: myName);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Story added!')));
+                  await context.read<FeedService>().createStory(
+                        '',
+                        sphereId: sphere.id,
+                        audienceMembers:
+                            sphere.members.map((m) => m.identityKey).toList(),
+                        mediaRefs: [path],
+                        authorName: myName,
+                      );
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Story added')));
                 }
               }
             },

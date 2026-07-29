@@ -127,11 +127,18 @@ class FeedService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Publish a post to one sphere.
+  ///
+  /// [sphereId] is required and [audienceMembers] is the sphere's member list.
+  /// Delivery goes to exactly those people. Previously this fanned out to every
+  /// non-blocked contact regardless of the chosen audience, so a "close
+  /// friends" story reached everyone — the audience only ever drew a badge.
   Future<void> createPost(
     String content, {
-    List<String>? mediaRefs, 
-    String authorName = 'You', 
-    PostAudience audience = PostAudience.everyone,
+    required String sphereId,
+    required List<String> audienceMembers,
+    List<String>? mediaRefs,
+    String authorName = 'You',
     bool isStory = false,
     DateTime? expiresAt,
   }) async {
@@ -142,7 +149,7 @@ class FeedService extends ChangeNotifier {
       content: content,
       mediaRefs: mediaRefs ?? [],
       createdAt: DateTime.now(),
-      audience: audience,
+      sphereId: sphereId,
       isStory: isStory,
       expiresAt: expiresAt,
     );
@@ -151,25 +158,34 @@ class FeedService extends ChangeNotifier {
     await _persistPosts();
     notifyListeners();
 
-    if (_myPublicKey != null) {
-      final relayPost = await _encodePostMedia(post);
-      final postJson = jsonEncode({'type': 'post', 'post': relayPost.toJson()});
-      for (final contact in _contacts.where((c) => !c.blocked)) {
-        _feedRelay.sendViaRelay(contact.publicKey, postJson);
-      }
+    if (_myPublicKey == null) return;
+
+    final relayPost = await _encodePostMedia(post);
+    final postJson = jsonEncode({'type': 'post', 'post': relayPost.toJson()});
+
+    final blocked = _contacts.where((c) => c.blocked).map((c) => c.publicKey).toSet();
+    for (final member in audienceMembers) {
+      if (member == _myPublicKey || blocked.contains(member)) continue;
+      _feedRelay.sendViaRelay(member, postJson);
     }
   }
 
-  /// Convenience method to create a 24-hour ephemeral story
-  Future<void> createStory(String content, {List<String>? mediaRefs, String authorName = 'You'}) async {
-    final expiresAt = DateTime.now().add(const Duration(hours: 24));
+  /// A 24-hour ephemeral post, scoped to a sphere like everything else.
+  Future<void> createStory(
+    String content, {
+    required String sphereId,
+    required List<String> audienceMembers,
+    List<String>? mediaRefs,
+    String authorName = 'You',
+  }) async {
     await createPost(
       content,
+      sphereId: sphereId,
+      audienceMembers: audienceMembers,
       mediaRefs: mediaRefs,
       authorName: authorName,
-      audience: PostAudience.closeFriends, // Stories default to close friends
       isStory: true,
-      expiresAt: expiresAt,
+      expiresAt: DateTime.now().add(const Duration(hours: 24)),
     );
   }
 

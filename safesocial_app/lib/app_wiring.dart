@@ -5,8 +5,8 @@ import 'services/chat_service.dart';
 import 'services/contact_service.dart';
 import 'services/debug_log_service.dart';
 import 'services/feed_service.dart';
-import 'services/group_service.dart';
 import 'services/identity_service.dart';
+import 'services/sphere_migration.dart';
 import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
 
@@ -26,7 +26,6 @@ Future<void> wireIdentity({
   required OutboxService outboxService,
   required CallService callService,
   required FeedService feedService,
-  required GroupService groupService,
   required AlbumService albumService,
   required SphereService sphereService,
 }) async {
@@ -85,6 +84,10 @@ Future<void> wireIdentity({
   sphereService.sendToPeer = chatService.sendRawToPeer;
   chatService.onSphereOp = sphereService.handleIncomingOp;
 
+  // One-time conversion of legacy groups and rings. Runs after configure() so
+  // the service can mint keys, and is a no-op on later launches.
+  await SphereMigration.run(sphereService);
+
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;
     chatService.connectRelay(contact.publicKey);
@@ -92,7 +95,6 @@ Future<void> wireIdentity({
   }
 
   feedService.initSync(publicKey, secretKey, contactService.contacts);
-  groupService.initSync(publicKey, secretKey);
   albumService.initSync(publicKey, secretKey);
 
   DebugLogService().success(

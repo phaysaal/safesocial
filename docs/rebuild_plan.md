@@ -500,18 +500,36 @@ Landed:
   replayed. Content from a non-member is refused even when validly signed and encrypted
   with the right key.
 
-Remaining — this is the larger half:
+**UI and migration landed.**
 
-- **UI.** Nothing in the app creates or shows a sphere yet. Needs a sphere list, creation and
-  invite flows, a member management screen, and a composer that targets a sphere.
-- **Migration** from groups, rings, albums and contacts into spheres, with the old models
-  deleted rather than adapted: `PostAudience`, `Ring`, `Contact.closeFriend`.
-- **Feed as the union over spheres**, replacing the current per-contact fan-out, and
-  `FeedService`/`AlbumService` sealing their content (they still send plaintext).
-- **Direct messages as spheres of two**, which is what finally retires the parallel chat path.
-- **Invite acceptance.** A create operation is currently applied on receipt if we are named
-  in it; there is no explicit accept step, so anyone you have a session with can add you to
-  a sphere. That needs a pending state and user consent before joining.
+- **Invite acceptance closes the gap flagged above.** A create operation naming us now
+  arrives as a `PendingInvite` and nothing is applied — not even the offered key — until
+  the user accepts. Declining discards the key.
+- Sphere list (with invitations), creation, and member management screens; routes at
+  `/spheres`, `/spheres/create`, `/sphere/:id`.
+- The composer now targets a sphere, and it is required: there is no "Everyone" option to
+  fall back to. Stories pick a sphere too.
+- `FeedService.createPost` takes a sphere and delivers to exactly its members. Previously
+  it fanned out to every non-blocked contact regardless of the chosen audience.
+- `Post.audience` is replaced by `Post.sphereId`. The post card names the sphere that
+  actually received the post, instead of a "Close Friends" badge that meant nothing.
+- **Deleted rather than adapted**, per the plan: `PostAudience`, `Ring`, `RingService`,
+  `manage_rings_screen`, `Group`, `GroupService`, and all five group screens.
+- One-time migration converts legacy groups and populated rings into spheres, skipping the
+  two empty rings that were seeded into every install. It is deliberately local-only and
+  broadcasts nothing, because that membership was never agreed with anyone.
+- 91 tests pass.
+
+Remaining:
+
+- **Feed content is still plaintext on the wire.** Audience is now enforced in delivery, but
+  `FeedService` and `AlbumService` do not yet seal with `SealMode.sphere`. The machinery
+  exists (`SphereService.sealContent`/`openContent`); wiring it is the next step.
+- **Feed as the union over spheres** — the feed still merges whatever arrives rather than
+  reading per sphere.
+- **Direct messages as spheres of two**, which retires the parallel chat path.
+- **Albums** are still their own thing rather than content inside a sphere.
+- `Contact.closeFriend` still exists on the model, unused.
 
 ### Phase 4 — Feature parity inside spheres *(4–6 weeks)*
 
