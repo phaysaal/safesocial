@@ -7,6 +7,7 @@ import 'crypto/session_manager.dart';
 import 'services/identity_service.dart';
 import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
+import 'services/call_config.dart';
 import 'services/relay_config.dart';
 import 'services/chat_service.dart';
 import 'services/feed_service.dart';
@@ -39,11 +40,13 @@ void main() async {
   final outboxService = OutboxService();
   final sphereService = SphereService();
   final relayConfig = RelayConfig();
+  final callConfig = CallConfig();
 
   // Load theme
   await themeService.load();
   // Must precede any relay traffic, or the first requests go to the default host.
   await relayConfig.load();
+  await callConfig.load();
 
   // Wire services
   syncService.attachServices(identityService);
@@ -96,6 +99,7 @@ void main() async {
         ChangeNotifierProvider.value(value: outboxService),
         ChangeNotifierProvider.value(value: sphereService),
         ChangeNotifierProvider.value(value: relayConfig),
+        ChangeNotifierProvider.value(value: callConfig),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),

@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app_info.dart';
 import '../../services/contact_service.dart';
+import '../../services/call_config.dart';
 import '../../services/relay_config.dart';
 import '../../services/backup_service.dart';
 import '../../services/identity_service.dart';
@@ -158,6 +159,17 @@ class SettingsScreen extends StatelessWidget {
             );
           }),
           const Divider(indent: 56),
+          Builder(builder: (context) {
+            final config = context.watch<CallConfig>();
+            return ListTile(
+              leading: Icon(Icons.call_outlined, color: cs.primary),
+              title: const Text('Call Servers'),
+              subtitle: Text(config.summary),
+              isThreeLine: false,
+              onTap: () => _showCallServersDialog(context, config),
+            );
+          }),
+          const Divider(indent: 56),
 
           // ── Privacy & Security ──────────────────────────
           _SectionHeader(title: 'Privacy & Security'),
@@ -292,6 +304,93 @@ class SettingsScreen extends StatelessWidget {
             child: const Text('Save'),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showCallServersDialog(
+      BuildContext context, CallConfig config) async {
+    final controller = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Call Servers'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'A STUN server learns your public IP. A TURN server relays '
+                  'the whole call when a direct connection is not possible, so '
+                  'it sees both IPs and the timing and volume of the media — '
+                  'the audio and video stay encrypted, the metadata does not.\n\n'
+                  'The default TURN is a free shared-credential public service, '
+                  'which means a third party is in that position unless you '
+                  'change it. Running your own coturn is the better setup.',
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: config.turnEnabled,
+                  title: const Text('Allow TURN relay',
+                      style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    'Off means calls only connect over a direct path — more '
+                    'private, but fails behind some networks.',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                  onChanged: (v) async {
+                    await config.setTurnEnabled(v);
+                    setDialogState(() {});
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: controller,
+                  maxLines: 4,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Custom servers (optional)',
+                    hintText: 'turn:turn.example.org:3478,user,secret',
+                    helperText: 'One per line, replaces the defaults',
+                    helperMaxLines: 2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await config.resetToDefault();
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Reset'),
+            ),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close')),
+            ElevatedButton(
+              onPressed: () async {
+                final error = await config.setCustom(controller.text);
+                if (!ctx.mounted) return;
+                if (error != null) {
+                  messenger.showSnackBar(SnackBar(content: Text(error)));
+                  return;
+                }
+                Navigator.pop(ctx);
+                messenger.showSnackBar(const SnackBar(
+                    content: Text('Call servers updated for the next call')));
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
       ),
     );
   }

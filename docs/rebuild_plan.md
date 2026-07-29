@@ -610,8 +610,13 @@ Remaining in Phase 4:
   hold the same image. **Video is uploaded untranscoded** (there is no codec in the
   dependency set) and capped at 24 MB, with no thumbnail, since extracting a frame needs a
   decoder we do not have. Adding one is a dependency decision, not a coding one.
-- **Push notifications**: nothing exists. Needs a privacy decision — prefer content-free
-  wakeups, and document what a push provider necessarily sees.
+- **Push notifications**: nothing exists, and this is the one remaining item that is
+  genuinely blocked on a decision rather than on work. Every practical option puts a third
+  party (FCM/APNs) in a position to see that *this device* received something and when,
+  which is metadata the relay redesign was specifically built to avoid handing out. The
+  options are: accept that with content-free wakeups, ship without push and rely on
+  foreground sync, or take a dependency on a self-hosted UnifiedPush-style provider. That
+  is a product call, so it is left explicitly unmade.
 - ~~**Search**~~ — done. Covers messages, posts, comments, spheres and contacts, with
   snippets trimmed around the hit. Entirely local: there is no server that could answer a
   query without being told what you are looking for.
@@ -619,8 +624,12 @@ Remaining in Phase 4:
   and relay selection. The relay host is now user-configurable (`RelayConfig`), which is
   what makes the self-hosting story in `relay/README.md` real rather than theoretical.
   Notification preferences are still absent because notifications themselves are.
-- **Stories**: view receipts and replies.
-- **TURN**: still the public `openrelay.metered.ca` with shared credentials.
+- **Stories**: view receipts and replies — still outstanding.
+- ~~**TURN**~~ — now configurable (`CallConfig`): custom STUN/TURN servers, or TURN off
+  entirely so calls only connect over a direct path. The default is still the free public
+  `openrelay.metered.ca`, which is stated plainly in the UI along with what a TURN server
+  can see. Shipping a better *default* needs infrastructure to point at, which is an
+  operational decision rather than a code one.
 
 ### Phase 5 — Decentralisation and recovery *(4–6 weeks)*
 

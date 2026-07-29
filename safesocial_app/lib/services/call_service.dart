@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
+import 'call_config.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
 
@@ -84,25 +85,10 @@ class CallService extends ChangeNotifier {
 
   void Function(String contactKey, String contactName, CallType type)? onIncomingCall;
 
-  static const _iceServers = [
-    {'urls': 'stun:stun.l.google.com:19302'},
-    {'urls': 'stun:stun1.l.google.com:19302'},
-    {
-      'urls': 'turn:openrelay.metered.ca:80',
-      'username': 'openrelayproject',
-      'credential': 'openrelayproject',
-    },
-    {
-      'urls': 'turn:openrelay.metered.ca:443',
-      'username': 'openrelayproject',
-      'credential': 'openrelayproject',
-    },
-    {
-      'urls': 'turn:openrelay.metered.ca:443?transport=tcp',
-      'username': 'openrelayproject',
-      'credential': 'openrelayproject',
-    },
-  ];
+  /// STUN and TURN come from [CallConfig] so the default third-party relay can
+  /// be replaced or switched off. A TURN server sees both parties' IPs and the
+  /// shape of the call when a direct path is unavailable.
+  List<Map<String, String>> get _iceServers => CallConfig.active;
 
   void setMyInfo(String key, String secretKey) {
     _myPublicKey = key;
