@@ -7,17 +7,20 @@ audience: everything lives inside a *sphere*, a named group with an explicit
 membership list. Your identity is a cryptographic keypair — not an email address or
 phone number.
 
-> ## ⚠️ Pre-alpha — not private yet
+> ## ⚠️ Pre-alpha — unaudited
 >
-> **Do not use Spheres for anything you need kept private.** The current build does
-> not deliver the guarantees this project is aiming for:
+> Messages, sphere posts and call signalling are now genuinely encrypted
+> (XChaCha20-Poly1305 with X25519 key agreement, everything signed), and the relay
+> derives its addresses from shared secrets so it cannot tell who talks to whom.
+> What is still true:
 >
-> - **Messages are not meaningfully encrypted.** The shipping cipher is a placeholder
->   (XOR) whose key is derived from public keys alone, so anyone who knows both
->   parties' public keys — including the relay operator — can read message content.
-> - **There is no peer-to-peer networking.** All traffic passes through a single
->   Cloudflare Worker relay, which can observe who communicates with whom. The Veilid
->   integration described in older documentation is not wired into the app.
+> - **Nothing here has been independently audited**, and none of it has been
+>   exercised on real devices end to end.
+> - **Local storage is unencrypted.** Message history and sphere keys sit in
+>   SharedPreferences; only the identity key is in the platform keystore.
+> - **Albums are still sent in the clear**, and there is no peer-to-peer
+>   networking — all traffic goes through one relay, which sees timing and
+>   approximate message size.
 > - **Several features are disabled** because they reported success without working:
 >   encrypted identity export/import, social recovery, and multi-device linking.
 >
@@ -37,10 +40,11 @@ profile — content that is not addressed to a sphere does not exist.
 |---|---|
 | Identity (Ed25519 keypair, local generation, secure storage) | Working |
 | Contacts, QR exchange, local contact management | Working |
-| 1:1 and group chat | Works locally; delivery is unreliable and not securely encrypted |
-| Feed, posts, stories, reactions | Working locally; audience scoping is not enforced |
-| Photo sharing | Works in the feed; chat and album media send local file paths |
-| Voice/video calls | 1:1 works via WebRTC; group calls and call decline are broken |
+| Spheres (member-scoped groups) | Working: create, invite, accept, remove with key rotation |
+| 1:1 chat | Encrypted and ratcheted, with a durable outbox and delivery receipts |
+| Feed, posts, stories, reactions | Encrypted and scoped to a sphere |
+| Photo sharing | Works in the feed; chat and album media still send local file paths |
+| Voice/video calls | 1:1 works via WebRTC, signalling encrypted; group calls still broken |
 | EXIF/GPS stripping on images | Working |
 | Encrypted backup, identity export, social recovery, device linking | Disabled — not implemented |
 | Veilid / DHT / peer-to-peer | Not implemented |
@@ -53,12 +57,16 @@ profile — content that is not addressed to a sphere does not exist.
 |  (screens, widgets, theme — Material Design 3)     |
 +---------------------------------------------------+
 |                  Dart Services                     |
-|  IdentityService | ChatService  | FeedService      |
-|  ContactService  | GroupService | CallService      |
-|  MediaService    | RelayService | AlbumService     |
+|  IdentityService | ChatService   | FeedService     |
+|  ContactService  | SphereService | CallService     |
+|  MediaService    | RelayService  | OutboxService   |
++---------------------------------------------------+
+|            Crypto (lib/crypto/)                    |
+|  X25519 + HKDF + XChaCha20-Poly1305, Ed25519 sigs  |
+|  pairwise sessions · sphere keyring · envelopes    |
 +---------------------------------------------------+
 |              Cloudflare Worker relay               |
-|  WebSocket rooms + offline mailbox + profile KV    |
+|  Secret-derived mailboxes + offline queue + prekey |
 +---------------------------------------------------+
 
 safesocial_core/ (Rust) exists but is dormant: it is not compiled
@@ -105,7 +113,7 @@ safesocial/
   docs/                   Technical documentation
     rebuild_plan.md       The current plan — start here
     architecture_weaknesses.md  Known defects in the shipping build
-    privacy_protocol.md   Intended cryptographic design (not yet implemented)
+    privacy_protocol.md   The cryptographic design, now largely implemented
     protocol.md           Original Veilid wire protocol spec (aspirational)
     threat_model.md       Threat model (describes the intended system)
 ```

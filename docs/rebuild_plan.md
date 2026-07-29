@@ -376,14 +376,17 @@ Landed:
   so the first session works without an app restart.
 - 34 tests pass, including forgery, tamper, replay, out-of-order, and cross-peer misuse.
 
-Remaining before the exit criterion is met:
+**Phase 1 is complete.** Every wire payload is now authenticated-encrypted; the last
+holdout (`call_service`) migrated with the calls work, and `crypto_service.dart` is gone.
 
-- `call_service` signalling payloads still use the placeholder cipher.
+Historical remainder, now done:
+
+- ~~`call_service` signalling payloads~~ — sealed with `SealMode.wrap`.
 - `group_service` still derives its key from the local user's own public key. A correct fix
   needs a per-sphere key, so this is best done together with Phase 3 rather than twice.
 - `feed_service` and `album_service` send plaintext today; they need sealing (wrap mode) plus
   audience enforcement, which is also Phase 3 work.
-- `crypto_service.dart` is marked `@Deprecated` and cannot be deleted until the above land.
+- ~~`crypto_service.dart`~~ — deleted once calls migrated; nothing uses XOR any more.
 
 ### Phase 2 — Stable messaging *(2–3 weeks)*
 
@@ -534,7 +537,8 @@ Remaining:
 - **Direct messages as spheres of two**, which retires the parallel chat path.
 - **Albums** are still their own thing rather than content inside a sphere, and still send
   plaintext.
-- **`call_service` is the last user of the placeholder cipher** — signalling payloads.
+- ~~`call_service` placeholder cipher~~ — done; `crypto_service.dart` is deleted and the
+  app has no unauthenticated cipher left.
 - `Contact.closeFriend` still exists on the model, unused.
 
 ### Phase 4 — Feature parity inside spheres *(4–6 weeks)*

@@ -275,11 +275,12 @@
     <div class="container">
       <div class="prealpha-banner">
         <h3>⚠️ Pre-alpha — not private yet</h3>
-        <p><strong>Do not use Spheres for anything you need kept private.</strong> This is an
-        early prototype published so the work can be followed in the open. Today its
-        messages are protected only by a placeholder cipher whose key can be derived from
-        public information, and all traffic passes through a single relay server that can
-        see who is talking to whom. There is no peer-to-peer networking yet.</p>
+        <p><strong>This is an early prototype, published so the work can be followed in the
+        open.</strong> Messages, posts and calls are now genuinely encrypted and the relay
+        cannot see who talks to whom — but none of it has been independently audited or
+        tested on real devices end to end, data on your device is stored unencrypted, and
+        shared albums are not yet protected. Do not rely on it if being read would put you
+        at risk.</p>
         <p>The roadmap for fixing this is public: see
         <a href="https://github.com/phaysaal/spheres/blob/main/docs/rebuild_plan.md">docs/rebuild_plan.md</a>.</p>
       </div>
@@ -320,7 +321,7 @@
               <td class="cross">None (Tracked)</td>
               <td class="cross">Poor (Leaks graph)</td>
               <td class="check">High</td>
-              <td class="highlight cross">Not yet — relay sees the graph</td>
+              <td class="highlight check">Relay cannot see the graph</td>
             </tr>
             <tr>
               <td class="feature-col">Phone / Email Req.</td>
@@ -334,7 +335,7 @@
               <td class="cross">❌</td>
               <td class="check">✅</td>
               <td class="check">✅</td>
-              <td class="highlight cross">❌ Not yet (in development)</td>
+              <td class="highlight check">✅ XChaCha20-Poly1305</td>
             </tr>
             <tr>
               <td class="feature-col">Open Source</td>
@@ -381,8 +382,8 @@
         <div class="security-item">
           <div class="security-icon">☁️</div>
           <div>
-            <h4>Relay Transport <span class="wip-tag">In development</span></h4>
-            <p>Messages currently travel through a single Cloudflare Worker relay. It is <strong>not</strong> zero-knowledge today: the placeholder cipher is derivable from public keys, and stable room identifiers let the operator see who talks to whom. Making the relay blind is the next milestone.</p>
+            <h4>Blind Relay</h4>
+            <p>Messages travel through a single Cloudflare Worker relay, but its addresses are derived from secrets only the participants share — so the operator cannot work out who is talking to whom, and cannot read content. It does still see timing and approximate message size.</p>
           </div>
         </div>
         <div class="security-item">

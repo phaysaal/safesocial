@@ -48,11 +48,36 @@ class SettingsScreen extends StatelessWidget {
           const _PreAlphaBanner(),
           const Divider(indent: 56),
           ListTile(
-            leading: Icon(Icons.warning_amber_outlined, color: cs.error),
+            leading: Icon(Icons.lock_outline, color: cs.primary),
             title: const Text('Message Encryption'),
             subtitle: const Text(
-              'Placeholder cipher — not secure. Messages are obscured, not '
-              'protected. Assume the relay operator can read them.',
+              'XChaCha20-Poly1305, keys agreed with X25519. Direct messages '
+              'also use a ratchet, so old messages stay closed if this device '
+              'is later compromised. Sphere posts do not.',
+            ),
+            isThreeLine: true,
+            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
+          ),
+          const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.visibility_off_outlined, color: cs.primary),
+            title: const Text('Network Privacy'),
+            subtitle: const Text(
+              'Relay addresses are derived from shared secrets, so the '
+              'operator cannot tell who talks to whom. It still sees message '
+              'timing and approximate size.',
+            ),
+            isThreeLine: true,
+            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
+          ),
+          const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.warning_amber_outlined, color: cs.error),
+            title: const Text('Storage On This Device'),
+            subtitle: const Text(
+              'Messages and encryption keys are stored unencrypted, so anyone '
+              'who can read this app\'s data can read them. Only your identity '
+              'key is in the secure keystore.',
             ),
             isThreeLine: true,
             trailing: Icon(Icons.error_outline, color: cs.error, size: 20),
@@ -60,10 +85,10 @@ class SettingsScreen extends StatelessWidget {
           const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.warning_amber_outlined, color: cs.error),
-            title: const Text('Network Privacy'),
+            title: const Text('Shared Albums'),
             subtitle: const Text(
-              'All traffic passes through one Cloudflare relay, which can see '
-              'who communicates with whom.',
+              'Album contents are still sent unencrypted. Do not put anything '
+              'sensitive in an album.',
             ),
             isThreeLine: true,
             trailing: Icon(Icons.error_outline, color: cs.error, size: 20),
@@ -376,9 +401,10 @@ class _PreAlphaBanner extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Pre-alpha build. The privacy features described in this app are '
-              'still being built and do not protect you yet. Do not use Spheres '
-              'for anything you need kept private.',
+              'Pre-alpha build. Messages, posts and calls are now genuinely '
+              'encrypted, but this has never been independently audited, data '
+              'on this device is stored unencrypted, and albums are not yet '
+              'protected. Do not rely on it if being read would put you at risk.',
               style: TextStyle(color: cs.onErrorContainer, fontSize: 12, height: 1.4),
             ),
           ),

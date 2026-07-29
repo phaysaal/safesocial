@@ -4,8 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
-import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
 
@@ -21,6 +21,10 @@ class CallService extends ChangeNotifier {
   String? _myPublicKey;
   SessionManager? _sessions;
   String? Function(String identityKey)? _resolveExchangeKey;
+
+  /// ICE candidates that arrived before we had a peer connection for them.
+  final Map<String, List<RTCIceCandidate>> _pendingCandidates = {};
+  static const int _maxPendingCandidates = 64;
 
   /// Supply the crypto context so signalling channels get pairwise addresses.
   void attachCrypto(
@@ -198,6 +202,7 @@ class CallService extends ChangeNotifier {
     DebugLogService().info('Call', 'Setting remote description (offer)');
     await pc.setRemoteDescription(_pendingOffer!);
     _pendingOffer = null;
+    await _flushPendingCandidates(_remoteContactKey!);
 
     DebugLogService().info('Call', 'Creating answer');
     final answer = await pc.createAnswer();
@@ -212,20 +217,28 @@ class CallService extends ChangeNotifier {
 
   Future<void> endCall() async {
     DebugLogService().info('Call', 'endCall — closing ${_peerConnections.length} peer connection(s)');
-    final targets = _peerConnections.keys.toList();
+    // Include the remote party even when no peer connection exists. Declining
+    // a ringing call created none, so no call_end was ever sent and the
+    // caller's phone rang until they gave up.
+    final targets = <String>{..._peerConnections.keys};
+    final remote = _remoteContactKey;
+    if (remote != null) targets.add(remote);
     for (var key in targets) {
       DebugLogService().info('Call', 'Sending call_end → $key');
-      _sendSignal(key, {'type': 'call_end'});
+      await _sendSignal(key, {'type': 'call_end'});
       await _peerConnections[key]?.close();
     }
     _peerConnections.clear();
     _remoteStreams.clear();
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream = null;
+    _pendingCandidates.clear();
     _state = CallState.idle;
     _groupId = null;
     _pendingOffer = null;
     _isIncomingCall = false;
+    _remoteContactKey = null;
+    _remoteContactName = null;
     DebugLogService().info('Call', 'Call ended — state reset to idle');
     notifyListeners();
   }
@@ -252,6 +265,22 @@ class CallService extends ChangeNotifier {
     });
     final tracks = _localStream!.getTracks();
     DebugLogService().info('Call', 'Local stream ready — ${tracks.length} track(s): ${tracks.map((t) => '${t.kind}(${t.id})').join(', ')}');
+  }
+
+  /// Apply any candidates that arrived before this peer connection existed.
+  Future<void> _flushPendingCandidates(String peerKey) async {
+    final pending = _pendingCandidates.remove(peerKey);
+    final pc = _peerConnections[peerKey];
+    if (pending == null || pc == null) return;
+    for (final candidate in pending) {
+      try {
+        await pc.addCandidate(candidate);
+      } catch (e) {
+        DebugLogService().warn('Call', 'Could not apply buffered candidate: $e');
+      }
+    }
+    DebugLogService()
+        .info('Call', 'Applied ${pending.length} buffered ICE candidate(s)');
   }
 
   Future<void> _setupPeer(String peerKey, {required bool isInitiator}) async {
@@ -316,21 +345,60 @@ class CallService extends ChangeNotifier {
     }
   }
 
-  void _sendSignal(String contactKey, Map<String, dynamic> data) {
-    DebugLogService().info('Call', 'sendSignal [${data['type']}] → $contactKey');
-    final plaintext = jsonEncode(data);
-    final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', contactKey);
-    _signaling.sendViaRelay(contactKey, CryptoService.encrypt(plaintext, sharedKey));
-  }
-
-  void _handleSignaling(String contactKey, String rawData) async {
-    final senderKey = contactKey.replaceFirst('call:', '');
-    DebugLogService().info('Call', 'handleSignaling: raw message from $senderKey (${rawData.length} chars)');
-    final sharedKey = CryptoService.deriveSharedKey(_myPublicKey ?? '', senderKey);
+  /// Seal and send one signalling message.
+  ///
+  /// Signalling carries SDP and ICE candidates, which contain local and public
+  /// IP addresses — so this needs real encryption as much as message content
+  /// does. It previously used the placeholder XOR cipher with a key derived
+  /// from the two public keys, meaning the relay could read every candidate.
+  ///
+  /// Sealed with [SealMode.wrap] rather than the ratchet: signalling is bursty,
+  /// lossy and order-independent, so a chain both peers must advance in
+  /// lockstep is the wrong fit. Replay is still covered by envelope-id dedup.
+  Future<void> _sendSignal(String contactKey, Map<String, dynamic> data) async {
+    final sessions = _sessions;
+    if (sessions == null) {
+      DebugLogService().warn('Call', 'No crypto context; cannot signal');
+      return;
+    }
 
     try {
-      final decrypted = CryptoService.decrypt(rawData, sharedKey);
-      final data = jsonDecode(decrypted) as Map<String, dynamic>;
+      final sealed = await sessions.seal(
+        peerIdentityKey: contactKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactKey),
+        type: 'call',
+        plaintext: jsonEncode(data),
+        mode: SealMode.wrap,
+      );
+      await _signaling.sendViaRelay(contactKey, sealed);
+    } on NoSessionException {
+      DebugLogService().warn(
+          'Call', 'No encryption key for $contactKey — cannot signal securely');
+    } catch (e) {
+      DebugLogService().error('Call', 'Could not send signal: $e');
+    }
+  }
+
+  void _handleSignaling(String channelKey, String rawData) async {
+    final sessions = _sessions;
+    if (sessions == null) return;
+
+    try {
+      final opened = await sessions.open(
+        raw: rawData,
+        resolveExchangeKey: (key) => _resolveExchangeKey?.call(key),
+      );
+
+      if (opened.type != 'call') {
+        DebugLogService()
+            .warn('Call', 'Ignoring envelope of type "${opened.type}"');
+        return;
+      }
+
+      // The peer is whoever signed the envelope, not whichever channel it
+      // arrived on — so nobody can inject signalling as someone else.
+      final senderKey = opened.from;
+      final data = jsonDecode(opened.plaintext) as Map<String, dynamic>;
       final type = data['type'];
       DebugLogService().info('Call', 'handleSignaling: received [$type] from $senderKey — currentState=$_state');
 
@@ -349,6 +417,7 @@ class CallService extends ChangeNotifier {
             DebugLogService().info('Call', 'call_offer received while busy ($state) — auto-answering as mesh peer');
             await _setupPeer(senderKey, isInitiator: false);
             await _peerConnections[senderKey]!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
+            await _flushPendingCandidates(senderKey);
             final answer = await _peerConnections[senderKey]!.createAnswer();
             await _peerConnections[senderKey]!.setLocalDescription(answer);
             _sendSignal(senderKey, {'type': 'call_answer', 'sdp': answer.sdp, 'sdp_type': answer.type});
@@ -357,12 +426,25 @@ class CallService extends ChangeNotifier {
         case 'call_answer':
           DebugLogService().info('Call', 'call_answer received from $senderKey — setting remote description');
           await _peerConnections[senderKey]?.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
+          await _flushPendingCandidates(senderKey);
           _state = CallState.connected;
           DebugLogService().success('Call', 'Call connected with $senderKey');
           break;
         case 'ice_candidate':
-          DebugLogService().info('Call', 'ice_candidate from $senderKey — peerExists=${_peerConnections.containsKey(senderKey)}');
-          await _peerConnections[senderKey]?.addCandidate(RTCIceCandidate(data['candidate'], data['sdpMid'], data['sdpMLineIndex']));
+          final candidate = RTCIceCandidate(
+              data['candidate'], data['sdpMid'], data['sdpMLineIndex']);
+          final pc = _peerConnections[senderKey];
+          if (pc != null) {
+            await pc.addCandidate(candidate);
+          } else {
+            // On the callee side no peer connection exists until the call is
+            // accepted, so trickled candidates arriving while ringing used to
+            // be dropped and ICE could never complete. Hold them instead.
+            final pending = _pendingCandidates.putIfAbsent(senderKey, () => []);
+            if (pending.length < _maxPendingCandidates) pending.add(candidate);
+            DebugLogService().info('Call',
+                'Buffered ICE candidate from $senderKey (${pending.length} held)');
+          }
           break;
         case 'group_call_invite':
           if (_state == CallState.idle) {
