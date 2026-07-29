@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../crypto/blob.dart';
 import '../crypto/session_manager.dart';
 import '../models/contact.dart';
 import '../models/post.dart';
@@ -351,9 +352,12 @@ class FeedService extends ChangeNotifier {
     if (post.mediaRefs.isEmpty) return post;
     final decoded = <String>[];
     for (final ref in post.mediaRefs) {
-      if (ref.startsWith('data:image/')) {
+      if (BlobRef.looksLikeRef(ref)) {
         final localPath = await MediaService.decodeAndSaveImage(ref);
-        if (localPath != null) decoded.add(localPath);
+        // Keep the reference when the blob cannot be fetched right now: the
+        // inline thumbnail still renders and the fetch can be retried, which
+        // is better than the media silently vanishing.
+        decoded.add(localPath ?? ref);
       } else {
         decoded.add(ref);
       }

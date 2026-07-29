@@ -30,6 +30,11 @@ const MAX_BODY_BYTES = 256 * 1024;
 const MAX_MAILBOX_MESSAGES = 500;
 const MAX_MAILBOX_BYTES = 8 * 1024 * 1024;
 const MAX_PREKEY_BYTES = 4 * 1024;
+
+// Blob storage for media. Chunked because a Durable Object storage value tops
+// out at 128 KiB, and base64 inflates by 4/3.
+const MAX_BLOB_CHUNK_BYTES = 96 * 1024;
+const MAX_BLOB_CHUNKS = 512;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const AUTH_WINDOW_MS = 5 * 60 * 1000;
@@ -79,6 +84,19 @@ export default {
       return env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(`inbox_${inbox[1]}`)).fetch(request);
     }
 
+    // Media blob: /blob/<address>/<chunk index>
+    // The address is a 256-bit capability that only travels inside sealed
+    // envelopes, and the bytes are encrypted before they arrive. Reads are
+    // therefore unauthenticated — holding the address is the authorisation —
+    // while writes are signed, so a blob cannot be overwritten by a passer-by.
+    const blob = url.pathname.match(/^\/blob\/([A-Za-z0-9_=-]+)\/(\d{1,3})$/);
+    if (blob) {
+      if (!ADDRESS_RE.test(blob[1])) {
+        return new Response("Malformed blob address", { status: 400 });
+      }
+      return env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(`blob_${blob[1]}`)).fetch(request);
+    }
+
     // Prekey bundle: /prekey/<identity public key>
     // Public by necessity — a new contact needs your X25519 key before any
     // shared secret can exist. It carries nothing else. v1's /state endpoint
@@ -115,6 +133,7 @@ export class RelayRoom {
 
     await this.scheduleSweep();
 
+    if (kind === "blob") return this.handleBlob(request, address, action);
     if (kind === "prekey") return this.handlePrekey(request, address);
     if (kind === "inbox") return this.handleInbox(request, url, address, action);
     return this.handleMailbox(request, url, address, action);
@@ -202,6 +221,46 @@ export class RelayRoom {
     }
 
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  // ── Media blobs ────────────────────────────────────────────────────────────
+
+  async handleBlob(request, address, indexRaw) {
+    const index = parseInt(indexRaw, 10);
+    if (!Number.isInteger(index) || index < 0 || index >= MAX_BLOB_CHUNKS) {
+      return new Response("Bad chunk index", { status: 400 });
+    }
+
+    if (request.method === "GET") {
+      const chunk = await this.state.storage.get(`chunk_${index}`);
+      if (!chunk) return new Response(null, { status: 404 });
+      await this.touchBlob();
+      return new Response(chunk, {
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+    }
+
+    if (request.method === "PUT") {
+      const body = await this.readBody(request, MAX_BLOB_CHUNK_BYTES);
+      if (body === null) return tooLarge();
+      // Signed by the blob address, which the uploader derived when minting it.
+      if (!(await this.verifyAuth(request, address, body))) return unauthorized();
+
+      const existing = await this.state.storage.get(`chunk_${index}`);
+      if (existing) return new Response("Chunk already written", { status: 409 });
+
+      await this.state.storage.put(`chunk_${index}`, body);
+      await this.touchBlob();
+      return new Response("OK");
+    }
+
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  /// Record last use so the retention alarm can expire idle blobs.
+  async touchBlob() {
+    await this.state.storage.put("blobTouched", Date.now());
+    await this.scheduleSweep();
   }
 
   // ── Prekey bundle ──────────────────────────────────────────────────────────
@@ -297,6 +356,18 @@ export class RelayRoom {
   }
 
   async alarm() {
+    // Blobs expire on the same clock as mail: once nothing has read or written
+    // them for the retention window, the whole object is dropped.
+    const touched = await this.state.storage.get("blobTouched");
+    if (touched !== undefined) {
+      if (Date.now() - touched > RETENTION_MS) {
+        await this.state.storage.deleteAll();
+        return;
+      }
+      await this.state.storage.setAlarm(Date.now() + SWEEP_INTERVAL_MS);
+      return;
+    }
+
     const mailbox = (await this.state.storage.get("mailbox")) || [];
     const cutoff = Date.now() - RETENTION_MS;
     const kept = mailbox.filter((m) => m.ts > cutoff);

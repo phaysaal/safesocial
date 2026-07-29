@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+
+import '../crypto/blob.dart';
 
 /// Thumbnail preview for a media item (image or video).
 ///
@@ -16,10 +19,17 @@ class MediaPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final isLocalFile = File(mediaRef).existsSync();
-    final isVideo = mediaRef.endsWith('.mp4') ||
-        mediaRef.endsWith('.mov') ||
-        mediaRef.endsWith('.avi');
+    // A reference that has not been fetched yet still has an inline preview,
+    // so the list renders immediately instead of showing a placeholder while
+    // the blob downloads.
+    final pending = BlobRef.tryDecode(mediaRef);
+    final thumbnail = pending?.thumbnail;
+
+    final isLocalFile = pending == null && File(mediaRef).existsSync();
+    final isVideo = pending?.isVideo ??
+        (mediaRef.endsWith('.mp4') ||
+            mediaRef.endsWith('.mov') ||
+            mediaRef.endsWith('.avi'));
 
     return GestureDetector(
       onTap: () {
@@ -30,7 +40,14 @@ class MediaPreview extends StatelessWidget {
         child: SizedBox(
           width: 120,
           height: 120,
-          child: isLocalFile
+          child: (!isLocalFile && thumbnail != null)
+              ? Image.memory(
+                  base64Decode(thumbnail.split(',').last),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      _buildPlaceholder(colorScheme, isVideo),
+                )
+              : isLocalFile
               ? Stack(
                   fit: StackFit.expand,
                   children: [

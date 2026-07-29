@@ -173,6 +173,8 @@ class AlbumService extends ChangeNotifier {
 
       final saved = await MediaService.decodeAndSaveImage(item.mediaRef);
       if (saved != null) item = item.copyWith(mediaRef: saved);
+      // If the blob is not reachable yet the reference is kept, so the inline
+      // thumbnail renders and the fetch can be retried later.
 
       _albums[index] = _albums[index].copyWith(
         items: [..._albums[index].items, item]

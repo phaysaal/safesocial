@@ -601,8 +601,15 @@ spheres, with no path that produces unscoped content.
 
 Remaining in Phase 4:
 
-- **Media pipeline**: chunked encrypted blobs, thumbnails, video compression. Images are
-  re-encoded and inlined, which works but does not scale and leaves video unsendable.
+- ~~**Media pipeline**~~ — done. Media is encrypted with a per-blob key, split into 48 KB
+  chunks and stored out of band at `/blob/<address>/<index>`; the message carries only a
+  reference plus a small inline thumbnail, so a list renders before anything is fetched.
+  Each chunk is bound to its index and blob address as associated data, so chunks cannot
+  be reordered or spliced between blobs. Addresses come from a fresh random seed rather
+  than the content hash — content-addressing would let the operator see that two people
+  hold the same image. **Video is uploaded untranscoded** (there is no codec in the
+  dependency set) and capped at 24 MB, with no thumbnail, since extracting a frame needs a
+  decoder we do not have. Adding one is a dependency decision, not a coding one.
 - **Push notifications**: nothing exists. Needs a privacy decision — prefer content-free
   wakeups, and document what a push provider necessarily sees.
 - **Search** over messages and posts; today it covers contact names only.

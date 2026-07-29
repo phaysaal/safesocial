@@ -48,8 +48,16 @@ deprecated, so an old client fails loudly instead of silently using the insecure
 | `POST /inbox/<identity>` | **none, by design** | Send a contact handshake |
 | `GET /inbox/<identity>/sync` | signed by the identity key | Read your handshakes |
 | `POST /inbox/<identity>/ack` | signed by the identity key | Clear handshakes |
+| `PUT /blob/<address>/<n>` | signed by the blob address | Upload a media chunk |
+| `GET /blob/<address>/<n>` | none | Fetch a media chunk |
 | `GET /prekey/<identity>` | none | Fetch a public key bundle |
 | `POST /prekey/<identity>` | signed by the identity key | Publish your key bundle |
+
+Blob reads are unauthenticated because the address is a 256-bit capability that only
+travels inside sealed envelopes, and the bytes are encrypted before they arrive. Writes are
+signed so a blob cannot be overwritten by a passer-by, and a chunk that already exists
+returns 409 rather than being replaced. Blobs expire on the same 30-day clock as mail,
+counted from last use.
 
 The handshake inbox is deliberately asymmetric: a stranger has no shared secret to sign
 with, so writes are open, but only the owner can read what arrived. The prekey bundle is
@@ -66,6 +74,8 @@ WebSocket API cannot set request headers portably.
 | Limit | Value |
 |---|---|
 | Request body | 256 KB |
+| Blob chunk | 96 KB |
+| Blob chunks per address | 512 |
 | Prekey bundle | 4 KB |
 | Messages per mailbox | 500 |
 | Bytes per mailbox | 8 MB |

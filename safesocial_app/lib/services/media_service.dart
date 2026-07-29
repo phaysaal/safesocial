@@ -6,6 +6,8 @@ import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../crypto/blob.dart';
+import 'blob_service.dart';
 import 'debug_log_service.dart';
 
 /// Handles media picking, local storage, and base64 encoding for relay transfer.
@@ -81,54 +83,116 @@ class MediaService extends ChangeNotifier {
 
   /// Encode a local image file as a base64 data URI for relay transfer.
   /// Resizes to max 1024px and compresses to JPEG quality 70 before encoding.
+  /// Maximum media we will upload. Roughly 512 chunks of 48 KB.
+  static const int maxMediaBytes = 24 * 1024 * 1024;
+
+  /// Prepare local media for sending: compress, thumbnail, encrypt, upload.
+  ///
+  /// Returns a [BlobRef] string to put in the message. Media used to be inlined
+  /// as a base64 data URI, so every photo counted against the message size cap
+  /// and was re-encrypted and re-sent once per recipient. Now the bytes are
+  /// uploaded once and the message carries a reference plus a small thumbnail.
   static Future<String?> encodeImageForRelay(String filePath) async {
     try {
       final file = File(filePath);
       if (!file.existsSync()) return null;
 
-      final bytes = await file.readAsBytes();
-      final image = img.decodeImage(bytes);
-      if (image == null) return null;
+      final raw = await file.readAsBytes();
+      final isVideo = _looksLikeVideo(filePath);
 
-      // Resize to max 1024px on the longest side
-      final resized = (image.width > image.height)
-          ? (image.width > 1024 ? img.copyResize(image, width: 1024) : image)
-          : (image.height > 1024 ? img.copyResize(image, height: 1024) : image);
+      Uint8List payload;
+      String mimeType;
+      String? thumbnail;
 
-      // Encode as JPEG quality 70 (~50–150KB for typical photos)
-      final compressed = Uint8List.fromList(img.encodeJpg(resized, quality: 70));
+      if (isVideo) {
+        // No transcoding: there is no video codec in the dependency set, so we
+        // send what the camera produced. Large clips are refused rather than
+        // silently truncated, and there is no thumbnail because extracting a
+        // frame also needs a decoder we do not have.
+        payload = raw;
+        mimeType = 'video/mp4';
+      } else {
+        final image = img.decodeImage(raw);
+        if (image == null) return null;
 
-      DebugLogService().info('Media', 'Image compressed: ${bytes.length ~/ 1024}KB → ${compressed.length ~/ 1024}KB');
-      return 'data:image/jpeg;base64,${base64Encode(compressed)}';
+        // Resize to max 1600px on the longest side. Larger than the old 1024
+        // because the size cap no longer applies once media is out of band.
+        final resized = (image.width > image.height)
+            ? (image.width > 1600 ? img.copyResize(image, width: 1600) : image)
+            : (image.height > 1600 ? img.copyResize(image, height: 1600) : image);
+
+        payload = Uint8List.fromList(img.encodeJpg(resized, quality: 80));
+        mimeType = 'image/jpeg';
+        thumbnail = _thumbnailFor(image);
+      }
+
+      if (payload.length > maxMediaBytes) {
+        DebugLogService().error('Media',
+            'Media is ${payload.length ~/ (1024 * 1024)}MB; limit is '
+            '${maxMediaBytes ~/ (1024 * 1024)}MB');
+        return null;
+      }
+
+      final ref = await BlobService().upload(
+        bytes: payload,
+        mimeType: mimeType,
+        thumbnail: thumbnail,
+      );
+      if (ref == null) return null;
+
+      DebugLogService().info('Media',
+          'Prepared ${raw.length ~/ 1024}KB as ${payload.length ~/ 1024}KB blob');
+      return ref.encode();
     } catch (e) {
-      DebugLogService().error('Media', 'Failed to encode image: $e');
+      DebugLogService().error('Media', 'Failed to prepare media: $e');
       return null;
     }
   }
 
-  /// Decode a base64 data URI and save to local storage.
-  /// Returns the local file path.
-  static Future<String?> decodeAndSaveImage(String dataUri) async {
+  /// A small inline preview, so a feed renders before any blob is fetched.
+  static String? _thumbnailFor(img.Image image) {
     try {
-      if (!dataUri.startsWith('data:image/')) return null;
-
-      final parts = dataUri.split(',');
-      if (parts.length != 2) return null;
-
-      final bytes = base64Decode(parts[1]);
-      final ext = dataUri.contains('png') ? 'png' : 'jpg';
-      final dir = await getApplicationDocumentsDirectory();
-      final fileName = 'media_${DateTime.now().millisecondsSinceEpoch}.$ext';
-      final file = File('${dir.path}/$fileName');
-      await file.writeAsBytes(bytes);
-
-      DebugLogService().info('Media', 'Saved received image: $fileName');
-      return file.path;
-    } catch (e) {
-      DebugLogService().error('Media', 'Failed to decode image: $e');
+      final thumb = (image.width > image.height)
+          ? img.copyResize(image, width: 320)
+          : img.copyResize(image, height: 320);
+      final bytes = img.encodeJpg(thumb, quality: 55);
+      // Keep it genuinely small — this rides inside every message.
+      if (bytes.length > 24 * 1024) return null;
+      return 'data:image/jpeg;base64,${base64Encode(bytes)}';
+    } catch (_) {
       return null;
     }
   }
+
+  static bool _looksLikeVideo(String path) {
+    final lower = path.toLowerCase();
+    return lower.endsWith('.mp4') ||
+        lower.endsWith('.mov') ||
+        lower.endsWith('.m4v') ||
+        lower.endsWith('.webm');
+  }
+
+  /// Resolve a received media reference to a local file path.
+  static Future<String?> decodeAndSaveImage(String reference) async {
+    try {
+      final ref = BlobRef.tryDecode(reference);
+      if (ref == null) {
+        DebugLogService()
+            .warn('Media', 'Unrecognised media reference; ignoring');
+        return null;
+      }
+      return BlobService().materialise(ref);
+    } catch (e) {
+      DebugLogService().error('Media', 'Failed to fetch media: $e');
+      return null;
+    }
+  }
+
+  /// The inline preview for a reference, if it has one.
+  ///
+  /// Lets a list render immediately and fetch the full blob lazily.
+  static String? thumbnailOf(String reference) =>
+      BlobRef.tryDecode(reference)?.thumbnail;
 
   Future<void> deleteMedia(String ref) async {
     try {

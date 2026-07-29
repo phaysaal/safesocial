@@ -178,7 +178,7 @@ class ChatService extends ChangeNotifier {
     final saved = <String>[];
     for (final ref in message.mediaRefs) {
       final path = await MediaService.decodeAndSaveImage(ref);
-      if (path != null) saved.add(path);
+      saved.add(path ?? ref);
     }
     return message.copyWith(mediaRefs: saved);
   }
