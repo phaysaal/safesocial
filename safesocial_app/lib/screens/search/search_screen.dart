@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
-import '../../widgets/avatar.dart';
+import '../../services/feed_service.dart';
+import '../../services/identity_service.dart';
+import '../../services/search_service.dart';
+import '../../services/sphere_service.dart';
 
 /// Search / discover contacts screen.
 class SearchScreen extends StatefulWidget {
@@ -27,16 +31,14 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final contactService = context.watch<ContactService>();
-    final contacts = contactService.contacts;
-
-    final filtered = _query.isEmpty
-        ? contacts
-        : contacts.where((c) {
-            final q = _query.toLowerCase();
-            return c.displayName.toLowerCase().contains(q) ||
-                c.publicKey.toLowerCase().contains(q);
-          }).toList();
+    final results = SearchService.search(
+      query: _query,
+      contacts: context.watch<ContactService>().contacts,
+      spheres: context.watch<SphereService>().spheres,
+      posts: context.watch<FeedService>().posts,
+      conversations: context.watch<ChatService>().conversations,
+      myIdentityKey: context.watch<IdentityService>().publicKey,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -58,7 +60,7 @@ class _SearchScreenState extends State<SearchScreen> {
               onChanged: (v) => setState(() => _query = v),
               autofocus: true,
               decoration: InputDecoration(
-                hintText: 'Search contacts...',
+                hintText: 'Search messages, posts, spheres, people',
                 prefixIcon: Icon(Icons.search, color: cs.onSurfaceVariant),
                 suffixIcon: _query.isNotEmpty
                     ? IconButton(
@@ -99,7 +101,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   _QuickAction(
                     icon: Icons.qr_code_scanner,
                     label: 'Scan QR code',
-                    onTap: () {},
+                    onTap: () => context.push('/contacts/add'),
                   ),
                   const Divider(height: 24),
                 ],
@@ -108,7 +110,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
           // Results
           Expanded(
-            child: filtered.isEmpty
+            child: results.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -116,43 +118,51 @@ class _SearchScreenState extends State<SearchScreen> {
                         Icon(
                           _query.isNotEmpty
                               ? Icons.search_off
-                              : Icons.people_outline,
+                              : Icons.search,
                           size: 48,
                           color: cs.onSurfaceVariant,
                         ),
                         const SizedBox(height: 12),
                         Text(
                           _query.isNotEmpty
-                              ? 'No contacts match "$_query"'
-                              : 'No contacts yet',
-                          style: theme.textTheme.bodyMedium,
+                              ? 'Nothing matched "$_query"'
+                              : 'Search your messages, posts and spheres',
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                          textAlign: TextAlign.center,
                         ),
+                        if (_query.isEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Searching happens on this device only.',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: cs.onSurfaceVariant),
+                          ),
+                        ],
                       ],
                     ),
                   )
                 : ListView.builder(
-                    itemCount: filtered.length,
+                    itemCount: results.length,
                     itemBuilder: (context, index) {
-                      final c = filtered[index];
+                      final result = results[index];
                       return ListTile(
-                        leading: UserAvatar(
-                          displayName: c.displayName,
-                          size: AvatarSize.medium,
+                        leading: CircleAvatar(
+                          backgroundColor: cs.surfaceContainerHighest,
+                          child: Icon(_iconFor(result.kind),
+                              size: 20, color: cs.onSurfaceVariant),
                         ),
-                        title: Text(
-                          c.displayName,
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        title: Text(result.title),
                         subtitle: Text(
-                          _truncateKey(c.publicKey),
-                          style: theme.textTheme.bodySmall,
+                          result.snippet,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        trailing: c.blocked
-                            ? Icon(Icons.block, color: cs.error, size: 18)
-                            : null,
-                        onTap: () => context.push('/chat/${c.publicKey}'),
+                        trailing: Text(
+                          _labelFor(result.kind),
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
+                        ),
+                        onTap: () => context.push(result.route),
                       );
                     },
                   ),
@@ -162,10 +172,19 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  String _truncateKey(String key) {
-    if (key.length <= 16) return key;
-    return '${key.substring(0, 8)}...${key.substring(key.length - 6)}';
-  }
+  static IconData _iconFor(SearchResultKind kind) => switch (kind) {
+        SearchResultKind.contact => Icons.person_outline,
+        SearchResultKind.sphere => Icons.blur_on,
+        SearchResultKind.post => Icons.article_outlined,
+        SearchResultKind.message => Icons.chat_bubble_outline,
+      };
+
+  static String _labelFor(SearchResultKind kind) => switch (kind) {
+        SearchResultKind.contact => 'Contact',
+        SearchResultKind.sphere => 'Sphere',
+        SearchResultKind.post => 'Post',
+        SearchResultKind.message => 'Message',
+      };
 }
 
 class _QuickAction extends StatelessWidget {

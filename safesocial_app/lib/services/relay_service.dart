@@ -10,6 +10,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../crypto/mailbox.dart';
 import 'debug_log_service.dart';
+import 'relay_config.dart';
 
 /// Whether a channel is usable right now.
 enum RelayConnectionState { disconnected, connecting, connected }
@@ -46,8 +47,6 @@ class _Conn {
 /// traffic onto the social graph, and cannot be convinced by a throwaway
 /// keypair that it should hand over someone else's mail.
 class RelayService extends ChangeNotifier {
-  static const _defaultRelayHost = 'relay.spheres.dev';
-  static const _fallbackRelayHost = 'spheres-relay.phaysaal.workers.dev';
 
   static const Duration _baseRetryDelay = Duration(seconds: 2);
   static const Duration _maxRetryDelay = Duration(minutes: 2);
@@ -65,8 +64,14 @@ class RelayService extends ChangeNotifier {
   /// Called whenever a channel becomes usable, so queued work can be flushed.
   void Function(String channelKey)? onConnected;
 
-  String _host(bool isFallback) =>
-      isFallback ? _fallbackRelayHost : _defaultRelayHost;
+  // The host is user-selectable so the relay operator is a choice; see
+  // RelayConfig. Falling back only makes sense for the default deployment —
+  // a self-hosted instance has no second host to try.
+  String _host(bool isFallback) => isFallback
+      ? (RelayConfig.primaryHost == RelayConfig.defaultHost
+          ? RelayConfig.fallbackHost
+          : RelayConfig.primaryHost)
+      : RelayConfig.primaryHost;
 
   RelayConnectionState stateFor(String channelKey) =>
       _conns[channelKey]?.state ?? RelayConnectionState.disconnected;

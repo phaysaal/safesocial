@@ -9,6 +9,7 @@ import '../crypto/blob.dart';
 import '../crypto/mailbox.dart';
 import '../crypto/spheres_crypto.dart';
 import 'debug_log_service.dart';
+import 'relay_config.dart';
 
 /// Uploads and fetches encrypted media blobs.
 ///
@@ -21,8 +22,6 @@ import 'debug_log_service.dart';
 /// same image, which is exactly the kind of correlation this project is trying
 /// not to leak.
 class BlobService {
-  static const _defaultRelayHost = 'relay.spheres.dev';
-  static const _fallbackRelayHost = 'spheres-relay.phaysaal.workers.dev';
 
   /// Overridable so tests do not need a network.
   static Future<http.Response> Function(
@@ -34,8 +33,11 @@ class BlobService {
 
   final _log = DebugLogService();
 
-  String _host(bool fallback) =>
-      fallback ? _fallbackRelayHost : _defaultRelayHost;
+  String _host(bool fallback) => fallback
+      ? (RelayConfig.primaryHost == RelayConfig.defaultHost
+          ? RelayConfig.fallbackHost
+          : RelayConfig.primaryHost)
+      : RelayConfig.primaryHost;
 
   Future<http.Response> _send(
     String method,

@@ -2,7 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+
 import '../../app_info.dart';
+import '../../services/contact_service.dart';
+import '../../services/relay_config.dart';
 import '../../services/backup_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/theme_service.dart';
@@ -136,8 +142,48 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(indent: 56),
 
+          // ── Network ────────────────────────────────────
+          _SectionHeader(title: 'Network'),
+          Builder(builder: (context) {
+            final config = context.watch<RelayConfig>();
+            return ListTile(
+              leading: Icon(Icons.dns_outlined, color: cs.primary),
+              title: const Text('Relay Server'),
+              subtitle: Text(
+                config.isCustom
+                    ? '${config.host} (self-hosted)'
+                    : '${config.host} (default)',
+              ),
+              onTap: () => _showRelayDialog(context, config),
+            );
+          }),
+          const Divider(indent: 56),
+
           // ── Privacy & Security ──────────────────────────
           _SectionHeader(title: 'Privacy & Security'),
+          Builder(builder: (context) {
+            final blocked = context
+                .watch<ContactService>()
+                .contacts
+                .where((c) => c.blocked)
+                .toList();
+            return ListTile(
+              leading: Icon(Icons.block, color: cs.primary),
+              title: const Text('Blocked Contacts'),
+              subtitle: Text(blocked.isEmpty
+                  ? 'Nobody is blocked'
+                  : '${blocked.length} blocked'),
+              onTap: () => _showBlockedDialog(context),
+            );
+          }),
+          const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.storage_outlined, color: cs.primary),
+            title: const Text('Cached Media'),
+            subtitle: const Text('Downloaded photos and videos'),
+            onTap: () => _showStorageDialog(context),
+          ),
+          const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.delete_forever, color: cs.error),
             title: Text('Reset Everything', style: TextStyle(color: cs.error)),
@@ -183,6 +229,162 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => context.push('/debug'),
           ),
           const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showRelayDialog(BuildContext context, RelayConfig config) async {
+    final controller = TextEditingController(text: config.host);
+    final messenger = ScaffoldMessenger.of(context);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Relay Server'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'The relay only moves encrypted bytes between addresses it cannot '
+              'link to anyone. It holds no keys and no account. You can run the '
+              'worker in relay/ yourself and point this at it.\n\n'
+              'Both people in a conversation must use a relay that can reach '
+              'the same mailbox, so changing this only works if your contacts '
+              'change it too.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Hostname',
+                hintText: 'relay.example.org',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await config.resetToDefault();
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Use default'),
+          ),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final error = await config.setHost(controller.text);
+              if (!ctx.mounted) return;
+              if (error != null) {
+                messenger.showSnackBar(SnackBar(content: Text(error)));
+                return;
+              }
+              Navigator.pop(ctx);
+              messenger.showSnackBar(const SnackBar(
+                content: Text('Relay changed. Restart the app to reconnect.'),
+              ));
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showBlockedDialog(BuildContext context) async {
+    final service = context.read<ContactService>();
+    final blocked = service.contacts.where((c) => c.blocked).toList();
+
+    if (blocked.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nobody is blocked')),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Blocked Contacts'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: blocked
+                .map((contact) => ListTile(
+                      dense: true,
+                      title: Text(contact.displayName),
+                      trailing: TextButton(
+                        onPressed: () async {
+                          await service.toggleBlock(contact.publicKey);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        child: const Text('Unblock'),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showStorageDialog(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final dir = await getApplicationDocumentsDirectory();
+    final cache = Directory('${dir.path}/media');
+
+    var bytes = 0;
+    var files = 0;
+    if (cache.existsSync()) {
+      for (final entity in cache.listSync()) {
+        if (entity is File) {
+          bytes += entity.lengthSync();
+          files++;
+        }
+      }
+    }
+
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cached Media'),
+        content: Text(
+          files == 0
+              ? 'No downloaded media is cached.'
+              : '$files file(s), ${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB.\n\n'
+                  'Clearing frees space. Anything still available on the relay '
+                  'will be downloaded again when you open it; media older than '
+                  'the relay retention window is gone for good.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          if (files > 0)
+            TextButton(
+              onPressed: () async {
+                try {
+                  await cache.delete(recursive: true);
+                  messenger.showSnackBar(
+                      const SnackBar(content: Text('Cached media cleared')));
+                } catch (e) {
+                  messenger
+                      .showSnackBar(SnackBar(content: Text('Failed: $e')));
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Clear', style: TextStyle(color: Colors.red)),
+            ),
         ],
       ),
     );

@@ -612,8 +612,13 @@ Remaining in Phase 4:
   decoder we do not have. Adding one is a dependency decision, not a coding one.
 - **Push notifications**: nothing exists. Needs a privacy decision — prefer content-free
   wakeups, and document what a push provider necessarily sees.
-- **Search** over messages and posts; today it covers contact names only.
-- **Settings**: block list management, storage/cache, relay selection, notification prefs.
+- ~~**Search**~~ — done. Covers messages, posts, comments, spheres and contacts, with
+  snippets trimmed around the hit. Entirely local: there is no server that could answer a
+  query without being told what you are looking for.
+- ~~**Settings**~~ — mostly done: blocked-contact management, cached-media size and clear,
+  and relay selection. The relay host is now user-configurable (`RelayConfig`), which is
+  what makes the self-hosting story in `relay/README.md` real rather than theoretical.
+  Notification preferences are still absent because notifications themselves are.
 - **Stories**: view receipts and replies.
 - **TURN**: still the public `openrelay.metered.ca` with shared credentials.
 
