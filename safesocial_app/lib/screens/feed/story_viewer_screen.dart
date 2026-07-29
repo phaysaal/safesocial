@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:io';
@@ -155,8 +154,6 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
   }
 
   Widget _buildOverlays() {
-    final story = widget.stories[_currentIndex];
-    
     return SafeArea(
       child: Column(
         children: [

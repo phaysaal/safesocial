@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../services/album_service.dart';
-import '../../widgets/avatar.dart';
 
 /// Screen displaying all shared photo albums.
 class AlbumListScreen extends StatelessWidget {
@@ -13,7 +12,6 @@ class AlbumListScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final albumService = context.watch<AlbumService>();
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(

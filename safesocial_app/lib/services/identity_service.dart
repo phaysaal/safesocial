@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -11,7 +10,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
-import 'rust_core_service.dart';
 
 class IdentityKeyPair {
   final String publicKey;
@@ -26,7 +24,6 @@ class IdentityService extends ChangeNotifier {
   static const _prefsPubKeyKey = 'spheres_identity_pubkey';
   static const _secureSecretKey = 'spheres_identity_secret';
 
-  final RustCoreService _rustCore = RustCoreService();
   final _secureStorage = const FlutterSecureStorage();
   
   UserProfile? _currentIdentity;
@@ -89,38 +86,44 @@ class IdentityService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Export the current identity keypair as a secure encrypted vault.
+  /// Export the current identity keypair as a passphrase-encrypted vault.
+  ///
+  /// Unavailable: the vault primitives it depended on
+  /// (`spheres_create_vault` / `spheres_unlock_vault`) are placeholders that
+  /// return a fixed string regardless of input, so an "encrypted" export
+  /// contained no key material. Exporting the key unencrypted instead is not
+  /// an acceptable substitute here — it would put the secret key on the system
+  /// clipboard, readable by other apps. Use [BackupService] until real vault
+  /// encryption lands.
   Future<String> exportIdentity(String passphrase) async {
-    if (_keypair == null) throw Exception('No identity to export');
-    
-    final payload = jsonEncode({
-      'key': _keypair!.publicKey,
-      'secret': _keypair!.secretKey,
-      'profile': _currentIdentity?.toJson(),
-    });
-
-    final vault = _rustCore.createVault(payload, passphrase);
-    if (vault == null) throw Exception('Failed to encrypt identity vault');
-    
-    return vault;
+    throw UnsupportedError(
+      'Encrypted identity export is not available in this build.',
+    );
   }
 
-  /// Import an identity from a secure vault.
+  /// Import an identity from an unencrypted export blob.
+  ///
+  /// Passphrase-protected blobs cannot be opened — see [exportIdentity].
   Future<bool> importIdentity(String blob, {String? passphrase}) async {
+    if (passphrase != null && passphrase.isNotEmpty) {
+      throw UnsupportedError(
+        'Passphrase-protected identity import is not available in this build.',
+      );
+    }
     try {
-      String decrypted;
-      if (passphrase != null && passphrase.isNotEmpty) {
-        final result = _rustCore.unlockVault(blob, passphrase);
-        if (result == null) return false;
-        decrypted = result;
-      } else {
-        decrypted = blob;
+      final data = jsonDecode(blob);
+      if (data is! Map ||
+          data['key'] is! String ||
+          data['secret'] is! String ||
+          (data['key'] as String).isEmpty ||
+          (data['secret'] as String).isEmpty) {
+        debugPrint('[IdentityService] Import rejected: no valid keypair in blob');
+        return false;
       }
 
-      final data = jsonDecode(decrypted);
       _keypair = IdentityKeyPair(
-        publicKey: data['key'],
-        secretKey: data['secret'],
+        publicKey: data['key'] as String,
+        secretKey: data['secret'] as String,
       );
 
       if (data['profile'] != null) {

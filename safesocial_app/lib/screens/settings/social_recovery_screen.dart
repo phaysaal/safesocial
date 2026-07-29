@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -20,7 +19,7 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
   final List<String> _selectedGuardians = [];
   final List<TextEditingController> _shardControllers = [];
   int _threshold = 3;
-  bool _isProcessing = false;
+  final bool _isProcessing = false;
 
   @override
   void initState() {
@@ -43,8 +42,6 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Social Recovery'),
@@ -68,7 +65,6 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
 
   Widget _buildSetupTab(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     final contactService = context.watch<ContactService>();
     final identityService = context.read<IdentityService>();
     final rustCore = context.read<RustCoreService>();
@@ -165,31 +161,35 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
     );
   }
 
+  // Social recovery is not implemented. Both entry points previously reported
+  // success without generating, sending, or reconstructing anything — so a
+  // user could believe their guardians held shards when none existed. Until
+  // the real Shamir flow lands (threshold enforcement, shard authentication,
+  // and verification of the reconstructed secret against the identity public
+  // key), these must fail visibly.
+  static const _unavailableMessage =
+      'Social recovery is not available yet. No shards were created or sent.';
+
   Future<void> _setupRecovery(IdentityService identity, RustCoreService rustCore) async {
-    setState(() => _isProcessing = true);
-    // Implementation: Generate shards via Rust FFI and send to guardians
-    DebugLogService().success('Recovery', 'Recovery setup initiated');
-    setState(() => _isProcessing = false);
+    DebugLogService().warn('Recovery', 'Setup attempted — feature not implemented');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_unavailableMessage)),
+      );
+    }
   }
 
   Future<void> _reconstructIdentity(IdentityService identity, RustCoreService rustCore) async {
-    setState(() => _isProcessing = true);
-    final shards = _shardControllers.map((c) => c.text.trim()).where((t) => t.isNotEmpty).toList();
-    
-    if (shards.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('At least 2 shards required')));
-      setState(() => _isProcessing = false);
-      return;
-    }
-
-    try {
-      // FUTURE: Call spheres_reconstruct_identity via FFI
-      DebugLogService().success('Recovery', 'Reconstruction successful (simulation)');
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      DebugLogService().error('Recovery', 'Reconstruction failed: $e');
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
+    DebugLogService().warn('Recovery', 'Reconstruction attempted — feature not implemented');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Identity reconstruction is not available yet. Your current '
+            'identity has not been changed.',
+          ),
+        ),
+      );
     }
   }
 }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -36,7 +35,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // Voice Note
   late final RecorderController _recorderController;
   bool _isRecording = false;
-  String? _audioPath;
 
   @override
   void initState() {
@@ -96,7 +94,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         
         setState(() {
           _isRecording = true;
-          _audioPath = path;
         });
       }
     } catch (e) {

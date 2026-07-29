@@ -2,7 +2,11 @@
 name = "safesocial_core"
 version = "0.3.0"
 edition = "2021"
-description = "Spheres P2P social network core — Veilid integration"
+description = "Spheres core — DORMANT, not built into the app (see docs/rebuild_plan.md)"
+
+# This crate is not compiled into the Flutter app and nothing calls it at
+# runtime. It is kept as a reference for a possible future non-Flutter client.
+# Do not add features that depend on it without reading docs/rebuild_plan.md §5.
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
@@ -17,17 +21,19 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
-prost = "0.13"
 uuid = { version = "1", features = ["v4", "serde"] }
-double-ratchet = "0.1.0"
 gf256 = { version = "0.3", features = ["shamir", "thread-rng"] }
 
-[build-dependencies]
-prost-build = "0.13"
+# Removed as unused: `prost`/`prost-build` (declared with no build.rs and no
+# .proto files — the wire format is JSON via serde) and `double-ratchet` (never
+# imported; ratchet.rs is a placeholder).
 
 [dev-dependencies]
 tokio-test = "0.4"
 
 [features]
 default = []
+# `ffi` was declared but never gated anything — lib.rs compiles the module
+# unconditionally. Left empty rather than removed so any external reference to
+# `--features ffi` keeps resolving.
 ffi = []

@@ -14,7 +14,6 @@ class ContactListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     final contactService = context.watch<ContactService>();
     final contacts = contactService.contacts;
 

@@ -211,6 +211,7 @@ class RustCoreService extends ChangeNotifier {
     _spheresStringFree(resultPtr);
   }
 
+  @override
   void dispose() {
     if (_handle != null) {
       _spheresFree(_handle!);

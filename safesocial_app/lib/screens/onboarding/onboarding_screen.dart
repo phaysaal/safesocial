@@ -54,7 +54,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _showImportDialog(BuildContext context) async {
     final blobController = TextEditingController();
-    final passphraseController = TextEditingController();
 
     await showDialog<void>(
       context: context,
@@ -63,18 +62,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Paste your backup data below, then enter your passphrase if it was encrypted.'),
+            const Text(
+              'Paste your backup data below.\n\n'
+              'Passphrase-protected backups cannot be opened in this build — '
+              'the encryption they used was a placeholder that discarded the key.',
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: blobController,
               decoration: const InputDecoration(labelText: 'Backup data'),
               maxLines: 4,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: passphraseController,
-              decoration: const InputDecoration(labelText: 'Passphrase (if encrypted)'),
-              obscureText: true,
             ),
           ],
         ),
@@ -86,12 +83,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ElevatedButton(
             onPressed: () async {
               final blob = blobController.text.trim();
-              final pass = passphraseController.text.trim();
               if (blob.isEmpty) return;
               Navigator.pop(ctx);
               try {
                 final idService = context.read<IdentityService>();
-                final ok = await idService.importIdentity(blob, passphrase: pass.isEmpty ? null : pass);
+                final ok = await idService.importIdentity(blob);
                 if (!mounted) return;
                 if (ok) {
                   final relay = context.read<RelayService>();
@@ -99,7 +95,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   context.go('/');
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Import failed — check your backup data or passphrase')),
+                    const SnackBar(content: Text('Import failed — the backup data is not a valid identity')),
                   );
                 }
               } catch (e) {
@@ -117,7 +113,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
     );
     blobController.dispose();
-    passphraseController.dispose();
   }
 
   @override

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,7 +21,6 @@ class ChatService extends ChangeNotifier {
   String? _mySecretKey;
 
   final Map<String, List<Message>> _conversations = {};
-  final Map<String, String> _conversationRoles = {}; 
   String? _activeConversation;
 
   Map<String, List<Message>> get conversations => Map.unmodifiable(_conversations);

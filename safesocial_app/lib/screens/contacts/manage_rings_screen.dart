@@ -13,8 +13,6 @@ class ManageRingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ringService = context.watch<RingService>();
-    final theme = Theme.of(context);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manage Rings'),

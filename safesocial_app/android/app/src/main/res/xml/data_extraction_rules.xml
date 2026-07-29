@@ -1,12 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing leaves the device via Android backup or device transfer.
+
+  The shared preferences hold the public key, cached profile, contact list,
+  and message history in cleartext; older installs additionally held the
+  identity keypair there before it was migrated to secure storage. Including
+  any of it in cloud backup would upload that to Google, which contradicts
+  what this app is for.
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- When <include> is present, everything else is excluded by default -->
-        <include domain="sharedpref" path="."/>
+        <exclude domain="sharedpref" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="external" path="."/>
+        <exclude domain="root" path="."/>
     </cloud-backup>
     <device-transfer>
-        <include domain="sharedpref" path="."/>
-        <include domain="file" path="."/>
-        <include domain="database" path="."/>
+        <exclude domain="sharedpref" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="external" path="."/>
+        <exclude domain="root" path="."/>
     </device-transfer>
 </data-extraction-rules>

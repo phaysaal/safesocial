@@ -3,8 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../models/post.dart';
-import '../../models/ring.dart';
-import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
@@ -674,7 +672,7 @@ class _CreatePostBar extends StatelessWidget {
 }
 
 class _NetworkDot extends StatelessWidget {
-  const _NetworkDot({super.key});
+  const _NetworkDot();
 
   @override
   Widget build(BuildContext context) {

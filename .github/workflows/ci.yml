@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter:
+    name: Flutter — analyze, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: safesocial_app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify formatting is parseable
+        run: dart format --output=none --set-exit-if-changed=false .
+
+      # Errors and warnings fail the build. Infos do not yet — there is a
+      # backlog of them (deprecated withOpacity, use_build_context_synchronously,
+      # prefer_const) that is being burned down. Once it reaches zero, drop
+      # --no-fatal-infos so it can never grow back.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      # A debug build, deliberately. Release builds require the signing
+      # keystore (android/key.properties) and now fail without it rather than
+      # silently falling back to the public Android debug key.
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+  relay:
+    name: Relay — syntax check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check worker parses
+        run: node --check worker.js
+
+# The Rust crate (safesocial_core) is intentionally not built here. It is
+# dormant: nothing loads it at runtime, no .so is bundled, and per
+# docs/rebuild_plan.md it is off the critical path. Building veilid-core in CI
+# would cost many minutes to validate code that does not ship. Re-add a job
+# here if and when the crate is revived.

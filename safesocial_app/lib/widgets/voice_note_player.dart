@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:audio_waveforms/audio_waveforms.dart';
-import 'dart:io';
 
 /// A modern voice note player with waveform visualization.
 class VoiceNotePlayer extends StatefulWidget {

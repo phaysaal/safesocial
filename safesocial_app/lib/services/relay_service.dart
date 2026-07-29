@@ -114,7 +114,6 @@ class RelayService extends ChangeNotifier {
   /// Sync offline messages via HTTP GET and acknowledge receipt.
   Future<void> _syncOfflineMessages(String baseUrl, String contactPublicKey, String myPublicKey, String mySecretKey) async {
     try {
-      final path = '${baseUrl.split('relay.spheres.dev').last}/sync'; // Extract path
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       
       // Request format: GET /room/<id>/sync

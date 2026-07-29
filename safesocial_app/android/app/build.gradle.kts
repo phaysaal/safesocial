@@ -46,15 +46,42 @@ android {
 
     buildTypes {
         release {
+            // Never fall back to the debug keystore. Its signing key is public,
+            // so a debug-signed "release" APK can be forged by anyone and can
+            // never be upgraded to a properly signed build without an uninstall.
+            // Without a keystore this stays null and the release is refused
+            // below, rather than silently signed with a key everyone has.
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                null
             }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
+    }
+}
+
+// Fail only when a release artifact is actually being produced. Checking here
+// rather than inside buildTypes {} matters: that block is evaluated at
+// configuration time for every invocation, so throwing there would also break
+// debug builds.
+gradle.taskGraph.whenReady {
+    if (keystorePropertiesFile.exists()) return@whenReady
+
+    val buildingRelease = allTasks.any { task ->
+        task.name.contains("Release") &&
+            listOf("assemble", "bundle", "package", "install").any { task.name.startsWith(it) }
+    }
+
+    if (buildingRelease) {
+        throw GradleException(
+            "Cannot build a release: android/key.properties is missing.\n" +
+            "Create it with keyAlias, keyPassword, storeFile and storePassword, " +
+            "or build a debug variant instead.\n" +
+            "Releases must never be signed with the public Android debug key."
+        )
     }
 }
 

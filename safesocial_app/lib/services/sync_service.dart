@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
-import 'crypto_service.dart';
 import 'debug_log_service.dart';
 import 'identity_service.dart';
 import 'relay_service.dart';
@@ -16,6 +14,11 @@ class SyncService extends ChangeNotifier {
   final RustCoreService _rustCore = RustCoreService();
   final RelayService _syncRelay = RelayService();
   
+  // Held but never read: a received identity is passed to the (non-functional)
+  // Rust core and never written back through IdentityService, so linking could
+  // not have persisted anything even if the relay handshake had worked. The UI
+  // entry points are disabled; rebuilding this is Phase 5 of docs/rebuild_plan.md.
+  // ignore: unused_field
   IdentityService? _identityService;
 
   bool _isLinking = false;

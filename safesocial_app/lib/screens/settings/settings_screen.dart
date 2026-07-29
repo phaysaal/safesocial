@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../app_info.dart';
 import '../../services/backup_service.dart';
 import '../../services/identity_service.dart';
-import '../../services/sync_service.dart';
 import '../../services/theme_service.dart';
 
 /// Settings screen — privacy, appearance, identity, backup.
@@ -19,7 +17,6 @@ class SettingsScreen extends StatelessWidget {
     final cs = theme.colorScheme;
     final themeService = context.watch<ThemeService>();
     final identityService = context.watch<IdentityService>();
-    final syncService = context.watch<SyncService>();
     final backupService = BackupService();
 
     return Scaffold(
@@ -46,70 +43,54 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(indent: 56),
 
+          // ── Security status ────────────────────────────
+          _SectionHeader(title: 'Security Status'),
+          const _PreAlphaBanner(),
+          const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.warning_amber_outlined, color: cs.error),
+            title: const Text('Message Encryption'),
+            subtitle: const Text(
+              'Placeholder cipher — not secure. Messages are obscured, not '
+              'protected. Assume the relay operator can read them.',
+            ),
+            isThreeLine: true,
+            trailing: Icon(Icons.error_outline, color: cs.error, size: 20),
+          ),
+          const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.warning_amber_outlined, color: cs.error),
+            title: const Text('Network Privacy'),
+            subtitle: const Text(
+              'All traffic passes through one Cloudflare relay, which can see '
+              'who communicates with whom.',
+            ),
+            isThreeLine: true,
+            trailing: Icon(Icons.error_outline, color: cs.error, size: 20),
+          ),
+          const Divider(indent: 56),
+
           // ── Identity ──────────────────────────────────
           _SectionHeader(title: 'Identity & Multi-Device'),
-          ListTile(
-            leading: Icon(Icons.devices, color: cs.primary),
-            title: const Text('Link New Device'),
-            subtitle: const Text('Clone identity to a tablet or computer'),
-            onTap: () => _showLinkDeviceDialog(context, syncService),
+          const _UnavailableTile(
+            icon: Icons.devices,
+            title: 'Link New Device',
+            reason: 'Device linking never completed — the two devices join '
+                'different relay rooms. Disabled until rebuilt.',
           ),
           const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.qr_code_scanner, color: cs.primary),
-            title: const Text('Clone Identity from Device'),
-            subtitle: const Text('Set up this device as a secondary'),
-            onTap: () => _showCloneIdentityDialog(context, syncService),
+          const _UnavailableTile(
+            icon: Icons.people_alt,
+            title: 'Social Recovery',
+            reason: 'Guardian shards were never generated or sent. Disabled '
+                'until implemented, so it cannot be relied on.',
           ),
           const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.people_alt, color: cs.primary),
-            title: const Text('Social Recovery'),
-            subtitle: const Text('Trust friends to help recover your account'),
-            onTap: () => context.push('/settings/recovery'),
-          ),
-          const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.key, color: cs.primary),
-            title: const Text('Export Private Key'),
-            subtitle: const Text('Copy for backup or multi-device use'),
-            onTap: () async {
-              final passphraseController = TextEditingController();
-              final passphrase = await showDialog<String>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Export Identity'),
-                  content: TextField(
-                    controller: passphraseController,
-                    decoration: const InputDecoration(labelText: 'Passphrase'),
-                    obscureText: true,
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                    ElevatedButton(onPressed: () => Navigator.pop(ctx, passphraseController.text), child: const Text('Export')),
-                  ],
-                ),
-              );
-              if (passphrase == null) return;
-              try {
-                final key = await identityService.exportIdentity(passphrase);
-                if (context.mounted) {
-                  Clipboard.setData(ClipboardData(text: key));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Identity copied to clipboard')),
-                  );
-                }
-              } catch(e) {
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
-              }
-            },
-          ),
-          const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.input, color: cs.primary),
-            title: const Text('Import Private Key'),
-            subtitle: const Text('Restore identity on this device'),
-            onTap: () => _showImportKeyDialog(context),
+          const _UnavailableTile(
+            icon: Icons.key,
+            title: 'Export / Import Private Key',
+            reason: 'Passphrase encryption was a placeholder that discarded '
+                'the key. Use Create Backup below instead.',
           ),
           const Divider(indent: 56),
 
@@ -118,14 +99,14 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(Icons.backup, color: cs.primary),
             title: const Text('Create Backup'),
-            subtitle: const Text('Save all data to an encrypted file'),
+            subtitle: const Text('Unencrypted — contains your private key'),
             onTap: () => _createBackup(context, backupService),
           ),
           const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.restore, color: cs.primary),
             title: const Text('Restore from Backup'),
-            subtitle: const Text('Load data from a backup file'),
+            subtitle: const Text('Replaces the identity on this device'),
             onTap: () => _showRestoreDialog(context, backupService),
           ),
           const Divider(indent: 56),
@@ -135,22 +116,8 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(Icons.delete_forever, color: cs.error),
             title: Text('Reset Everything', style: TextStyle(color: cs.error)),
-            subtitle: const Text('Wipe all local data and start fresh'),
+            subtitle: const Text('Wipe all local data, including backups'),
             onTap: () => _showResetDialog(context, identityService),
-          ),
-          const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.shield_outlined, color: cs.primary),
-            title: const Text('Encryption'),
-            subtitle: const Text('End-to-end XChaCha20-Poly1305'),
-            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
-          ),
-          const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.visibility_off_outlined, color: cs.primary),
-            title: const Text('Network Privacy'),
-            subtitle: const Text('End-to-end encrypted via Cloudflare relay'),
-            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
           ),
           const Divider(indent: 56),
 
@@ -164,11 +131,13 @@ class SettingsScreen extends StatelessWidget {
               showAboutDialog(
                 context: context,
                 applicationName: 'Spheres',
-                applicationVersion: '0.4.5',
+                applicationVersion: AppInfo.version,
                 applicationLegalese:
                     'Your data. Your network. Your rules.\n\n'
-                    'Spheres is a private, end-to-end encrypted social network '
-                    'with no servers storing your data in plaintext.',
+                    'Spheres is an early prototype of a private social network. '
+                    'Its encryption is not yet implemented and its traffic is '
+                    'relayed through a single server. Do not use it for '
+                    'anything sensitive.',
               );
             },
           ),
@@ -176,7 +145,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(Icons.code, color: cs.primary),
             title: const Text('Version'),
-            subtitle: const Text('0.4.5 (alpha)'),
+            subtitle: const Text('${AppInfo.version} (${AppInfo.channel})'),
           ),
           const Divider(indent: 56),
 
@@ -200,7 +169,10 @@ class SettingsScreen extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('Reset Everything?'),
         content: const Text(
-          'This will permanently delete your identity, contacts, and all messages from this device.\n\n'
+          'This will permanently delete your identity, contacts, and all '
+          'messages from this device — including any backup files saved here.\n\n'
+          'Your identity cannot be recovered afterwards. If you want to keep '
+          'it, copy your backup file off this device first.\n\n'
           'This action cannot be undone.',
         ),
         actions: [
@@ -220,211 +192,34 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  void _showLinkDeviceDialog(BuildContext context, SyncService syncService) {
-    final pairingCode = syncService.startPrimaryLinking();
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Link New Device'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Scan this code with your secondary device to clone your identity.'),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: 200,
-              height: 200,
-              child: QrImageView(
-                data: 'spheres-sync:$pairingCode',
-                version: QrVersions.auto,
-                eyeStyle: QrEyeStyle(
-                  eyeShape: QrEyeShape.square,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                dataModuleStyle: QrDataModuleStyle(
-                  dataModuleShape: QrDataModuleShape.square,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            const CircularProgressIndicator(),
-            const SizedBox(height: 12),
-            const Text('Waiting for connection...', style: TextStyle(fontSize: 12)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              syncService.stopLinking();
-              Navigator.pop(ctx);
-            },
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showCloneIdentityDialog(BuildContext context, SyncService syncService) {
-    final controller = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Clone Identity'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Enter the pairing code shown on your primary device.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Pairing Code',
-                hintText: 'Enter code from primary device',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final code = controller.text.trim();
-              if (code.isNotEmpty) {
-                syncService.startSecondaryLinking(code);
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Linking started...')),
-                );
-              }
-            },
-            child: const Text('Start Linking'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showImportKeyDialog(BuildContext context) {
-    final controller = TextEditingController();
-    final nameController = TextEditingController();
-    final theme = Theme.of(context);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Import Private Key'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Paste the private key exported from another device to restore your identity.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Private Key JSON',
-                hintText: 'Paste exported key here',
-              ),
-              maxLines: 3,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Passphrase',
-                hintText: 'Passphrase used during export',
-              ),
-              textCapitalization: TextCapitalization.words,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final key = controller.text.trim();
-              if (key.isEmpty) return;
-              final pass = nameController.text.trim(); // Re-using name field for passphrase
-              final success = await context.read<IdentityService>().importIdentity(
-                    key,
-                    passphrase: pass.isNotEmpty ? pass : null,
-                  );
-              if (ctx.mounted) Navigator.pop(ctx);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      success ? 'Identity restored successfully' : 'Invalid key format',
-                    ),
-                  ),
-                );
-              }
-            },
-            child: const Text('Import'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _createBackup(BuildContext context, BackupService backupService) async {
-    final passphraseController = TextEditingController();
-
-    final passphrase = await showDialog<String>(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Create Backup'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Set a passphrase to encrypt your backup. Leave empty for unencrypted.',
-              style: TextStyle(fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passphraseController,
-              decoration: const InputDecoration(
-                labelText: 'Passphrase (optional)',
-                prefixIcon: Icon(Icons.lock_outline),
-              ),
-              obscureText: true,
-            ),
-          ],
+        content: const Text(
+          'The backup file will contain your private key in readable form.\n\n'
+          'Passphrase encryption is not available in this build, so anyone who '
+          'obtains the file can take over your identity. Store it somewhere you '
+          'trust, and delete it when you no longer need it.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, passphraseController.text),
-            child: const Text('Create Backup'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Create Anyway'),
           ),
         ],
       ),
     );
 
-    if (passphrase == null) return;
+    if (confirmed != true) return;
 
     try {
-      final filePath = await backupService.createBackup(
-        passphrase: passphrase.isNotEmpty ? passphrase : null,
-      );
+      final filePath = await backupService.createBackup();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -455,8 +250,6 @@ class SettingsScreen extends StatelessWidget {
       return;
     }
 
-    final passphraseController = TextEditingController();
-
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -464,6 +257,12 @@ class SettingsScreen extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text(
+              'Restoring replaces the identity currently on this device. That '
+              'identity cannot be recovered afterwards.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
             Text('${backups.length} backup(s) found:', style: theme.textTheme.bodySmall),
             const SizedBox(height: 12),
             SizedBox(
@@ -479,37 +278,30 @@ class SettingsScreen extends StatelessWidget {
                     title: Text(name, style: const TextStyle(fontSize: 12)),
                     onTap: () async {
                       Navigator.pop(ctx);
-                      // Ask for passphrase
-                      final pp = await showDialog<String>(
+                      final confirmed = await showDialog<bool>(
                         context: context,
                         builder: (ctx2) => AlertDialog(
-                          title: const Text('Enter Passphrase'),
-                          content: TextField(
-                            controller: passphraseController,
-                            decoration: const InputDecoration(
-                              labelText: 'Passphrase (if encrypted)',
-                            ),
-                            obscureText: true,
+                          title: const Text('Replace this identity?'),
+                          content: Text(
+                            'Restore "$name"?\n\n'
+                            'Your current identity, contacts, and posts will be '
+                            'overwritten and cannot be brought back.',
                           ),
                           actions: [
                             TextButton(
-                              onPressed: () => Navigator.pop(ctx2),
+                              onPressed: () => Navigator.pop(ctx2, false),
                               child: const Text('Cancel'),
                             ),
                             ElevatedButton(
-                              onPressed: () =>
-                                  Navigator.pop(ctx2, passphraseController.text),
+                              onPressed: () => Navigator.pop(ctx2, true),
                               child: const Text('Restore'),
                             ),
                           ],
                         ),
                       );
-                      if (pp == null) return;
+                      if (confirmed != true) return;
                       try {
-                        await backupService.restoreBackup(
-                          backups[i].path,
-                          passphrase: pp.isNotEmpty ? pp : null,
-                        );
+                        await backupService.restoreBackup(backups[i].path);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -559,6 +351,89 @@ class _SectionHeader extends StatelessWidget {
           letterSpacing: 1,
         ),
       ),
+    );
+  }
+}
+
+/// Banner stating the build's overall maturity, shown above the security rows.
+class _PreAlphaBanner extends StatelessWidget {
+  const _PreAlphaBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.science_outlined, color: cs.onErrorContainer, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Pre-alpha build. The privacy features described in this app are '
+              'still being built and do not protect you yet. Do not use Spheres '
+              'for anything you need kept private.',
+              style: TextStyle(color: cs.onErrorContainer, fontSize: 12, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A feature that has been deliberately disabled, with the reason shown.
+///
+/// These features previously reported success while doing nothing, which is
+/// worse than being absent — users relied on them.
+class _UnavailableTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String reason;
+
+  const _UnavailableTile({
+    required this.icon,
+    required this.title,
+    required this.reason,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final disabled = cs.onSurface.withValues(alpha: 0.38);
+    return ListTile(
+      enabled: false,
+      leading: Icon(icon, color: disabled),
+      title: Row(
+        children: [
+          Flexible(child: Text(title, style: TextStyle(color: disabled))),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              'UNAVAILABLE',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+      subtitle: Text(reason, style: TextStyle(color: disabled, fontSize: 12)),
+      isThreeLine: true,
     );
   }
 }
