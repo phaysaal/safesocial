@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -10,19 +11,46 @@ import 'package:convert/convert.dart';
 import 'crypto_service.dart';
 import 'debug_log_service.dart';
 
+/// Whether a room is usable right now.
+enum RelayConnectionState { disconnected, connecting, connected }
+
+/// Per-room connection bookkeeping.
+class _Conn {
+  WebSocketChannel? channel;
+  RelayConnectionState state = RelayConnectionState.connecting;
+
+  /// Set when the app closes the socket on purpose, so [onDone] does not
+  /// resurrect it. Without this, disconnecting a blocked contact or leaving a
+  /// group reconnected five seconds later, forever.
+  bool closedIntentionally = false;
+
+  /// Consecutive failed attempts, for backoff.
+  int attempt = 0;
+
+  Timer? retryTimer;
+
+  /// Real-time frames that arrived while the offline mailbox was being
+  /// fetched, held back so ordering is preserved.
+  final List<String> buffer = [];
+  bool syncing = true;
+}
+
 /// WebSocket and HTTP relay client for messaging and state sync.
 class RelayService extends ChangeNotifier {
   static const _defaultRelayHost = 'relay.spheres.dev';
   static const _fallbackRelayHost = 'spheres-relay.phaysaal.workers.dev';
 
-  final Map<String, WebSocketChannel> _channels = {};
-  final _log = DebugLogService();
+  static const Duration _baseRetryDelay = Duration(seconds: 2);
+  static const Duration _maxRetryDelay = Duration(minutes: 2);
 
-  // Issue #3 Fix: Message buffering
-  final Map<String, List<String>> _messageBuffers = {};
-  final Map<String, bool> _isSyncing = {};
+  final Map<String, _Conn> _conns = {};
+  final _log = DebugLogService();
+  final Random _jitter = Random();
 
   void Function(String contactPublicKey, String encryptedMessage)? onMessageReceived;
+
+  /// Called whenever a room becomes usable, so queued work can be flushed.
+  void Function(String contactPublicKey)? onConnected;
 
   /// Get the base URL for HTTP or WS.
   String _getBaseUrl(bool isFallback, bool isWs) {
@@ -30,85 +58,173 @@ class RelayService extends ChangeNotifier {
     return isWs ? 'wss://$host' : 'https://$host';
   }
 
+  RelayConnectionState stateFor(String contactPublicKey) =>
+      _conns[contactPublicKey]?.state ?? RelayConnectionState.disconnected;
+
+  bool isConnected(String contactPublicKey) =>
+      _conns[contactPublicKey]?.state == RelayConnectionState.connected;
+
+  void _setState(String key, RelayConnectionState state) {
+    final conn = _conns[key];
+    if (conn == null || conn.state == state) return;
+    conn.state = state;
+    notifyListeners();
+  }
+
   /// Connect to a relay room for a specific contact and sync offline messages.
+  ///
   /// [authPublicKey] is the raw hex Ed25519 public key used for mailbox auth.
   /// If omitted, [myPublicKey] is used (fine when it has no namespace prefix).
-  Future<void> connect(String myPublicKey, String contactPublicKey, {String? mySecretKey, String? authPublicKey, bool isFallback = false}) async {
+  Future<void> connect(String myPublicKey, String contactPublicKey,
+      {String? mySecretKey,
+      String? authPublicKey,
+      bool isFallback = false}) async {
+    // Claim the slot before the first await. The previous version checked for
+    // an existing channel at the top but only recorded one after `await
+    // channel.ready`, so two rapid calls opened two sockets and the second
+    // wiped the first's buffered messages.
+    final existing = _conns[contactPublicKey];
+    if (existing != null &&
+        (existing.state == RelayConnectionState.connected ||
+            (existing.state == RelayConnectionState.connecting &&
+                existing.channel != null))) {
+      return;
+    }
+    if (existing != null && existing.state == RelayConnectionState.connecting) {
+      return;
+    }
+
+    final conn = existing ?? _Conn();
+    conn.closedIntentionally = false;
+    conn.retryTimer?.cancel();
+    conn.syncing = true;
+    conn.buffer.clear();
+    _conns[contactPublicKey] = conn;
+    _setState(contactPublicKey, RelayConnectionState.connecting);
+
     final roomId = CryptoService.deriveRelayRoomId(myPublicKey, contactPublicKey);
     final wsUrl = '${_getBaseUrl(isFallback, true)}/room/$roomId';
     final httpUrl = '${_getBaseUrl(isFallback, false)}/room/$roomId';
 
-    if (_channels.containsKey(contactPublicKey)) {
-      return;
-    }
-
-    _isSyncing[contactPublicKey] = true;
-    _messageBuffers[contactPublicKey] = [];
-
     _log.info('Relay', 'Connecting to $wsUrl');
 
     try {
-      // 1. Establish real-time WebSocket connection first (start buffering)
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      
+      conn.channel = channel;
+
       try {
         await channel.ready;
-        _log.success('Relay', 'Connected to room $roomId (Buffering messages)');
       } catch (e) {
+        conn.channel = null;
         _log.error('Relay', 'WebSocket handshake failed: $e');
-        _isSyncing.remove(contactPublicKey);
         if (!isFallback) {
           _log.warn('Relay', 'Primary relay failed, trying fallback...');
-          return connect(myPublicKey, contactPublicKey, mySecretKey: mySecretKey, authPublicKey: authPublicKey, isFallback: true);
+          _setState(contactPublicKey, RelayConnectionState.disconnected);
+          _conns.remove(contactPublicKey);
+          return connect(myPublicKey, contactPublicKey,
+              mySecretKey: mySecretKey,
+              authPublicKey: authPublicKey,
+              isFallback: true);
         }
+        _scheduleRetry(myPublicKey, contactPublicKey,
+            mySecretKey: mySecretKey,
+            authPublicKey: authPublicKey,
+            isFallback: isFallback);
         return;
       }
 
-      _channels[contactPublicKey] = channel;
+      conn.attempt = 0;
+      _log.success('Relay', 'Connected to room $roomId (buffering)');
 
       channel.stream.listen(
         (data) {
-          if (_isSyncing[contactPublicKey] == true) {
-            _messageBuffers[contactPublicKey]?.add(data as String);
+          if (conn.syncing) {
+            conn.buffer.add(data as String);
           } else {
             onMessageReceived?.call(contactPublicKey, data as String);
           }
         },
         onError: (e) {
           _log.error('Relay', 'WebSocket stream error: $e');
-          _channels.remove(contactPublicKey);
         },
         onDone: () {
-          _log.info('Relay', 'WebSocket closed, reconnecting in 5s...');
-          _channels.remove(contactPublicKey);
-          Future.delayed(const Duration(seconds: 5), () {
-            connect(myPublicKey, contactPublicKey, mySecretKey: mySecretKey, authPublicKey: authPublicKey, isFallback: isFallback);
-          });
+          conn.channel = null;
+          _setState(contactPublicKey, RelayConnectionState.disconnected);
+          if (conn.closedIntentionally) {
+            _log.info('Relay', 'Room closed for $contactPublicKey');
+            _conns.remove(contactPublicKey);
+            return;
+          }
+          _scheduleRetry(myPublicKey, contactPublicKey,
+              mySecretKey: mySecretKey,
+              authPublicKey: authPublicKey,
+              isFallback: isFallback);
         },
       );
 
-      // 2. Fetch offline messages (only if we have a secret key)
+      // Fetch offline messages before releasing buffered real-time frames, so
+      // the caller sees them in order.
       if (mySecretKey != null) {
         final pubKeyForAuth = authPublicKey ?? myPublicKey;
-        await _syncOfflineMessages(httpUrl, contactPublicKey, pubKeyForAuth, mySecretKey);
+        await _syncOfflineMessages(
+            httpUrl, contactPublicKey, pubKeyForAuth, mySecretKey);
       } else {
-        _log.warn('Relay', 'No secret key provided; skipping offline mailbox sync for $roomId');
+        _log.warn('Relay',
+            'No secret key provided; skipping offline mailbox sync for $roomId');
       }
 
-      // 3. Flush buffer
-      _isSyncing[contactPublicKey] = false;
-      final buffer = _messageBuffers.remove(contactPublicKey) ?? [];
-      if (buffer.isNotEmpty) {
-        _log.info('Relay', 'Flushing ${buffer.length} buffered real-time messages');
-        for (final msg in buffer) {
+      conn.syncing = false;
+      if (conn.buffer.isNotEmpty) {
+        _log.info('Relay', 'Flushing ${conn.buffer.length} buffered messages');
+        for (final msg in conn.buffer) {
           onMessageReceived?.call(contactPublicKey, msg);
         }
+        conn.buffer.clear();
       }
 
+      _setState(contactPublicKey, RelayConnectionState.connected);
+      onConnected?.call(contactPublicKey);
     } catch (e) {
       _log.error('Relay', 'Failed to connect: $e');
-      _isSyncing.remove(contactPublicKey);
+      _scheduleRetry(myPublicKey, contactPublicKey,
+          mySecretKey: mySecretKey,
+          authPublicKey: authPublicKey,
+          isFallback: isFallback);
     }
+  }
+
+  /// Reconnect after a delay that grows with consecutive failures.
+  ///
+  /// Jittered so that a relay restart does not bring every client back in the
+  /// same instant.
+  void _scheduleRetry(String myPublicKey, String contactPublicKey,
+      {String? mySecretKey, String? authPublicKey, bool isFallback = false}) {
+    final conn = _conns[contactPublicKey];
+    if (conn == null || conn.closedIntentionally) return;
+
+    conn.attempt++;
+    final backoffMs = _baseRetryDelay.inMilliseconds * (1 << (conn.attempt - 1));
+    final cappedMs = backoffMs.clamp(
+      _baseRetryDelay.inMilliseconds,
+      _maxRetryDelay.inMilliseconds,
+    );
+    final delay = Duration(
+      milliseconds: cappedMs + _jitter.nextInt(1000),
+    );
+
+    _setState(contactPublicKey, RelayConnectionState.disconnected);
+    _log.info('Relay',
+        'Reconnecting to $contactPublicKey in ${delay.inSeconds}s (attempt ${conn.attempt})');
+
+    conn.retryTimer?.cancel();
+    conn.retryTimer = Timer(delay, () {
+      if (conn.closedIntentionally) return;
+      _conns.remove(contactPublicKey);
+      connect(myPublicKey, contactPublicKey,
+          mySecretKey: mySecretKey,
+          authPublicKey: authPublicKey,
+          isFallback: isFallback);
+    });
   }
 
   /// Sync offline messages via HTTP GET and acknowledge receipt.
@@ -220,17 +336,20 @@ class RelayService extends ChangeNotifier {
     return hex.encode(sig);
   }
 
-  /// Send a message via relay.
+  /// Hand a message to the relay.
+  ///
+  /// Returns false when there is no live socket. Callers must not treat that
+  /// as delivered — [OutboxService] keeps the message queued and retries.
   Future<bool> sendViaRelay(String contactPublicKey, String encryptedMessage) async {
-    final channel = _channels[contactPublicKey];
-    if (channel == null) {
+    final conn = _conns[contactPublicKey];
+    final channel = conn?.channel;
+    if (channel == null || conn?.state != RelayConnectionState.connected) {
       _log.warn('Relay', 'No active WS connection for $contactPublicKey');
       return false;
     }
 
     try {
       channel.sink.add(encryptedMessage);
-      _log.success('Relay', 'Message sent via relay');
       return true;
     } catch (e) {
       _log.error('Relay', 'Send failed: $e');
@@ -239,22 +358,25 @@ class RelayService extends ChangeNotifier {
   }
 
   void disconnect(String contactPublicKey) {
-    final channel = _channels.remove(contactPublicKey);
-    channel?.sink.close();
-    _isSyncing.remove(contactPublicKey);
-    _messageBuffers.remove(contactPublicKey);
+    final conn = _conns[contactPublicKey];
+    if (conn == null) return;
+    conn.closedIntentionally = true;
+    conn.retryTimer?.cancel();
+    conn.channel?.sink.close();
+    conn.channel = null;
+    _conns.remove(contactPublicKey);
+    notifyListeners();
   }
 
   void disconnectAll() {
-    for (final channel in _channels.values) {
-      channel.sink.close();
+    for (final entry in _conns.entries.toList()) {
+      entry.value.closedIntentionally = true;
+      entry.value.retryTimer?.cancel();
+      entry.value.channel?.sink.close();
     }
-    _channels.clear();
-    _isSyncing.clear();
-    _messageBuffers.clear();
+    _conns.clear();
+    notifyListeners();
   }
-
-  bool isConnected(String contactPublicKey) => _channels.containsKey(contactPublicKey);
 
   @override
   void dispose() {

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/post.dart';
 import '../../services/feed_service.dart';
+import '../../services/outbox_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
 import '../../services/ring_service.dart';
@@ -676,22 +677,37 @@ class _NetworkDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Real state, not decoration. This used to be hardcoded green with a
+    // "Relay network: connected" message regardless of whether anything was
+    // actually connected.
+    final outbox = context.watch<OutboxService>();
+    final pending = outbox.pendingCount;
+    final failed =
+        outbox.entries.where((e) => e.state == OutboxState.failed).length;
+
+    final (Color color, String message) = switch ((failed, pending)) {
+      (> 0, _) => (
+          Colors.red,
+          '$failed message(s) could not be sent. Tap and hold a message to retry.'
+        ),
+      (_, > 0) => (
+          Colors.amber,
+          '$pending message(s) waiting to send. They will go out when the '
+              'connection returns.'
+        ),
+      _ => (Colors.green, 'No messages waiting to send.'),
+    };
+
     return GestureDetector(
       onTap: () {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Relay network: connected'),
-            duration: Duration(seconds: 3),
-          ),
+          SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
         );
       },
       child: Container(
         width: 10,
         height: 10,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.green,
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: color),
       ),
     );
   }

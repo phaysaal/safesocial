@@ -11,6 +11,7 @@ import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/group_service.dart';
 import '../../services/identity_service.dart';
+import '../../services/outbox_service.dart';
 import '../../services/relay_service.dart';
 import '../../services/debug_log_service.dart';
 
@@ -74,6 +75,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       sessionManager: context.read<SessionManager>(),
       contactService: context.read<ContactService>(),
       chatService: context.read<ChatService>(),
+      outboxService: context.read<OutboxService>(),
       callService: context.read<CallService>(),
       feedService: context.read<FeedService>(),
       groupService: context.read<GroupService>(),

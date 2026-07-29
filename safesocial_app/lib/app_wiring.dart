@@ -7,6 +7,7 @@ import 'services/debug_log_service.dart';
 import 'services/feed_service.dart';
 import 'services/group_service.dart';
 import 'services/identity_service.dart';
+import 'services/outbox_service.dart';
 
 /// Connect an identity to every service that needs it.
 ///
@@ -21,6 +22,7 @@ Future<void> wireIdentity({
   required SessionManager sessionManager,
   required ContactService contactService,
   required ChatService chatService,
+  required OutboxService outboxService,
   required CallService callService,
   required FeedService feedService,
   required GroupService groupService,
@@ -54,12 +56,16 @@ Future<void> wireIdentity({
   );
   await contactService.listenForHandshakes();
 
+  await outboxService.load();
   chatService.setMyInfo(
     publicKey,
     secretKey,
     sessions: sessionManager,
+    outbox: outboxService,
     resolveExchangeKey: contactService.exchangeKeyFor,
   );
+  outboxService.start();
+  await outboxService.pruneCompleted();
   callService.setMyInfo(publicKey, secretKey);
 
   for (final contact in contactService.contacts) {

@@ -8,6 +8,7 @@ import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/message.dart';
 import 'debug_log_service.dart';
+import 'outbox_service.dart';
 import 'relay_service.dart';
 
 /// Manages chat conversations over the relay.
@@ -21,6 +22,7 @@ class ChatService extends ChangeNotifier {
 
   final RelayService _relayService = RelayService();
   SessionManager? _sessions;
+  OutboxService? _outbox;
 
   /// Resolves a contact's X25519 public key by their identity key. Supplied by
   /// the app so ChatService does not need to depend on ContactService.
@@ -45,16 +47,28 @@ class ChatService extends ChangeNotifier {
     String publicKey,
     String secretKey, {
     SessionManager? sessions,
+    OutboxService? outbox,
     String? Function(String identityKey)? resolveExchangeKey,
   }) {
     _myPublicKey = publicKey;
     _mySecretKey = secretKey;
     if (sessions != null) _sessions = sessions;
     if (resolveExchangeKey != null) _resolveExchangeKey = resolveExchangeKey;
+
+    if (outbox != null) {
+      _outbox = outbox;
+      outbox.send = _relayService.sendViaRelay;
+      // Retry as soon as a room comes back, rather than waiting for the tick.
+      _relayService.onConnected = (peer) => outbox.flush(onlyPeer: peer);
+    }
+
     _relayService.onMessageReceived = (contactKey, raw) {
       _handleRelayMessage(contactKey, raw);
     };
   }
+
+  /// Delivery state for a message we sent, or null if it is not tracked.
+  OutboxState? deliveryState(String messageId) => _outbox?.stateOf(messageId);
 
   void connectRelay(String contactPublicKey) {
     if (_myPublicKey != null) {
@@ -97,7 +111,37 @@ class ChatService extends ChangeNotifier {
     );
 
     _addMessageLocally(contactPublicKey, message);
-    _relayService.sendViaRelay(contactPublicKey, sealed);
+
+    // Durable hand-off. If the socket is down the message waits here and is
+    // retried on reconnect or on the next tick — including across app restarts.
+    final outbox = _outbox;
+    if (outbox != null) {
+      await outbox.enqueue(
+        id: message.id,
+        peer: contactPublicKey,
+        payload: sealed,
+      );
+    } else {
+      await _relayService.sendViaRelay(contactPublicKey, sealed);
+    }
+  }
+
+  /// Tell a sender we have their message, so their copy stops showing as unsent.
+  Future<void> _sendReceipt(String peerKey, String messageId) async {
+    final sessions = _sessions;
+    if (sessions == null || !sessions.isReady) return;
+    try {
+      final sealed = await sessions.seal(
+        peerIdentityKey: peerKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
+        type: 'receipt',
+        plaintext: jsonEncode({'id': messageId}),
+      );
+      await _relayService.sendViaRelay(peerKey, sealed);
+    } catch (e) {
+      // A receipt is best-effort; never let it break message handling.
+      DebugLogService().warn('Chat', 'Could not send receipt: $e');
+    }
   }
 
   Future<void> _handleRelayMessage(String contactKey, String raw) async {
@@ -109,6 +153,12 @@ class ChatService extends ChangeNotifier {
         raw: raw,
         resolveExchangeKey: (key) => _resolveExchangeKey?.call(key),
       );
+
+      if (opened.type == 'receipt') {
+        final id = jsonDecode(opened.plaintext)['id'];
+        if (id is String) await _outbox?.markDelivered(id);
+        return;
+      }
 
       if (opened.type != 'chat') {
         DebugLogService()
@@ -129,6 +179,7 @@ class ChatService extends ChangeNotifier {
       }
 
       _addMessageLocally(opened.from, msg);
+      await _sendReceipt(opened.from, msg.id);
     } on EnvelopeException catch (e) {
       DebugLogService().error('Chat', 'Rejected message from $contactKey: $e');
     } on NoSessionException catch (e) {
@@ -187,6 +238,7 @@ class ChatService extends ChangeNotifier {
     // removed, leaving the message history readable on disk indefinitely.
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_prefsMsgPrefix$contactKey');
+    await _outbox?.removeForPeer(contactKey);
 
     await _persistConversationKeys();
     notifyListeners();

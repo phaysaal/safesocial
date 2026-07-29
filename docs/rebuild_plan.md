@@ -393,6 +393,39 @@ Everything in §6. This is the phase that fixes the complaint that messaging is 
 two-device test exchanges N messages across forced disconnects with zero loss and zero
 duplication; the relay cannot read a message or identify a participant.
 
+**Progress — client reliability done; relay hardening still to do.**
+
+Landed:
+
+- `lib/services/outbox_service.dart` — a durable queue. Every message is written down
+  before any network attempt and stays until the relay accepts it, with bounded retries,
+  manual retry after giving up, and pruning of completed entries. It survives process
+  death: an unsent message is still pending after a restart.
+- Delivery receipts. The recipient returns a sealed `receipt` envelope, so
+  `pending → sent → delivered` reflects the peer's device, not just the relay.
+- `RelayService` connection lifecycle rewritten:
+  - Intentional closes no longer reconnect. Blocking a contact or leaving a group used to
+    resurrect the socket five seconds later, permanently.
+  - Exponential backoff with jitter, replacing a fixed five-second retry.
+  - The connect race is closed — the slot is claimed before the first `await`, so two
+    rapid calls can no longer open two sockets and have the second discard the first's
+    buffered messages.
+  - A real `RelayConnectionState` is exposed and notified.
+- The feed's network dot shows actual queue state instead of being hardcoded green with a
+  "Relay network: connected" message that was true regardless.
+- 45 tests pass, 11 of them covering the outbox state machine.
+
+Remaining:
+
+- **Relay v2** (§6.1): derived rotating mailboxes, membership-bound auth, 256-bit IDs,
+  padding, quotas, a retention sweep, and removing the unauthenticated `/state` read. This
+  is a coordinated client + worker deployment, so it is worth doing as one change.
+- **One multiplexed connection**: seven `RelayService` instances still exist, one per
+  service.
+- **Sequence numbers and gap detection** for feed/group content; direct messages already
+  get ordering from the ratchet index.
+- **SQLite encrypted at rest** (§7), which the outbox and message history both want.
+
 ### Phase 3 — The sphere model *(3–4 weeks)*
 
 - Sphere data model, encrypted store, and migration from contacts / groups / rings / albums.

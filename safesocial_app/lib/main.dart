@@ -5,6 +5,7 @@ import 'app.dart';
 import 'app_wiring.dart';
 import 'crypto/session_manager.dart';
 import 'services/identity_service.dart';
+import 'services/outbox_service.dart';
 import 'services/chat_service.dart';
 import 'services/feed_service.dart';
 import 'services/contact_service.dart';
@@ -40,6 +41,7 @@ void main() async {
   await themeService.load();
 
   final sessionManager = SessionManager();
+  final outboxService = OutboxService();
 
   // Wire services
   syncService.attachServices(identityService);
@@ -60,6 +62,7 @@ void main() async {
     sessionManager: sessionManager,
     contactService: contactService,
     chatService: chatService,
+    outboxService: outboxService,
     callService: callService,
     feedService: feedService,
     groupService: groupService,
@@ -92,6 +95,7 @@ void main() async {
         ChangeNotifierProvider.value(value: albumService),
         ChangeNotifierProvider.value(value: relayService),
         Provider<SessionManager>.value(value: sessionManager),
+        ChangeNotifierProvider.value(value: outboxService),
         ChangeNotifierProvider.value(value: DebugLogService()),
       ],
       child: const SpheresApp(),
