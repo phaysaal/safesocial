@@ -9,7 +9,7 @@ import 'spheres_crypto.dart';
 
 /// Wire format version. Bump on any change to [Envelope._signedBytes] or the
 /// field set, and reject unknown versions rather than guessing.
-const int kEnvelopeVersion = 1;
+const int kEnvelopeVersion = 2;
 
 /// How the payload key was established.
 enum SealMode {
@@ -19,6 +19,10 @@ enum SealMode {
   /// Random content key wrapped under the static pairwise wrapping key.
   /// Used where a ratchet cannot be kept in lockstep (feed, albums, groups).
   wrap,
+
+  /// Content key wrapped under a sphere's per-epoch key, so every member can
+  /// open it without the sender encrypting once per recipient.
+  sphere,
 }
 
 /// Raised when an inbound envelope fails any integrity check.
@@ -63,9 +67,15 @@ class Envelope {
   final Uint8List nonce;
   final Uint8List ciphertext;
 
-  /// Wrapped content key and its nonce. Present in [SealMode.wrap] only.
+  /// Wrapped content key and its nonce. Present in [SealMode.wrap] and
+  /// [SealMode.sphere].
   final Uint8List? wrappedKey;
   final Uint8List? wrapNonce;
+
+  /// Sphere this belongs to, and the epoch whose key opens it.
+  /// Present in [SealMode.sphere] only.
+  final String? sphereId;
+  final int sphereEpoch;
 
   final Uint8List signature;
 
@@ -82,6 +92,8 @@ class Envelope {
     required this.wrappedKey,
     required this.wrapNonce,
     required this.signature,
+    this.sphereId,
+    this.sphereEpoch = -1,
   });
 
   /// The exact bytes covered by the signature and used as AEAD associated data.
@@ -100,6 +112,8 @@ class Envelope {
     required Uint8List nonce,
     required Uint8List? wrappedKey,
     required Uint8List? wrapNonce,
+    required String? sphereId,
+    required int sphereEpoch,
   }) {
     final parts = [
       'spheres-envelope',
@@ -113,6 +127,8 @@ class Envelope {
       base64Encode(nonce),
       wrappedKey == null ? '' : base64Encode(wrappedKey),
       wrapNonce == null ? '' : base64Encode(wrapNonce),
+      sphereId ?? '',
+      '$sphereEpoch',
     ];
     return Uint8List.fromList(utf8.encode(parts.join('\n')));
   }
@@ -128,6 +144,8 @@ class Envelope {
         nonce: nonce,
         wrappedKey: wrappedKey,
         wrapNonce: wrapNonce,
+        sphereId: sphereId,
+        sphereEpoch: sphereEpoch,
       );
 
   // ── Sealing ───────────────────────────────────────────────────────────────
@@ -199,6 +217,8 @@ class Envelope {
     required Uint8List? wrappedKey,
     required Uint8List? wrapNonce,
     required String myIdentitySecretHex,
+    String? sphereId,
+    int sphereEpoch = -1,
   }) async {
     final nonce = SpheresCrypto.randomNonce();
     final id = base64Encode(SpheresCrypto.randomBytes(16));
@@ -215,6 +235,8 @@ class Envelope {
       nonce: nonce,
       wrappedKey: wrappedKey,
       wrapNonce: wrapNonce,
+      sphereId: sphereId,
+      sphereEpoch: sphereEpoch,
     );
 
     final ciphertext = await SpheresCrypto.encrypt(
@@ -242,6 +264,79 @@ class Envelope {
       wrappedKey: wrappedKey,
       wrapNonce: wrapNonce,
       signature: Uint8List.fromList(signature),
+      sphereId: sphereId,
+      sphereEpoch: sphereEpoch,
+    );
+  }
+
+  /// Seal [plaintext] to every member of a sphere at once.
+  ///
+  /// The content key is wrapped under the sphere's epoch key, so the sender
+  /// encrypts once regardless of how many members there are, and anyone
+  /// holding that epoch key can open it. Members added later receive the key
+  /// and can read back; members removed later cannot read anything sealed
+  /// after the rotation, because they never get the next epoch's key.
+  static Future<Envelope> sealToSphere({
+    required String sphereId,
+    required int epoch,
+    required Uint8List sphereKey,
+    required String type,
+    required List<int> plaintext,
+    required String myIdentityKey,
+    required String myIdentitySecretHex,
+  }) async {
+    final contentKey = SpheresCrypto.randomKey();
+    final wrapNonce = SpheresCrypto.randomNonce();
+    final wrapped = await SpheresCrypto.encrypt(
+      key: sphereKey,
+      nonce: wrapNonce,
+      plaintext: contentKey,
+      aad: const <int>[],
+    );
+
+    return _seal(
+      mode: SealMode.sphere,
+      type: type,
+      from: myIdentityKey,
+      sequence: -1,
+      payloadKey: contentKey,
+      plaintext: plaintext,
+      wrappedKey: wrapped,
+      wrapNonce: wrapNonce,
+      myIdentitySecretHex: myIdentitySecretHex,
+      sphereId: sphereId,
+      sphereEpoch: epoch,
+    );
+  }
+
+  /// Verify and decrypt sphere-sealed content.
+  ///
+  /// [sphereKey] must be the key for [sphereEpoch]. The caller is responsible
+  /// for checking that [from] was a member of the sphere at that epoch — the
+  /// signature proves who sent it, not that they were entitled to.
+  Future<Uint8List> openWithSphereKey(Uint8List sphereKey) async {
+    if (mode != SealMode.sphere) {
+      throw const EnvelopeException('Not a sphere-sealed envelope');
+    }
+    verifySignature();
+
+    final wrapped = wrappedKey;
+    final wn = wrapNonce;
+    if (wrapped == null || wn == null) {
+      throw const EnvelopeException('Sphere envelope has no wrapped key');
+    }
+
+    final contentKey = await SpheresCrypto.decrypt(
+      key: sphereKey,
+      nonce: wn,
+      ciphertextWithMac: wrapped,
+      aad: const <int>[],
+    );
+    return SpheresCrypto.decrypt(
+      key: contentKey,
+      nonce: nonce,
+      ciphertextWithMac: ciphertext,
+      aad: associatedData,
     );
   }
 
@@ -275,6 +370,11 @@ class Envelope {
           nonce: nonce,
           ciphertextWithMac: ciphertext,
           aad: associatedData,
+        );
+
+      case SealMode.sphere:
+        throw const EnvelopeException(
+          'Sphere-sealed content needs the sphere key — use openWithSphereKey',
         );
 
       case SealMode.wrap:
@@ -334,6 +434,8 @@ class Envelope {
         'ct': base64Encode(ciphertext),
         if (wrappedKey != null) 'wk': base64Encode(wrappedKey!),
         if (wrapNonce != null) 'wn': base64Encode(wrapNonce!),
+        if (sphereId != null) 'sid': sphereId,
+        if (sphereId != null) 'sep': sphereEpoch,
         'sig': base64Encode(signature),
       };
 
@@ -404,6 +506,8 @@ class Envelope {
       wrappedKey: optional('wk'),
       wrapNonce: optional('wn'),
       signature: required('sig'),
+      sphereId: json['sid'] as String?,
+      sphereEpoch: json['sep'] as int? ?? -1,
     );
   }
 }

@@ -7,6 +7,7 @@ import 'services/debug_log_service.dart';
 import 'services/feed_service.dart';
 import 'services/group_service.dart';
 import 'services/identity_service.dart';
+import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
 
 /// Connect an identity to every service that needs it.
@@ -27,6 +28,7 @@ Future<void> wireIdentity({
   required FeedService feedService,
   required GroupService groupService,
   required AlbumService albumService,
+  required SphereService sphereService,
 }) async {
   if (!identityService.isOnboarded) return;
 
@@ -70,6 +72,18 @@ Future<void> wireIdentity({
   callService.setMyInfo(publicKey, secretKey);
   callService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
   feedService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
+
+  await sphereService.load();
+  sphereService.configure(
+    sessions: sessionManager,
+    identityKey: publicKey,
+    identitySecret: secretKey,
+    resolveExchangeKey: contactService.exchangeKeyFor,
+  );
+  // Membership changes and sphere keys travel over the pairwise chat channels
+  // that already exist, so there is no separate transport to keep alive.
+  sphereService.sendToPeer = chatService.sendRawToPeer;
+  chatService.onSphereOp = sphereService.handleIncomingOp;
 
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;

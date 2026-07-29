@@ -65,6 +65,17 @@ class ChatService extends ChangeNotifier {
     };
   }
 
+  /// Called with (senderIdentityKey, payload) for verified `sphere_op`
+  /// envelopes. Set by the app so ChatService need not know about spheres.
+  Future<void> Function(String from, String payload)? onSphereOp;
+
+  /// Send an already-sealed payload straight to a peer.
+  ///
+  /// Used for control traffic (sphere membership, key distribution) that has
+  /// its own sealing and must not be queued as a chat message.
+  Future<bool> sendRawToPeer(String peerIdentityKey, String payload) =>
+      _relayService.sendViaRelay(peerIdentityKey, payload);
+
   /// Delivery state for a message we sent, or null if it is not tracked.
   OutboxState? deliveryState(String messageId) => _outbox?.stateOf(messageId);
 
@@ -172,6 +183,11 @@ class ChatService extends ChangeNotifier {
       if (opened.type == 'receipt') {
         final id = jsonDecode(opened.plaintext)['id'];
         if (id is String) await _outbox?.markDelivered(id);
+        return;
+      }
+
+      if (opened.type == 'sphere_op') {
+        await onSphereOp?.call(opened.from, opened.plaintext);
         return;
       }
 

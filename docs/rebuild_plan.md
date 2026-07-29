@@ -475,6 +475,44 @@ Remaining:
 **Exit:** on two real devices — create a sphere, invite, accept, post, chat; a removed member
 provably cannot decrypt anything published after removal.
 
+**Progress — the model and its enforcement are in; the UI is not.**
+
+Landed:
+
+- `lib/models/sphere.dart` — the primitive: id (random 256-bit, not derived from the member
+  set so it survives membership changes), name, kind, epoch, and members with roles.
+- `lib/crypto/sphere_keyring.dart` — one symmetric key per epoch, retained for old epochs so
+  history stays readable, with persistence.
+- `Envelope` gains `SealMode.sphere` (wire version 2): content key wrapped under the sphere's
+  epoch key, so the sender encrypts once regardless of member count. `sphereId` and `epoch`
+  are covered by the signature and the AEAD associated data, so content cannot be relabelled
+  into another sphere or another epoch.
+- `lib/services/sphere_service.dart` — creation, add, remove, promote, leave; signed
+  `MembershipOp`s; key distribution over the existing pairwise channels; content sealing and
+  opening with a membership check on the author.
+- **Removal is now cryptographic.** Every membership change bumps the epoch and mints a new
+  key that is wrapped only for the remaining members. A removed member keeps what they
+  already had and gets nothing further. This replaces a local `blocked` boolean.
+- 83 tests pass. The 28 new ones cover the exit property directly: a removed member cannot
+  open post-rotation content, remaining members keep reading across the rotation, and
+  inbound operations are rejected when the author disagrees with the verified sender, when
+  the author is not an admin, when the signature is forged, and when an older epoch is
+  replayed. Content from a non-member is refused even when validly signed and encrypted
+  with the right key.
+
+Remaining — this is the larger half:
+
+- **UI.** Nothing in the app creates or shows a sphere yet. Needs a sphere list, creation and
+  invite flows, a member management screen, and a composer that targets a sphere.
+- **Migration** from groups, rings, albums and contacts into spheres, with the old models
+  deleted rather than adapted: `PostAudience`, `Ring`, `Contact.closeFriend`.
+- **Feed as the union over spheres**, replacing the current per-contact fan-out, and
+  `FeedService`/`AlbumService` sealing their content (they still send plaintext).
+- **Direct messages as spheres of two**, which is what finally retires the parallel chat path.
+- **Invite acceptance.** A create operation is currently applied on receipt if we are named
+  in it; there is no explicit accept step, so anyone you have a session with can add you to
+  a sphere. That needs a pending state and user consent before joining.
+
 ### Phase 4 — Feature parity inside spheres *(4–6 weeks)*
 
 - Comments and reactions: persisted, broadcast, signed (comments currently vanish on restart and
