@@ -530,16 +530,36 @@ to be a member of the sphere, and the payload's `authorId`/`sphereId` must agree
 signed envelope — `author_id` was previously a field the sender could set to anything.
 Likes and reactions go only to the sphere the post belongs to, rather than to every contact.
 
-Remaining:
+**Phase 3 is complete.**
 
-- **Feed as the union over spheres** — the feed still merges whatever arrives rather than
-  reading per sphere.
-- **Direct messages as spheres of two**, which retires the parallel chat path.
-- **Albums** are still their own thing rather than content inside a sphere, and still send
-  plaintext.
-- ~~`call_service` placeholder cipher~~ — done; `crypto_service.dart` is deleted and the
-  app has no unauthenticated cipher left.
-- `Contact.closeFriend` still exists on the model, unused.
+- The feed is the union over spheres: `posts` and stories are filtered to spheres we are
+  still a member of, and to authors who are still members. Content whose sphere we left
+  disappears from the feed instead of lingering because it happens to be in local storage.
+  `postsIn(sphereId)` gives the per-sphere view.
+- Direct messages are spheres of two, derived deterministically from the two identity keys
+  (`SphereService.directSphereWith`). No invitation, no key distribution, and the two
+  devices cannot disagree about what the sphere is. DMs deliberately keep the ratcheted
+  pairwise transport rather than a shared sphere key — the ratchet gives forward secrecy
+  that a sphere key cannot, so the sphere here is the membership and presentation model,
+  not the transport.
+- Albums belong to a sphere and their contributions are sealed to it. Album membership,
+  which was a third parallel notion of "who can see this", is gone. Album items also now
+  carry the image rather than a local filesystem path, which was a dead reference on
+  anyone else's device — "shared" albums never actually shared anything.
+- `Contact.closeFriend` and `toggleCloseFriend` deleted.
+- 102 tests pass.
+
+**Nothing in the app now sends plaintext, and there is no unauthenticated cipher left:
+`crypto_service.dart` is deleted.**
+
+Carried into later phases:
+
+- Album item ingestion rides the feed channels. That works, but it is another sign the
+  seven `RelayService` instances should become one multiplexed connection (Phase 2's
+  remaining item).
+- Group calls are still broken — invites cannot be accepted (Phase 4).
+- Chat still has its own conversation store rather than reading through the DM sphere. The
+  model is unified; the storage is not.
 
 ### Phase 4 — Feature parity inside spheres *(4–6 weeks)*
 

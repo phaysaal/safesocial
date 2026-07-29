@@ -233,15 +233,6 @@ class ContactService extends ChangeNotifier {
     }
   }
 
-  Future<void> toggleCloseFriend(String publicKey) async {
-    final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
-    if (index != -1) {
-      _contacts[index] = _contacts[index].copyWith(closeFriend: !_contacts[index].closeFriend);
-      await _persistContacts();
-      notifyListeners();
-    }
-  }
-
   void _updateContactInfo(String publicKey, String name, {required bool isPending}) {
     final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
     if (index != -1) {

@@ -25,8 +25,31 @@ class FeedService extends ChangeNotifier {
   String? _myPublicKey;
   List<Contact> _contacts = [];
 
-  List<Post> get posts =>
-      _posts.where((p) => !_hiddenPostIds.contains(p.id) && !p.isStory).toList();
+  /// The home feed: the union of posts across the spheres you belong to.
+  ///
+  /// A post whose sphere we are not in is not shown even if it reached this
+  /// device — after leaving a sphere its content disappears from the feed
+  /// rather than lingering because it happens to be in local storage. The
+  /// feed used to display whatever arrived, with no scoping at all.
+  List<Post> get posts => _visible(_posts.where((p) => !p.isStory));
+
+  /// Posts limited to one sphere.
+  List<Post> postsIn(String sphereId) =>
+      _visible(_posts.where((p) => !p.isStory && p.sphereId == sphereId));
+
+  List<Post> _visible(Iterable<Post> source) {
+    final spheres = _spheres;
+    return source.where((p) {
+      if (_hiddenPostIds.contains(p.id)) return false;
+      if (spheres == null) return false;
+      final sphere = spheres.sphere(p.sphereId);
+      if (sphere == null) return false;
+      // Only show authors who are still members. A former member's old posts
+      // stay readable to those who were there, but do not keep appearing as if
+      // they were still in the sphere.
+      return sphere.contains(p.authorId);
+    }).toList();
+  }
 
   /// Returns posts from previous years on the same month and day.
   List<Post> get memories {
@@ -42,11 +65,9 @@ class FeedService extends ChangeNotifier {
   /// Returns unexpired stories grouped by authorId
   Map<String, List<Post>> get storiesByAuthor {
     final now = DateTime.now();
-    final activeStories = _posts.where((p) => 
-      p.isStory && 
-      !_hiddenPostIds.contains(p.id) && 
-      (p.expiresAt == null || p.expiresAt!.isAfter(now))
-    ).toList();
+    // Sphere-scoped like the rest of the feed.
+    final activeStories = _visible(_posts.where((p) =>
+        p.isStory && (p.expiresAt == null || p.expiresAt!.isAfter(now))));
 
     final map = <String, List<Post>>{};
     for (var story in activeStories) {
@@ -63,6 +84,9 @@ class FeedService extends ChangeNotifier {
   SessionManager? _sessions;
   SphereService? _spheres;
   String? Function(String identityKey)? _resolveExchangeKey;
+
+  /// Receives sealed `album_add` envelopes that arrive on the feed channels.
+  Future<void> Function(String sealed)? onAlbumItem;
 
   /// Supply the crypto context so feed channels get pairwise addresses and
   /// content can be sealed to a sphere.
@@ -242,6 +266,12 @@ class FeedService extends ChangeNotifier {
       final opened = await spheres.openContent(data);
       final authorId = opened.from;
       final json = jsonDecode(opened.plaintext);
+
+      if (json['type'] == 'album_add') {
+        // Album items ride the same per-member channels as feed content.
+        await onAlbumItem?.call(data);
+        return;
+      }
 
       if (json['type'] == 'post') {
         final post = await _decodePostMedia(Post.fromJson(json['post']));

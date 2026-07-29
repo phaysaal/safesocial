@@ -1,6 +1,10 @@
 import 'package:equatable/equatable.dart';
 
 /// A collaborative collection of media items.
+/// A shared photo album.
+///
+/// Membership is the sphere's — an album no longer keeps its own member list,
+/// which was a third parallel notion of "who can see this".
 class Album with EquatableMixin {
   final String dhtKey;
   final String name;
@@ -8,7 +12,8 @@ class Album with EquatableMixin {
   final String createdBy;
   final DateTime createdAt;
   final List<AlbumItem> items;
-  final List<String> memberPublicKeys;
+  /// The sphere this album belongs to.
+  final String sphereId;
 
   const Album({
     required this.dhtKey,
@@ -17,7 +22,7 @@ class Album with EquatableMixin {
     required this.createdBy,
     required this.createdAt,
     this.items = const [],
-    this.memberPublicKeys = const [],
+    required this.sphereId,
   });
 
   factory Album.fromJson(Map<String, dynamic> json) {
@@ -31,10 +36,7 @@ class Album with EquatableMixin {
               ?.map((e) => AlbumItem.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
-      memberPublicKeys: (json['memberPublicKeys'] as List<dynamic>?)
-              ?.map((e) => e as String)
-              .toList() ??
-          [],
+      sphereId: json['sphereId'] as String? ?? '',
     );
   }
 
@@ -46,7 +48,7 @@ class Album with EquatableMixin {
       'createdBy': createdBy,
       'createdAt': createdAt.toIso8601String(),
       'items': items.map((e) => e.toJson()).toList(),
-      'memberPublicKeys': memberPublicKeys,
+      'sphereId': sphereId,
     };
   }
 
@@ -54,7 +56,7 @@ class Album with EquatableMixin {
     String? name,
     String? description,
     List<AlbumItem>? items,
-    List<String>? memberPublicKeys,
+    String? sphereId,
   }) {
     return Album(
       dhtKey: dhtKey,
@@ -63,13 +65,13 @@ class Album with EquatableMixin {
       createdBy: createdBy,
       createdAt: createdAt,
       items: items ?? this.items,
-      memberPublicKeys: memberPublicKeys ?? this.memberPublicKeys,
+      sphereId: sphereId ?? this.sphereId,
     );
   }
 
   @override
   List<Object?> get props =>
-      [dhtKey, name, description, createdBy, createdAt, items, memberPublicKeys];
+      [dhtKey, name, description, createdBy, createdAt, items, sphereId];
 }
 
 /// A single media item (photo/video) within an album.
@@ -107,6 +109,14 @@ class AlbumItem with EquatableMixin {
       'addedAt': addedAt.toIso8601String(),
     };
   }
+
+  AlbumItem copyWith({String? mediaRef}) => AlbumItem(
+        id: id,
+        authorId: authorId,
+        mediaRef: mediaRef ?? this.mediaRef,
+        type: type,
+        addedAt: addedAt,
+      );
 
   @override
   List<Object?> get props => [id, authorId, mediaRef, type, addedAt];

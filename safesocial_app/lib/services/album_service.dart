@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../crypto/mailbox.dart';
 import '../models/album.dart';
 import 'debug_log_service.dart';
-import '../crypto/mailbox.dart';
+import 'media_service.dart';
 import 'relay_service.dart';
+import 'sphere_service.dart';
 
 /// Manages collaborative shared photo albums.
 class AlbumService extends ChangeNotifier {
@@ -15,6 +17,19 @@ class AlbumService extends ChangeNotifier {
   final List<Album> _albums = [];
   final RelayService _albumRelay = RelayService();
   String? _myPublicKey;
+  SphereService? _spheres;
+
+  /// Supply the sphere context so album contents can be sealed.
+  void attachSpheres(SphereService spheres) => _spheres = spheres;
+
+  /// Handle a sealed album item delivered over the feed channels.
+  Future<void> handleSealedItem(String sealed) async =>
+      _handleIncomingContribution('feed', sealed);
+
+  /// Albums whose sphere we are still a member of.
+  List<Album> get visibleAlbums => _albums
+      .where((a) => _spheres?.sphere(a.sphereId) != null)
+      .toList(growable: false);
 
   List<Album> get albums => List.unmodifiable(_albums);
 
@@ -29,13 +44,12 @@ class AlbumService extends ChangeNotifier {
 
   void initSync(String myPublicKey, String mySecretKey) {
     _myPublicKey = myPublicKey;
-    _albumRelay.onMessageReceived = (albumKey, data) {
-      _handleIncomingContribution(albumKey, data);
+    _albumRelay.onMessageReceived = (channelKey, data) {
+      _handleIncomingContribution(channelKey, data);
     };
 
-    for (final album in _albums) {
-      _connectAlbumMailbox(album.dhtKey);
-    }
+    // Album traffic rides the same per-member channels the feed uses; there is
+    // no separate album room any more.
   }
 
   Future<void> loadAlbums() async {
@@ -53,14 +67,15 @@ class AlbumService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> createAlbum(String name, String description) async {
+  Future<void> createAlbum(
+      String name, String description, String sphereId) async {
     final album = Album(
       dhtKey: const Uuid().v4(),
       name: name,
       description: description,
       createdBy: _myPublicKey ?? 'self',
       createdAt: DateTime.now(),
-      memberPublicKeys: [_myPublicKey ?? 'self'],
+      sphereId: sphereId,
     );
 
     _albums.add(album);
@@ -83,43 +98,92 @@ class AlbumService extends ChangeNotifier {
       addedAt: DateTime.now(),
     );
 
-    _albums[index] = _albums[index].copyWith(
+    final album = _albums[index].copyWith(
       items: [..._albums[index].items, item],
     );
-    
+    _albums[index] = album;
+
     await _persist();
     notifyListeners();
 
-    // Broadcast contribution to members
-    final payload = jsonEncode({
-      'type': 'album_add',
-      'album_id': dhtKey,
-      'item': item.toJson(),
-    });
-    _albumRelay.sendViaRelay('alb:$dhtKey', payload);
+    final spheres = _spheres;
+    final sphere = spheres?.sphere(album.sphereId);
+    if (spheres == null || sphere == null) {
+      DebugLogService()
+          .warn('Media', 'Album "${album.name}" has no sphere; not shared');
+      return;
+    }
+
+    // Send the image itself, not a path. Album items used to carry a local
+    // filesystem path, which is a dead reference on anyone else's device — so
+    // "shared" albums never actually shared anything.
+    final encoded = await MediaService.encodeImageForRelay(mediaRef);
+    final shared = encoded == null ? item : item.copyWith(mediaRef: encoded);
+
+    final String sealed;
+    try {
+      sealed = await spheres.sealContent(
+        sphereId: album.sphereId,
+        type: 'album_add',
+        plaintext: jsonEncode({
+          'type': 'album_add',
+          'album_id': dhtKey,
+          'item': shared.toJson(),
+        }),
+      );
+    } catch (e) {
+      DebugLogService().error('Media', 'Could not seal album item: $e');
+      return;
+    }
+
+    for (final member in sphere.members.map((m) => m.identityKey)) {
+      if (member == _myPublicKey) continue;
+      _albumRelay.sendViaRelay(member, sealed);
+    }
   }
 
-  void _handleIncomingContribution(String albumKey, String data) {
+  Future<void> _handleIncomingContribution(String channelKey, String data) async {
+    final spheres = _spheres;
+    if (spheres == null) return;
+
     try {
-      final json = jsonDecode(data);
-      if (json['type'] == 'album_add') {
-        final albumId = json['album_id'];
-        final item = AlbumItem.fromJson(json['item']);
-        
-        final index = _albums.indexWhere((a) => a.dhtKey == albumId);
-        if (index != -1) {
-          if (!_albums[index].items.any((i) => i.id == item.id)) {
-            _albums[index] = _albums[index].copyWith(
-              items: [..._albums[index].items, item]..sort((a, b) => b.addedAt.compareTo(a.addedAt)),
-            );
-            _persist();
-            notifyListeners();
-            DebugLogService().success('Media', 'New photo added to "${_albums[index].name}"');
-          }
-        }
+      final opened = await spheres.openContent(data);
+      final json = jsonDecode(opened.plaintext);
+      if (json['type'] != 'album_add') return;
+
+      final albumId = json['album_id'];
+      var item = AlbumItem.fromJson(json['item']);
+
+      final index = _albums.indexWhere((a) => a.dhtKey == albumId);
+      if (index == -1) return;
+
+      // The album must belong to the sphere the content was sealed to, or a
+      // member of one sphere could inject items into an unrelated album.
+      if (_albums[index].sphereId != opened.sphereId) {
+        DebugLogService()
+            .warn('Media', 'Album item sealed to the wrong sphere; dropped');
+        return;
       }
+      if (item.authorId != opened.from) {
+        DebugLogService()
+            .warn('Media', 'Album item author disagrees with signature');
+        return;
+      }
+      if (_albums[index].items.any((i) => i.id == item.id)) return;
+
+      final saved = await MediaService.decodeAndSaveImage(item.mediaRef);
+      if (saved != null) item = item.copyWith(mediaRef: saved);
+
+      _albums[index] = _albums[index].copyWith(
+        items: [..._albums[index].items, item]
+          ..sort((a, b) => b.addedAt.compareTo(a.addedAt)),
+      );
+      await _persist();
+      notifyListeners();
+      DebugLogService()
+          .success('Media', 'New photo in "${_albums[index].name}"');
     } catch (e) {
-      debugPrint('[AlbumService] Contribution error: $e');
+      DebugLogService().warn('Media', 'Rejected album item: $e');
     }
   }
 

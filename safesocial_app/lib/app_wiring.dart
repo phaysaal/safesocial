@@ -91,6 +91,8 @@ Future<void> wireIdentity({
     contactService.exchangeKeyFor,
     spheres: sphereService,
   );
+  albumService.attachSpheres(sphereService);
+  feedService.onAlbumItem = albumService.handleSealedItem;
 
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../models/sphere.dart';
 import '../../services/album_service.dart';
+import '../../services/sphere_service.dart';
 
 /// Screen displaying all shared photo albums.
 class AlbumListScreen extends StatelessWidget {
@@ -62,9 +64,25 @@ class AlbumListScreen extends StatelessWidget {
   void _showCreateAlbumDialog(BuildContext context, AlbumService service) {
     final nameController = TextEditingController();
     final descController = TextEditingController();
+    final spheres = context.read<SphereService>().writable;
+
+    if (spheres.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Albums live inside a sphere. Create a sphere first, then an album in it.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    Sphere selectedSphere = spheres.first;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
         title: const Text('Create Shared Album'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -81,6 +99,19 @@ class AlbumListScreen extends StatelessWidget {
               decoration: const InputDecoration(labelText: 'Description (optional)'),
               textCapitalization: TextCapitalization.sentences,
             ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: selectedSphere.id,
+              decoration: const InputDecoration(labelText: 'Sphere'),
+              items: spheres
+                  .map((s) => DropdownMenuItem(value: s.id, child: Text(s.name)))
+                  .toList(),
+              onChanged: (id) {
+                if (id == null) return;
+                setDialogState(() => selectedSphere =
+                    spheres.firstWhere((s) => s.id == id));
+              },
+            ),
           ],
         ),
         actions: [
@@ -89,13 +120,15 @@ class AlbumListScreen extends StatelessWidget {
             onPressed: () {
               final name = nameController.text.trim();
               if (name.isNotEmpty) {
-                service.createAlbum(name, descController.text.trim());
+                service.createAlbum(
+                    name, descController.text.trim(), selectedSphere.id);
               }
               Navigator.pop(ctx);
             },
             child: const Text('Create'),
           ),
         ],
+        ),
       ),
     );
   }

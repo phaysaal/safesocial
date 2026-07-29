@@ -19,7 +19,6 @@ class Contact with EquatableMixin {
   final bool blocked;
   final bool muted;
   final bool following;
-  final bool closeFriend;
   final bool isPending;
   final String? feedDhtKey;
 
@@ -32,7 +31,6 @@ class Contact with EquatableMixin {
     this.blocked = false,
     this.muted = false,
     this.following = true,
-    this.closeFriend = false,
     this.isPending = false,
     this.feedDhtKey,
   });
@@ -47,7 +45,6 @@ class Contact with EquatableMixin {
       blocked: json['blocked'] as bool? ?? false,
       muted: json['muted'] as bool? ?? false,
       following: json['following'] as bool? ?? true,
-      closeFriend: json['closeFriend'] as bool? ?? false,
       isPending: json['isPending'] as bool? ?? false,
       feedDhtKey: json['feedDhtKey'] as String?,
     );
@@ -63,7 +60,6 @@ class Contact with EquatableMixin {
       'blocked': blocked,
       'muted': muted,
       'following': following,
-      'closeFriend': closeFriend,
       'isPending': isPending,
       'feedDhtKey': feedDhtKey,
     };
@@ -78,7 +74,6 @@ class Contact with EquatableMixin {
     bool? blocked,
     bool? muted,
     bool? following,
-    bool? closeFriend,
     bool? isPending,
     String? feedDhtKey,
   }) {
@@ -91,7 +86,6 @@ class Contact with EquatableMixin {
       blocked: blocked ?? this.blocked,
       muted: muted ?? this.muted,
       following: following ?? this.following,
-      closeFriend: closeFriend ?? this.closeFriend,
       isPending: isPending ?? this.isPending,
       feedDhtKey: feedDhtKey ?? this.feedDhtKey,
     );
@@ -107,7 +101,6 @@ class Contact with EquatableMixin {
         blocked,
         muted,
         following,
-        closeFriend,
         isPending,
         feedDhtKey,
       ];

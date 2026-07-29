@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:convert/convert.dart';
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -238,6 +239,54 @@ class SphereService extends ChangeNotifier {
   bool get isReady => _sessions != null && _myIdentityKey != null;
 
   // ── Creation and membership ────────────────────────────────────────────────
+
+  /// The sphere representing a one-to-one conversation.
+  ///
+  /// Derived deterministically from the two identity keys rather than created
+  /// and negotiated: both sides compute the same id and the same two-member
+  /// list without exchanging anything, so a DM needs no invitation and cannot
+  /// drift out of sync.
+  ///
+  /// It carries no sphere key. Direct messages keep the ratcheted pairwise
+  /// path, which gives forward secrecy that a shared sphere key cannot — the
+  /// sphere here is the membership and presentation model, not the transport.
+  Sphere directSphereWith(String peerIdentityKey) {
+    _requireReady();
+    final me = _myIdentityKey!;
+    final ordered = [me, peerIdentityKey]..sort();
+    final id = hex.encode(
+      Uint8List.fromList(
+        sha256.convert(utf8.encode('spheres-direct-v1:${ordered.join(':')}')).bytes,
+      ),
+    );
+
+    final joinedAt = DateTime.fromMillisecondsSinceEpoch(0);
+    return Sphere(
+      id: id,
+      name: 'Direct message',
+      kind: SphereKind.direct,
+      createdBy: ordered.first,
+      createdAt: joinedAt,
+      epoch: 1,
+      members: ordered
+          .map((k) => SphereMember(
+                identityKey: k,
+                role: SphereRole.admin,
+                joinedAt: joinedAt,
+                invitedBy: k,
+              ))
+          .toList(),
+    );
+  }
+
+  /// True when [sphereId] is the derived DM sphere for some contact.
+  bool isDirectSphere(String sphereId, List<String> contactKeys) {
+    if (!isReady) return false;
+    for (final contact in contactKeys) {
+      if (directSphereWith(contact).id == sphereId) return true;
+    }
+    return false;
+  }
 
   /// Create a sphere with us as the first admin.
   Future<Sphere> create({
