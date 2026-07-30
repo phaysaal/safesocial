@@ -11,6 +11,7 @@ import '../../app_info.dart';
 import '../../services/contact_service.dart';
 import '../../services/call_config.dart';
 import '../../services/relay_config.dart';
+import '../../services/sync_service.dart';
 import '../../services/backup_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
@@ -94,10 +95,10 @@ class SettingsScreen extends StatelessWidget {
           const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.warning_amber_outlined, color: cs.error),
-            title: const Text('Shared Albums'),
+            title: const Text('Multiple Devices'),
             subtitle: const Text(
-              'Album contents are still sent unencrypted. Do not put anything '
-              'sensitive in an album.',
+              'Linking copies your identity to another device. Using both at '
+              'once is not supported yet — messages can arrive out of order.',
             ),
             isThreeLine: true,
             trailing: Icon(Icons.error_outline, color: cs.error, size: 20),
@@ -106,11 +107,18 @@ class SettingsScreen extends StatelessWidget {
 
           // ── Identity ──────────────────────────────────
           _SectionHeader(title: 'Identity & Multi-Device'),
-          const _UnavailableTile(
-            icon: Icons.devices,
-            title: 'Link New Device',
-            reason: 'Device linking never completed — the two devices join '
-                'different relay rooms. Disabled until rebuilt.',
+          ListTile(
+            leading: Icon(Icons.devices, color: cs.primary),
+            title: const Text('Link Another Device'),
+            subtitle: const Text('Copy this identity to a second device'),
+            onTap: () => _showLinkDeviceDialog(context, context.read<SyncService>()),
+          ),
+          const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.qr_code_scanner, color: cs.primary),
+            title: const Text('Clone From Another Device'),
+            subtitle: const Text('Enter a pairing code from your first device'),
+            onTap: () => _showCloneDialog(context, context.read<SyncService>()),
           ),
           const Divider(indent: 56),
           ListTile(
@@ -323,6 +331,102 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Show a pairing code the other device can use.
+  ///
+  /// The identity travels as a vault keyed by this code, which is shown on
+  /// screen and never sent over the relay — so the relay carries only
+  /// ciphertext it has no key for.
+  Future<void> _showLinkDeviceDialog(
+      BuildContext context, SyncService sync) async {
+    final code = sync.startPrimaryLinking();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Link Another Device'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Enter this code on the other device. It is the key to your '
+                'identity while linking, so read it out or show the screen — '
+                'do not send it through a chat app.',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                code,
+                style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 12, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Both devices will share one identity. Using them at the same '
+                'time is not supported yet — messages can arrive out of order '
+                'or fail to decrypt. Treat this as moving to a new device, not '
+                'running two.',
+                style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              sync.stopLinking();
+              Navigator.pop(ctx);
+            },
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCloneDialog(BuildContext context, SyncService sync) async {
+    final controller = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clone From Another Device'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter the pairing code shown on your first device. This '
+              'replaces any identity already on this device.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              maxLines: 3,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'Pairing code'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Clone'),
+          ),
+        ],
+      ),
+    );
+
+    if (code == null || code.isEmpty) return;
+    await sync.startSecondaryLinking(code);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Waiting for the other device… keep both apps open.'),
+    ));
   }
 
   Future<void> _showExportDialog(
@@ -806,10 +910,11 @@ class _PreAlphaBanner extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Pre-alpha build. Messages, posts and calls are now genuinely '
-              'encrypted, but this has never been independently audited, data '
-              'on this device is stored unencrypted, and albums are not yet '
-              'protected. Do not rely on it if being read would put you at risk.',
+              'Pre-alpha build. Messages, posts, albums and calls are '
+              'encrypted, and backups and recovery work — but none of this has '
+              'been independently audited, and data on this device is stored '
+              'unencrypted. Do not rely on it if being read would put you at '
+              'risk.',
               style: TextStyle(color: cs.onErrorContainer, fontSize: 12, height: 1.4),
             ),
           ),
@@ -819,52 +924,3 @@ class _PreAlphaBanner extends StatelessWidget {
   }
 }
 
-/// A feature that has been deliberately disabled, with the reason shown.
-///
-/// These features previously reported success while doing nothing, which is
-/// worse than being absent — users relied on them.
-class _UnavailableTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String reason;
-
-  const _UnavailableTile({
-    required this.icon,
-    required this.title,
-    required this.reason,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final disabled = cs.onSurface.withValues(alpha: 0.38);
-    return ListTile(
-      enabled: false,
-      leading: Icon(icon, color: disabled),
-      title: Row(
-        children: [
-          Flexible(child: Text(title, style: TextStyle(color: disabled))),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              'UNAVAILABLE',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ],
-      ),
-      subtitle: Text(reason, style: TextStyle(color: disabled, fontSize: 12)),
-      isThreeLine: true,
-    );
-  }
-}

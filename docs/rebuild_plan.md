@@ -644,7 +644,21 @@ Remaining in Phase 4:
 ### Phase 5 — Decentralisation and recovery *(4–6 weeks)*
 
 - Multi-relay support, user-configurable relay, published self-host image.
-- Multi-device via device certificates signed by the identity key, with per-device encryption.
+- **Multi-device — partially done, and deliberately so.** Device linking works: the primary
+  shows a pairing code, the identity travels as a vault keyed by that code (so the relay
+  carries only ciphertext it has no key for), and the secondary actually adopts it. That
+  covers *moving* to a new device, which is what most people need.
+  What is **not** done is running two devices at once. Both would share one identity and one
+  set of ratchet chains, so they would advance the same chain independently and reuse
+  message keys — messages arriving out of order or failing to decrypt. Doing it properly
+  needs per-device keypairs with certificates signed by the identity key, sessions keyed by
+  (contact, device) rather than contact, and fan-out to every device. That reaches into the
+  working message path, so it was not attempted in a pass that cannot be tested on real
+  devices. The limitation is stated in the linking dialog and in settings rather than left
+  for a user to discover.
+- Ratchet state is deliberately excluded from backups: restoring it onto a device that is
+  still running would let two devices advance the same chain. Sessions re-derive; only
+  ordering is lost.
 - ~~Social recovery~~ — done. Shamir over GF(256) in Dart (`lib/crypto/shamir.dart`), with a
   threshold of 1 refused outright, duplicate and mismatched shards rejected instead of
   panicking, and — the load-bearing part — the reconstruction verified against the identity's

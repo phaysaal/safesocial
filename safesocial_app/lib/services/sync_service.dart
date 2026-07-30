@@ -8,18 +8,11 @@ import '../crypto/mailbox.dart';
 import 'debug_log_service.dart';
 import 'identity_service.dart';
 import 'relay_service.dart';
-import 'rust_core_service.dart';
 
 /// Manages multi-device synchronization and secure identity cloning.
 class SyncService extends ChangeNotifier {
-  final RustCoreService _rustCore = RustCoreService();
   final RelayService _syncRelay = RelayService();
   
-  // Held but never read: a received identity is passed to the (non-functional)
-  // Rust core and never written back through IdentityService, so linking could
-  // not have persisted anything even if the relay handshake had worked. The UI
-  // entry points are disabled; rebuilding this is Phase 5 of docs/rebuild_plan.md.
-  // ignore: unused_field
   IdentityService? _identityService;
 
   bool _isLinking = false;
@@ -93,22 +86,27 @@ class SyncService extends ChangeNotifier {
   void _handlePrimaryHandshake(String data, String secretB64) async {
     try {
       final json = jsonDecode(data);
-      if (json['type'] == 'link_request') {
-        DebugLogService().success('Sync', 'Link request received from ${json['device_name']}');
-        
-        // Export identity wrapped with the session secret
-        final wrappedIdentity = _rustCore.exportIdentity(secretB64);
-        if (wrappedIdentity != null) {
-          final response = jsonEncode({
-            'type': 'identity_transfer',
-            'data': wrappedIdentity,
-          });
-          await _syncRelay.sendViaRelay(_pairingChannel, response);
-          DebugLogService().success('Sync', 'Encrypted identity transferred to new device');
-        }
-      }
+      if (json['type'] != 'link_request') return;
+
+      DebugLogService()
+          .success('Sync', 'Link request from ${json['device_name']}');
+
+      final identity = _identityService;
+      if (identity == null) return;
+
+      // The identity travels as a vault keyed by the pairing secret, which was
+      // shown as a QR code and never sent over the relay. The relay therefore
+      // carries only ciphertext it has no key for. This previously called a
+      // Rust stub that returned null, so nothing was ever transferred.
+      final vault = await identity.exportIdentity(secretB64);
+
+      await _syncRelay.sendViaRelay(
+        _pairingChannel,
+        jsonEncode({'type': 'identity_transfer', 'data': vault}),
+      );
+      DebugLogService().success('Sync', 'Identity sent to the new device');
     } catch (e) {
-      DebugLogService().error('Sync', 'Handshake error: $e');
+      DebugLogService().error('Sync', 'Could not send identity: $e');
     }
   }
 
@@ -116,15 +114,24 @@ class SyncService extends ChangeNotifier {
     try {
       final json = jsonDecode(data);
       if (json['type'] == 'identity_transfer') {
-        DebugLogService().success('Sync', 'Encrypted identity received');
-        
-        // Import identity into Rust core and local storage
-        _rustCore.importIdentity(json['data'], secretB64);
-        
-        // Finalize
-        _isLinking = false;
+        final identity = _identityService;
+        if (identity == null) return;
+
+        // Actually adopt it. The old path handed the blob to the Rust core and
+        // never wrote it back through IdentityService, so even a successful
+        // transfer left the device with no identity.
+        final ok = await identity.importIdentity(
+          json['data'] as String,
+          passphrase: secretB64,
+        );
+        if (!ok) {
+          DebugLogService()
+              .error('Sync', 'Transferred identity could not be applied');
+          return;
+        }
+        DebugLogService().success('Sync', 'Identity cloned to this device');
+
         notifyListeners();
-        DebugLogService().success('Sync', 'Identity successfully cloned!');
       }
     } catch (e) {
       DebugLogService().error('Sync', 'Handshake error: $e');

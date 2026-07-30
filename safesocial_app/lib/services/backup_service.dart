@@ -21,7 +21,33 @@ class BackupService extends ChangeNotifier {
   final _secureStorage = const FlutterSecureStorage();
 
   /// Current backup payload format version.
-  static const int formatVersion = 2;
+  ///
+  /// 3 added spheres, sphere keys, conversations and messages. Version 2 files
+  /// still restore — they simply carry less.
+  static const int formatVersion = 3;
+
+  /// Preference keys copied verbatim into a backup.
+  ///
+  /// Sphere keys are the critical addition: unlike sessions, they cannot be
+  /// re-derived. Losing them makes every post in that sphere permanently
+  /// unreadable, so a backup without them was not really a backup.
+  static const List<String> _backedUpKeys = [
+    'spheres_identity_profile',
+    'spheres_contacts',
+    'spheres_feed_posts',
+    'spheres_hidden_posts',
+    'spheres_spheres_v1',
+    'spheres_keyring_v1',
+    'spheres_invites_v1',
+    'spheres_albums',
+    'spheres_conversations',
+  ];
+
+  /// Ratchet state is deliberately NOT backed up. Restoring it onto a device
+  /// that is also still running would let two devices advance the same chain,
+  /// reusing message keys. Sessions re-derive from the identity key anyway;
+  /// only ordering is lost, which the receiver tolerates.
+  static const String _excludedSessionKey = 'spheres_sessions_v1';
 
   /// Create a full backup bundle.
   ///
@@ -31,25 +57,43 @@ class BackupService extends ChangeNotifier {
   Future<String> createBackup({String? passphrase}) async {
     final prefs = await SharedPreferences.getInstance();
 
-    // 1. Collect all essential data
-    final profile = prefs.getString('spheres_identity_profile');
     final pubKey = prefs.getString('spheres_identity_pubkey');
     final secretKey = await _secureStorage.read(key: 'spheres_identity_secret');
-    final contacts = prefs.getString('spheres_contacts');
-    final posts = prefs.getString('spheres_feed_posts');
+    final exchangeSecret =
+        await _secureStorage.read(key: 'spheres_identity_x25519_secret');
 
     if (pubKey == null || secretKey == null) {
       throw Exception('No identity on this device — nothing to back up');
     }
 
+    // Everything under the backed-up keys, plus every conversation's messages.
+    final store = <String, String>{};
+    for (final key in _backedUpKeys) {
+      final value = prefs.getString(key);
+      if (value != null) store[key] = value;
+    }
+    for (final key in prefs.getKeys()) {
+      if (key.startsWith('spheres_msgs_')) {
+        final value = prefs.getString(key);
+        if (value != null) store[key] = value;
+      }
+    }
+
+    final profile = prefs.getString('spheres_identity_profile');
+    final contacts = prefs.getString('spheres_contacts');
+    final posts = prefs.getString('spheres_feed_posts');
+
     final payload = {
+      // Kept flat for compatibility with version 2 readers.
       'identity': profile != null ? jsonDecode(profile) : null,
       'keypair': {
         'key': pubKey,
         'secret': secretKey,
+        if (exchangeSecret != null) 'exchangeSecret': exchangeSecret,
       },
       'contacts': contacts != null ? jsonDecode(contacts) : [],
       'posts': posts != null ? jsonDecode(posts) : [],
+      'store': store,
       'version': formatVersion,
       'encrypted': false,
       'exported_at': DateTime.now().toIso8601String(),
@@ -155,17 +199,43 @@ class BackupService extends ChangeNotifier {
     if (data['identity'] != null) {
       await prefs.setString('spheres_identity_profile', jsonEncode(data['identity']));
     }
+
     await prefs.setString('spheres_identity_pubkey', keypair['key'] as String);
     await _secureStorage.write(
       key: 'spheres_identity_secret',
       value: keypair['secret'] as String,
     );
 
-    if (data['contacts'] != null) {
-      await prefs.setString('spheres_contacts', jsonEncode(data['contacts']));
+    // The X25519 key is restored when present. Without it a new one is
+    // generated on load, which is safe but silently invalidates every existing
+    // pairwise session until contacts pick up the new prekey.
+    final exchangeSecret = keypair['exchangeSecret'];
+    if (exchangeSecret is String && exchangeSecret.isNotEmpty) {
+      await _secureStorage.write(
+        key: 'spheres_identity_x25519_secret',
+        value: exchangeSecret,
+      );
     }
-    if (data['posts'] != null) {
-      await prefs.setString('spheres_feed_posts', jsonEncode(data['posts']));
+
+    final store = data['store'];
+    if (store is Map) {
+      // Version 3 and later: restore everything verbatim.
+      store.forEach((key, value) {
+        if (key is! String || value is! String) return;
+        if (key == _excludedSessionKey) return;
+        if (!_backedUpKeys.contains(key) && !key.startsWith('spheres_msgs_')) {
+          return; // Never write keys a backup should not be able to set.
+        }
+        prefs.setString(key, value);
+      });
+    } else {
+      // Version 2: only the flat fields existed.
+      if (data['contacts'] != null) {
+        await prefs.setString('spheres_contacts', jsonEncode(data['contacts']));
+      }
+      if (data['posts'] != null) {
+        await prefs.setString('spheres_feed_posts', jsonEncode(data['posts']));
+      }
     }
 
     DebugLogService().success('Backup', 'Data restored successfully');
