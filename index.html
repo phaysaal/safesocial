@@ -222,6 +222,37 @@
       .security-grid { grid-template-columns: 1fr; }
       th, td { padding: 12px 10px; font-size: 12px; }
     }
+    .prealpha-banner {
+      background: #3a1d1d;
+      border: 1px solid #7f2d2d;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 0 auto 36px;
+      max-width: 760px;
+      text-align: left;
+      line-height: 1.6;
+      font-size: 0.95rem;
+    }
+    .prealpha-banner strong { color: #ff9d9d; }
+    .prealpha-banner h3 {
+      margin: 0 0 10px;
+      font-size: 1.05rem;
+      color: #ff9d9d;
+    }
+    .prealpha-banner a { color: #ffc9c9; }
+    .wip-tag {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: #7f2d2d;
+      color: #ffd9d9;
+      vertical-align: middle;
+      margin-left: 6px;
+    }
   </style>
 </head>
 <body>
@@ -242,9 +273,20 @@
 
   <section class="hero">
     <div class="container">
+      <div class="prealpha-banner">
+        <h3>⚠️ Pre-alpha — not private yet</h3>
+        <p><strong>This is an early prototype, published so the work can be followed in the
+        open.</strong> Messages, posts and calls are now genuinely encrypted and the relay
+        cannot see who talks to whom — but none of it has been independently audited or
+        tested on real devices end to end, data on your device is stored unencrypted, and
+        shared albums are not yet protected. Do not rely on it if being read would put you
+        at risk.</p>
+        <p>The roadmap for fixing this is public: see
+        <a href="https://github.com/phaysaal/spheres/blob/main/docs/rebuild_plan.md">docs/rebuild_plan.md</a>.</p>
+      </div>
       <h1>Your circle. Your peace.<br><span>Your privacy.</span></h1>
-      <p>Spheres v0.4.7 — A social network built for calm, meaningful connections. No rage-bait algorithms, no ads harvesting your attention, no strangers in your feed. Just the people you actually trust.</p>
-      <a href="#download" class="btn btn-primary">Download Spheres v0.4.7</a>
+      <p>Spheres v0.5.0 (pre-alpha) — A social network being built for calm, meaningful connections. No rage-bait algorithms, no ads harvesting your attention, no strangers in your feed. Just the people you actually trust.</p>
+      <a href="#download" class="btn btn-primary">Download Spheres v0.5.0</a>
     </div>
   </section>
 
@@ -252,7 +294,7 @@
     <div class="container">
       <div class="section-title">
         <h2>Social media, without the stress</h2>
-        <p>Most social apps are designed to keep you anxious and scrolling. Spheres is designed for peace of mind — your data stays on your device, your feed shows only people you chose.</p>
+        <p>Most social apps are designed to keep you anxious and scrolling. Spheres is designed for peace of mind — your feed shows only people you chose, and there is no public audience anywhere in the product.</p>
       </div>
 
       <div class="comparison-wrapper">
@@ -263,7 +305,7 @@
               <th>Facebook / IG</th>
               <th>WhatsApp</th>
               <th>Session / SimpleX</th>
-              <th class="highlight">Spheres v0.4.7</th>
+              <th class="highlight">Spheres v0.5.0</th>
             </tr>
           </thead>
           <tbody>
@@ -272,14 +314,14 @@
               <td>Company Servers</td>
               <td>Company Servers</td>
               <td>Decentralized Nodes</td>
-              <td class="highlight">Your Device (P2P)</td>
+              <td class="highlight">Your Device + Relay Queue</td>
             </tr>
             <tr>
               <td class="feature-col">Metadata Privacy</td>
               <td class="cross">None (Tracked)</td>
               <td class="cross">Poor (Leaks graph)</td>
               <td class="check">High</td>
-              <td class="highlight check">High (E2E + no plaintext)</td>
+              <td class="highlight check">Relay cannot see the graph</td>
             </tr>
             <tr>
               <td class="feature-col">Phone / Email Req.</td>
@@ -293,7 +335,7 @@
               <td class="cross">❌</td>
               <td class="check">✅</td>
               <td class="check">✅</td>
-              <td class="highlight check">✅ (Ed25519 keys)</td>
+              <td class="highlight check">✅ XChaCha20-Poly1305</td>
             </tr>
             <tr>
               <td class="feature-col">Open Source</td>
@@ -334,28 +376,28 @@
           <div class="security-icon">🔑</div>
           <div>
             <h4>Ed25519 Cryptographic Identity</h4>
-            <p>Your identity is a cryptographic keypair — no username, no password, no email. Only you hold your private key. All messages are signed and encrypted before leaving your device.</p>
+            <p>Your identity is a cryptographic keypair — no username, no password, no email. Only you hold your private key, which is generated on your device and stored in the platform keystore.</p>
           </div>
         </div>
         <div class="security-item">
           <div class="security-icon">☁️</div>
           <div>
-            <h4>Zero-Knowledge Relay</h4>
-            <p>Messages travel through an end-to-end encrypted relay. The relay sees only opaque encrypted blobs — no message content, no social graph, no plaintext metadata.</p>
+            <h4>Blind Relay</h4>
+            <p>Messages travel through a single Cloudflare Worker relay, but its addresses are derived from secrets only the participants share — so the operator cannot work out who is talking to whom, and cannot read content. It does still see timing and approximate message size.</p>
           </div>
         </div>
         <div class="security-item">
           <div class="security-icon">👥</div>
           <div>
-            <h4>Social Identity Recovery</h4>
-            <p>No phone number or email required. Trust your close circle with encrypted fragments of your key via Shamir's Secret Sharing.</p>
+            <h4>Social Identity Recovery <span class="wip-tag">Not implemented</span></h4>
+            <p>The plan: trust your close circle with encrypted fragments of your key via Shamir's Secret Sharing. This is designed but not built — the feature is disabled in the app.</p>
           </div>
         </div>
         <div class="security-item">
           <div class="security-icon">📦</div>
           <div>
-            <h4>Encrypted Vault Backups</h4>
-            <p>Export your entire social network and history into a single, passphrase-secured .spheres file for safe cold storage.</p>
+            <h4>Encrypted Vault Backups <span class="wip-tag">Not implemented</span></h4>
+            <p>The plan: export your network and history into a single passphrase-secured .spheres file. Passphrase encryption is disabled today; backups are written unencrypted and clearly labelled as such in the app.</p>
           </div>
         </div>
         <div class="security-item">
@@ -388,7 +430,7 @@
         <h3>Download Spheres for Android</h3>
         <p style="margin-bottom: 30px;">v0.4.7-alpha &bull; (stealth version) &bull; Open Source</p>
 
-        <a href="https://github.com/phaysaal/safesocial/releases/download/0.4.7/app-arm64-v8a-release.apk" class="btn download-btn">Download APK (v0.4.7 &bull; arm64)</a>
+        <a href="https://github.com/phaysaal/safesocial/releases/download/0.5.0/app-arm64-v8a-release.apk" class="btn download-btn">Download APK (v0.4.7 &bull; arm64)</a>
       </div>
     </div>
   </section>
