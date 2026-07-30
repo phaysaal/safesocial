@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -42,6 +43,16 @@ class ContactService extends ChangeNotifier {
   }
 
   String? _mySecretKey;
+  Timer? _inboxTimer;
+
+  /// Called when a contact becomes usable — i.e. we know their X25519 key and
+  /// can therefore open encrypted channels to them.
+  ///
+  /// Adding a contact used to wire chat and calls at the one call site that
+  /// happened to remember to, and nothing at all when the contact arrived via
+  /// an inbound handshake. So the person who scanned got a working contact and
+  /// the person who was scanned got nothing.
+  void Function(String publicKey)? onContactReady;
 
   /// Drain our handshake inbox.
   ///
@@ -53,6 +64,30 @@ class ContactService extends ChangeNotifier {
   /// Previously the inbound room was joined only while *sending* a handshake,
   /// so an incoming request could not be received unless we happened to have
   /// sent one first in the same session.
+  /// Check the inbox on a timer.
+  ///
+  /// There is no live channel for handshakes — a stranger has no shared secret
+  /// to open one with — so the inbox has to be polled. It was previously read
+  /// exactly once, during startup wiring, which meant a request only arrived
+  /// if the recipient happened to launch the app afterwards. Two people adding
+  /// each other with both apps open, which is the normal case, never worked.
+  void startInboxPolling({Duration interval = const Duration(seconds: 20)}) {
+    _inboxTimer?.cancel();
+    _inboxTimer = Timer.periodic(interval, (_) => listenForHandshakes());
+    listenForHandshakes();
+  }
+
+  void stopInboxPolling() {
+    _inboxTimer?.cancel();
+    _inboxTimer = null;
+  }
+
+  @override
+  void dispose() {
+    stopInboxPolling();
+    super.dispose();
+  }
+
   Future<void> listenForHandshakes() async {
     final publicKey = _myPublicKey;
     final secretKey = _mySecretKey;
@@ -60,7 +95,40 @@ class ContactService extends ChangeNotifier {
 
     final payloads = await _handshakeRelay.syncInbox(publicKey, secretKey);
     for (final payload in payloads) {
-      handleIncomingHandshake(publicKey, payload);
+      await handleIncomingHandshake(publicKey, payload);
+    }
+
+    await _backfillMissingExchangeKeys();
+  }
+
+  /// Fetch prekeys for contacts we cannot yet encrypt to.
+  ///
+  /// A contact added before the other side published its bundle has no
+  /// exchange key, and every send to them fails with NoSessionException —
+  /// which the callers only log. Retrying here is what turns that from
+  /// permanent into temporary.
+  Future<void> _backfillMissingExchangeKeys() async {
+    for (final contact in _contacts.toList()) {
+      if (contact.keyExchangePublicKey != null) continue;
+
+      final prekeyStr = await _handshakeRelay.fetchPrekey(contact.publicKey);
+      if (prekeyStr == null) continue;
+
+      try {
+        final envelope = jsonDecode(prekeyStr) as Map<String, dynamic>;
+        final bundle = envelope['bundle'];
+        if (bundle is Map<String, dynamic> &&
+            _prekeyIsAuthentic(
+                contact.publicKey, bundle, envelope['signature']) &&
+            bundle['keyExchangePublicKey'] is String) {
+          await setExchangeKey(
+              contact.publicKey, bundle['keyExchangePublicKey'] as String);
+          DebugLogService().success(
+              'Contacts', 'Can now encrypt to ${contact.displayName}');
+        }
+      } catch (_) {
+        // Try again on the next tick.
+      }
     }
   }
 
@@ -74,10 +142,15 @@ class ContactService extends ChangeNotifier {
     String finalName = displayName;
     String? exchangeKey = keyExchangePublicKey;
     try {
-      // Only the key bundle is public now. Display name arrives through the
-      // handshake instead — publishing it at an unauthenticated endpoint made
-      // every user's name and bio readable by anyone holding a public key.
-      final prekeyStr = await _handshakeRelay.fetchPrekey(publicKey);
+      // Only fetch when we do not already have the key — a scanned invite and
+      // an inbound handshake both carry it, and the round trip would only add
+      // a way for adding a contact to fail.
+      final prekeyStr = exchangeKey != null
+          ? null
+          // Only the key bundle is public. The display name arrives through
+          // the handshake instead: publishing it at an unauthenticated
+          // endpoint made every user's name readable by anyone with a key.
+          : await _handshakeRelay.fetchPrekey(publicKey);
       if (prekeyStr != null) {
         final envelope = jsonDecode(prekeyStr) as Map<String, dynamic>;
         final bundle = envelope['bundle'];
@@ -106,6 +179,10 @@ class ContactService extends ChangeNotifier {
     await _persistContacts();
     notifyListeners();
 
+    if (contact.keyExchangePublicKey != null) {
+      onContactReady?.call(publicKey);
+    }
+
     // Send handshake via relay so they add us back
     if (_myPublicKey != null && !isPending) {
       _sendHandshake(publicKey, 'contact_request');
@@ -113,7 +190,7 @@ class ContactService extends ChangeNotifier {
   }
 
   /// Handle incoming handshake from another peer.
-  void handleIncomingHandshake(String senderKey, String data) {
+  Future<void> handleIncomingHandshake(String senderKey, String data) async {
     try {
       final json = jsonDecode(data);
       final type = json['type'];
@@ -129,7 +206,7 @@ class ContactService extends ChangeNotifier {
       if (type == 'contact_request') {
         DebugLogService().info('Contacts', 'Incoming contact request from $name');
         // Automatically add them as a pending contact
-        addContact(publicKey, name,
+        await addContact(publicKey, name,
             isPending: true,
             keyExchangePublicKey: exchangeKey is String ? exchangeKey : null);
         // Send back our info
@@ -138,7 +215,7 @@ class ContactService extends ChangeNotifier {
         DebugLogService().success('Contacts', '$name accepted your request');
         _updateContactInfo(publicKey, name, isPending: false);
         if (exchangeKey is String) {
-          setExchangeKey(publicKey, exchangeKey);
+          await setExchangeKey(publicKey, exchangeKey);
         }
       }
     } catch (e) {
@@ -178,6 +255,9 @@ class ContactService extends ChangeNotifier {
         _contacts[index].copyWith(keyExchangePublicKey: exchangeKey);
     await _persistContacts();
     notifyListeners();
+
+    // Only now can anything be encrypted to them.
+    onContactReady?.call(publicKey);
   }
 
   void _sendHandshake(String targetKey, String type) {

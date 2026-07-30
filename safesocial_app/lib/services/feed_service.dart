@@ -141,6 +141,17 @@ class FeedService extends ChangeNotifier {
     }
   }
 
+  /// Open a feed channel for a contact added after startup.
+  ///
+  /// initSync only ever saw the contacts that existed at launch, so anyone
+  /// added later never received posts and their posts never arrived.
+  Future<void> connectContact(Contact contact) async {
+    if (!_contacts.any((c) => c.publicKey == contact.publicKey)) {
+      _contacts.add(contact);
+    }
+    await _connectFeedMailbox(contact.publicKey);
+  }
+
   Future<void> _connectFeedMailbox(String contactKey) async {
     final sessions = _sessions;
     if (sessions == null) return;

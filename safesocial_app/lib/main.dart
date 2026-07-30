@@ -75,6 +75,7 @@ void main() async {
     feedService: feedService,
     albumService: albumService,
     sphereService: sphereService,
+    relayService: relayService,
   );
 
   // Start Rust Core in the background (non-blocking)

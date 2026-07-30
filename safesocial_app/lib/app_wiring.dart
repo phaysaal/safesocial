@@ -9,6 +9,7 @@ import 'services/identity_service.dart';
 import 'services/sphere_migration.dart';
 import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
+import 'services/relay_service.dart';
 
 /// Connect an identity to every service that needs it.
 ///
@@ -28,6 +29,7 @@ Future<void> wireIdentity({
   required FeedService feedService,
   required AlbumService albumService,
   required SphereService sphereService,
+  required RelayService relayService,
 }) async {
   if (!identityService.isOnboarded) return;
 
@@ -56,7 +58,12 @@ Future<void> wireIdentity({
     exchangeKey: identityService.exchangePublicKey,
     secretKey: secretKey,
   );
-  await contactService.listenForHandshakes();
+
+  // Republish every launch. This was only done at onboarding, so an identity
+  // created before prekeys existed — or one whose first publish failed because
+  // the device was offline — never advertised an X25519 key at all. Contacts
+  // then could not encrypt to them, and every send failed silently.
+  await identityService.publishProfileToRelay(relayService);
 
   await outboxService.load();
   chatService.setMyInfo(
@@ -94,11 +101,29 @@ Future<void> wireIdentity({
   albumService.attachSpheres(sphereService);
   feedService.onAlbumItem = albumService.handleSealedItem;
 
+  // One place that opens every channel for a contact, wherever the contact
+  // came from: a QR scan, an inbound handshake, or a prekey arriving late.
+  void wireContact(String key) {
+    final matches = contactService.contacts.where((c) => c.publicKey == key);
+    if (matches.isEmpty) return;
+    final contact = matches.first;
+    if (contact.blocked) return;
+
+    chatService.connectRelay(key);
+    callService.connectSignaling(key);
+    feedService.connectContact(contact);
+  }
+
+  contactService.onContactReady = wireContact;
+
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;
     chatService.connectRelay(contact.publicKey);
     callService.connectSignaling(contact.publicKey);
   }
+
+  // Polls the handshake inbox and backfills any missing exchange keys.
+  contactService.startInboxPolling();
 
   feedService.initSync(publicKey, secretKey, contactService.contacts);
   albumService.initSync(publicKey, secretKey);

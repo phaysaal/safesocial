@@ -25,6 +25,9 @@ class _AddContactScreenState extends State<AddContactScreen> with SingleTickerPr
   final _keyController = TextEditingController();
   final _nameController = TextEditingController();
   bool _isScanning = false;
+
+  /// X25519 key read from a scanned invite, if it carried one.
+  String? _scannedExchangeKey;
   bool _isProcessing = false;
 
   @override
@@ -60,7 +63,8 @@ class _AddContactScreenState extends State<AddContactScreen> with SingleTickerPr
       final identityService = context.read<IdentityService>();
 
       // 1. Add to contact list
-      await contactService.addContact(publicKey, name);
+      await contactService.addContact(publicKey, name,
+          keyExchangePublicKey: _scannedExchangeKey);
 
       // 2. Initialize signaling and relay
       if (identityService.isOnboarded) {
@@ -174,7 +178,14 @@ class _AddContactScreenState extends State<AddContactScreen> with SingleTickerPr
     final name = identity.currentIdentity?.displayName ?? 'User';
     final cs = Theme.of(context).colorScheme;
 
-    final inviteLink = 'spheres://add?key=$pubKey&name=${Uri.encodeComponent(name)}';
+    // Carry the X25519 key too. With only the Ed25519 key, the scanner has to
+    // fetch a prekey bundle from the relay before it can encrypt anything — so
+    // a scan silently produced a contact nothing could be sent to whenever
+    // that bundle was missing.
+    final exchangeKey = identity.exchangePublicKey;
+    final inviteLink = 'spheres://add?key=$pubKey'
+        '&name=${Uri.encodeComponent(name)}'
+        '${exchangeKey != null ? '&xk=$exchangeKey' : ''}';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(32),
@@ -256,6 +267,9 @@ class _AddContactScreenState extends State<AddContactScreen> with SingleTickerPr
                     setState(() {
                       _keyController.text = key;
                       if (name != null) _nameController.text = name;
+                      // Present in codes from 0.5.1 onward; older codes fall
+                      // back to fetching a prekey bundle from the relay.
+                      _scannedExchangeKey = uri.queryParameters['xk'];
                       _isScanning = false;
                     });
                     break;
