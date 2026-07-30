@@ -16,13 +16,24 @@ class CreateSphereScreen extends StatefulWidget {
 
 class _CreateSphereScreenState extends State<CreateSphereScreen> {
   final _nameController = TextEditingController();
+  final _descriptionController = TextEditingController();
   final _selected = <String>{};
+
+  /// Who gets admin alongside us from the start.
+  ///
+  /// A sphere whose only privileged member loses their phone can never be
+  /// re-keyed, which means no invites and no removals, ever. Asking for a
+  /// second admin at creation is the cheapest way to close that, so this is
+  /// offered up front rather than buried in the member list later.
+  String? _coAdmin;
+
   SphereKind _kind = SphereKind.group;
   bool _creating = false;
 
   @override
   void dispose() {
     _nameController.dispose();
+    _descriptionController.dispose();
     super.dispose();
   }
 
@@ -39,8 +50,10 @@ class _CreateSphereScreenState extends State<CreateSphereScreen> {
     try {
       await context.read<SphereService>().create(
             name: name,
+            description: _descriptionController.text.trim(),
             kind: _kind,
             initialMembers: _selected.toList(),
+            coAdmin: _coAdmin,
           );
       if (mounted) context.pop();
     } catch (e) {
@@ -84,6 +97,17 @@ class _CreateSphereScreenState extends State<CreateSphereScreen> {
             decoration: const InputDecoration(
               labelText: 'Name',
               hintText: 'e.g. Family, Climbing, Book club',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _descriptionController,
+            maxLines: 2,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Description (optional)',
+              hintText: 'What this sphere is for',
               border: OutlineInputBorder(),
             ),
           ),
@@ -147,10 +171,43 @@ class _CreateSphereScreenState extends State<CreateSphereScreen> {
                     _selected.add(contact.publicKey);
                   } else {
                     _selected.remove(contact.publicKey);
+                    if (_coAdmin == contact.publicKey) _coAdmin = null;
                   }
                 }),
               );
             }),
+          if (_selected.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Text('Second admin', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text(
+              'You own this sphere. Nobody else can invite or remove people '
+              'unless you make them an admin — and if you lose this device, '
+              'nobody ever will be able to. Naming someone now costs nothing.',
+              style:
+                  theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: 8),
+            RadioGroup<String?>(
+              groupValue: _coAdmin,
+              onChanged: (value) => setState(() => _coAdmin = value),
+              child: Column(
+                children: [
+                  ...contacts
+                      .where((c) => _selected.contains(c.publicKey))
+                      .map((contact) => RadioListTile<String?>(
+                            value: contact.publicKey,
+                            title: Text(contact.displayName),
+                          )),
+                  const RadioListTile<String?>(
+                    value: null,
+                    title: Text('Nobody for now'),
+                    subtitle: Text('You can promote someone later'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -170,9 +170,14 @@ signed and verifiable). Nothing may depend on someone adjudicating.
 | **Member** | Post, comment, react, invite (if enabled), leave, propose and cast votes |
 | **Read-only** | Sees content, cannot post — for broadcast-style spheres |
 
-Currently only admin/member exist and the creator is just an admin. Owner should be
-distinct, because "who can hand over the keys" and "who can kick people" are different
-questions.
+~~Currently only admin/member exist and the creator is just an admin.~~ **Done.** Owner is
+now distinct. Two clarifications the implementation forced:
+
+* **Only the owner may demote another admin**; anyone may demote themselves. Letting any
+  admin demote any other turns a disagreement into a race decided by whichever operation
+  reaches the most devices first.
+* **Read-only members are still missing.** `SphereKind.broadcast` already limits posting by
+  role, so the gap is a per-member flag rather than a new concept.
 
 ### 3.3 Voting to remove — design
 Removal is the one power that most needs legitimacy, because it is the only one that is
@@ -204,11 +209,17 @@ after a failed one, so a majority cannot harass a minority with repeated votes.
 a central authority. Spheres above a configurable size could require a vote even for
 admins.
 
-### 3.4 Transferring control
-- Owner nominates a successor; **the successor must accept** before it takes effect,
-  otherwise ownership can be dumped on someone who has stopped using the app.
-- Transfer is a signed membership operation like any other, so it is verifiable.
-- Demoting yourself from admin should be possible — currently it is not.
+### 3.4 Transferring control — **done**
+- Owner offers; the successor accepts and **executes the change themselves**, carrying the
+  owner's signed offer as proof. Doing it in that direction means a transfer completes even
+  if the outgoing owner has already gone — often exactly why they are handing it over.
+- Offers **expire after seven days**. There is no cancellation: a revocation message a
+  member simply failed to receive would be worse than a bounded window.
+- Demoting yourself is now possible, and so is stepping down as admin.
+- **An owner who leaves hands ownership on automatically** — to the longest-serving admin,
+  or the longest-serving member if there is no other admin. Leaving has to stay
+  unconditional, so succession is derived rather than negotiated; every device computes the
+  same answer from the member list.
 
 ### 3.5 Orphaned spheres — the case a decentralised design must answer
 **If the only owner loses their phone, the sphere is currently stuck forever.** Nobody can
@@ -227,6 +238,11 @@ Options, in order of preference:
 Recommend 1 immediately and 3 later. Avoid 2 alone — inactivity is not the same as absence,
 and getting the threshold wrong hands spheres to whoever is most online.
 
+**Option 1 is done**, in three places: the create screen asks for a second admin whenever
+the sphere has any members, the sphere page warns an owner who is the only admin, and an
+owner leaving hands ownership on rather than orphaning the sphere. Option 3 waits on the
+voting machinery in 3.3.
+
 ### 3.6 Membership lifecycle — the full set
 | Operation | Status |
 |---|---|
@@ -236,13 +252,13 @@ and getting the threshold wrong hands spheres to whoever is most online.
 | Leave | **Built** |
 | Remove (admin) | **Built** — epoch bump and re-key |
 | Promote to admin | **Built** |
-| **Demote an admin** | **Missing** |
-| **Demote self** | **Missing** |
-| **Transfer ownership** | **Missing** |
-| **Propose / vote removal** | **Missing** |
-| **Rename, edit description** | **Missing** |
+| **Demote an admin** | **Built** — owner only |
+| **Demote self** | **Built** |
+| **Transfer ownership** | **Built** — offer, accept, seven-day expiry |
+| **Propose / vote removal** | **Missing** — next |
+| **Rename, edit description** | **Built** |
 | **Sphere icon or colour** | **Missing** |
-| **Member-visible audit log** | **Missing** — who did what, when; the substitute for Account Status |
+| **Member-visible audit log** | **Built** — 200 entries per sphere, on the sphere page |
 | **Rejoin after leaving** | **Missing** — needs a fresh invitation today |
 | **Delete a sphere** | **Missing** — distinct from everyone leaving |
 | Read-only members | **Missing** |
@@ -251,6 +267,16 @@ and getting the threshold wrong hands spheres to whoever is most online.
 **The audit log deserves attention.** With no central authority, the check on admin power
 is that every member can see what admins did. It is also cheap: the signed membership
 operations already exist, so it is largely a rendering job.
+
+Built, with one honest limitation: the log records what *this device applied*, so it is
+each member's own record rather than a shared one. Two members who were offline at
+different times hold different slices and neither is authoritative. The screen says so.
+
+Implementing this also turned up a real hole. Inbound authority was a single question —
+is the author an admin? — which meant an admin could attach any member list they liked to
+any operation. Operations now recompute the expected membership from state already held
+and reject anything that does not match, so an author can trigger a change but not define
+one. A rename can no longer smuggle in a new member.
 
 ---
 
@@ -268,9 +294,10 @@ signals are throttled to one every three seconds, inbound ones expire after
 seven, and they never enter the outbox — a typing signal that arrives late is
 worse than one that never arrives.
 
-**Second — governance.** Ownership as a distinct role, transfer with acceptance, demotion,
-rename, audit log, second-admin-by-default. Mostly extensions of machinery that already
-works, and they close the orphaned-sphere hole before anyone hits it.
+**Second — governance.** ~~Ownership as a distinct role, transfer with acceptance,
+demotion, rename, audit log, second-admin-by-default.~~ **Done.** Remaining in this block:
+voting-based removal (3.3), deleting a sphere, rejoining after leaving, read-only members,
+and invite permissions.
 
 **Third — efficiency.** Multiplex the connections, cap the media cache. Before spheres get
 large, not after.

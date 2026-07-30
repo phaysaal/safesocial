@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spheres_app/crypto/session_manager.dart';
 import 'package:spheres_app/models/sphere.dart';
+import 'package:spheres_app/models/sphere_event.dart';
 import 'package:spheres_app/services/secure_store.dart';
 import 'package:spheres_app/services/sphere_service.dart';
 
@@ -985,6 +986,20 @@ void main() {
       await service.leave(sphere.id);
 
       expect(service.eventsFor(sphere.id), isEmpty);
+    });
+
+    test('an entry survives a JSON round trip', () {
+      final entry = SphereEvent(
+        sphereId: sphereId,
+        op: MembershipOp.opRename,
+        by: alice,
+        target: '',
+        epoch: 4,
+        at: DateTime(2026, 7, 30, 9, 15),
+        detail: 'Close family',
+      );
+
+      expect(SphereEvent.fromJson(entry.toJson()), entry);
     });
 
     test('it is stored encrypted', () async {
