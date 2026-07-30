@@ -12,7 +12,108 @@ import '../crypto/session_manager.dart';
 import '../crypto/sphere_keyring.dart';
 import '../crypto/spheres_crypto.dart';
 import '../models/sphere.dart';
+import '../models/sphere_event.dart';
 import 'debug_log_service.dart';
+
+/// A standalone signed assertion by one member, carried inside a membership
+/// operation as proof that the operation was allowed.
+///
+/// This is how authority works without a server. An operation that one member
+/// is not entitled to make on their own becomes legitimate when it carries
+/// signed statements from the members who are — an owner's offer of ownership
+/// today, a set of removal votes tomorrow. Every recipient checks the proof
+/// themselves rather than trusting whoever transmitted it.
+class SignedStatement {
+  static const kindTransferOffer = 'transfer-offer';
+
+  final String kind;
+  final String sphereId;
+
+  /// The epoch the statement was made at, so it can be judged against the
+  /// membership that existed when it was signed.
+  final int atEpoch;
+
+  /// Who the statement is about.
+  final String subject;
+
+  /// Who signed it. The signature is checked against this key.
+  final String by;
+
+  final int timestampMs;
+  final String signatureHex;
+
+  const SignedStatement({
+    required this.kind,
+    required this.sphereId,
+    required this.atEpoch,
+    required this.subject,
+    required this.by,
+    required this.timestampMs,
+    required this.signatureHex,
+  });
+
+  /// Newline-delimited for the same reason as everything else here: no field
+  /// can contain a newline, so the encoding cannot be made ambiguous.
+  static Uint8List bytesToSign({
+    required String kind,
+    required String sphereId,
+    required int atEpoch,
+    required String subject,
+    required String by,
+    required int timestampMs,
+  }) =>
+      Uint8List.fromList(utf8.encode([
+        'spheres-statement',
+        kind,
+        sphereId,
+        '$atEpoch',
+        subject,
+        by,
+        '$timestampMs',
+      ].join('\n')));
+
+  Uint8List signedBytes() => bytesToSign(
+        kind: kind,
+        sphereId: sphereId,
+        atEpoch: atEpoch,
+        subject: subject,
+        by: by,
+        timestampMs: timestampMs,
+      );
+
+  /// Whether the signature really is [by]'s.
+  bool get isSignatureValid {
+    try {
+      return ed.verify(
+        ed.PublicKey(hex.decode(by)),
+        signedBytes(),
+        Uint8List.fromList(hex.decode(signatureHex)),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        'sphereId': sphereId,
+        'atEpoch': atEpoch,
+        'subject': subject,
+        'by': by,
+        'ts': timestampMs,
+        'sig': signatureHex,
+      };
+
+  static SignedStatement fromJson(Map<String, dynamic> json) => SignedStatement(
+        kind: json['kind'] as String,
+        sphereId: json['sphereId'] as String,
+        atEpoch: json['atEpoch'] as int,
+        subject: json['subject'] as String,
+        by: json['by'] as String,
+        timestampMs: json['ts'] as int,
+        signatureHex: json['sig'] as String,
+      );
+}
 
 /// A membership change, signed by the admin who made it.
 ///
@@ -26,6 +127,9 @@ class MembershipOp {
   static const opRemove = 'remove';
   static const opLeave = 'leave';
   static const opPromote = 'promote';
+  static const opDemote = 'demote';
+  static const opTransfer = 'transfer';
+  static const opRename = 'rename';
 
   final String sphereId;
 
@@ -48,7 +152,12 @@ class MembershipOp {
   final List<SphereMember> members;
 
   final String name;
+  final String description;
   final SphereKind kind;
+
+  /// Statements that authorise this operation, when the author could not have
+  /// made it alone. Empty for operations that rest on the author's own role.
+  final List<SignedStatement> proof;
 
   const MembershipOp({
     required this.sphereId,
@@ -60,6 +169,8 @@ class MembershipOp {
     required this.members,
     required this.name,
     required this.kind,
+    this.description = '',
+    this.proof = const [],
   });
 
   /// Bytes the signature covers. Newline-delimited for the same reason as
@@ -87,6 +198,8 @@ class MembershipOp {
         'name': name,
         'kind': kind.name,
         'members': members.map((m) => m.toJson()).toList(),
+        if (description.isNotEmpty) 'description': description,
+        if (proof.isNotEmpty) 'proof': proof.map((p) => p.toJson()).toList(),
       };
 
   static MembershipOp fromJson(Map<String, dynamic> json) {
@@ -102,9 +215,13 @@ class MembershipOp {
       by: json['by'] as String,
       timestampMs: json['ts'] as int,
       name: json['name'] as String? ?? '',
+      description: json['description'] as String? ?? '',
       kind: kind,
       members: (json['members'] as List<dynamic>)
           .map((m) => SphereMember.fromJson(m as Map<String, dynamic>))
+          .toList(),
+      proof: (json['proof'] as List<dynamic>? ?? const [])
+          .map((p) => SignedStatement.fromJson(p as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -170,6 +287,12 @@ class SphereService extends ChangeNotifier {
   static const _prefsKey = 'spheres_spheres_v1';
 
   static const _prefsInvitesKey = 'spheres_invites_v1';
+  static const _prefsAuditKey = 'spheres_sphere_audit_v1';
+  static const _prefsOffersKey = 'spheres_transfer_offers_v1';
+
+  /// Entries kept per sphere. Enough to cover any argument worth having, and
+  /// bounded so a long-lived sphere cannot grow local storage without limit.
+  static const int auditLimit = 200;
 
   final SphereKeyring keyring = SphereKeyring();
   final Map<String, Sphere> _spheres = {};
@@ -180,6 +303,9 @@ class SphereService extends ChangeNotifier {
   /// session with could silently add us to a sphere and start receiving our
   /// posts to it.
   final Map<String, PendingInvite> _invites = {};
+
+  /// Audit entries, newest last, keyed by sphere id.
+  final Map<String, List<SphereEvent>> _audit = {};
 
   SessionManager? _sessions;
   String? _myIdentityKey;
@@ -195,6 +321,35 @@ class SphereService extends ChangeNotifier {
   Sphere? sphere(String id) => _spheres[id];
 
   List<PendingInvite> get invites => List.unmodifiable(_invites.values);
+
+  /// What has happened in a sphere, newest first.
+  List<SphereEvent> eventsFor(String sphereId) =>
+      (_audit[sphereId] ?? const <SphereEvent>[]).reversed.toList();
+
+  /// Append an audit entry.
+  Future<void> _record(
+    Sphere sphere,
+    String op,
+    String target,
+    String by, {
+    String detail = '',
+    DateTime? at,
+  }) async {
+    final entries = _audit.putIfAbsent(sphere.id, () => []);
+    entries.add(SphereEvent(
+      sphereId: sphere.id,
+      op: op,
+      by: by,
+      target: target,
+      epoch: sphere.epoch,
+      at: at ?? DateTime.now(),
+      detail: detail,
+    ));
+    if (entries.length > auditLimit) {
+      entries.removeRange(0, entries.length - auditLimit);
+    }
+    await _persistAudit();
+  }
 
   /// Join a sphere we were invited to.
   Future<void> acceptInvite(String sphereId) async {
@@ -288,11 +443,18 @@ class SphereService extends ChangeNotifier {
     return false;
   }
 
-  /// Create a sphere with us as the first admin.
+  /// Create a sphere with us as its owner.
+  ///
+  /// [coAdmin] is strongly encouraged and the UI asks for one. A sphere whose
+  /// only privileged member loses their phone cannot be re-keyed by anybody,
+  /// which means no invites and no removals, ever. A second admin costs
+  /// nothing and closes that hole before it can open.
   Future<Sphere> create({
     required String name,
     required SphereKind kind,
     List<String> initialMembers = const [],
+    String? coAdmin,
+    String description = '',
   }) async {
     _requireReady();
     final me = _myIdentityKey!;
@@ -301,6 +463,7 @@ class SphereService extends ChangeNotifier {
     final sphere = Sphere(
       id: hex.encode(SpheresCrypto.randomBytes(32)),
       name: name,
+      description: description,
       kind: kind,
       createdBy: me,
       createdAt: now,
@@ -308,13 +471,13 @@ class SphereService extends ChangeNotifier {
       members: [
         SphereMember(
           identityKey: me,
-          role: SphereRole.admin,
+          role: SphereRole.owner,
           joinedAt: now,
           invitedBy: me,
         ),
         ...initialMembers.where((k) => k != me).map((k) => SphereMember(
               identityKey: k,
-              role: SphereRole.member,
+              role: k == coAdmin ? SphereRole.admin : SphereRole.member,
               joinedAt: now,
               invitedBy: me,
             )),
@@ -323,6 +486,7 @@ class SphereService extends ChangeNotifier {
 
     _spheres[sphere.id] = sphere;
     keyring.rotate(sphere.id, sphere.epoch);
+    await _record(sphere, MembershipOp.opCreate, '', me, detail: name);
     await _persist();
     notifyListeners();
 
@@ -350,6 +514,7 @@ class SphereService extends ChangeNotifier {
     );
 
     await _applyLocally(next);
+    await _record(next, MembershipOp.opAdd, identityKey, _myIdentityKey!);
     await _broadcast(next, MembershipOp.opAdd, identityKey);
   }
 
@@ -357,6 +522,11 @@ class SphereService extends ChangeNotifier {
   Future<void> removeMember(String sphereId, String identityKey) async {
     final sphere = _requireAdmin(sphereId);
     if (!sphere.contains(identityKey)) return;
+    if (sphere.isOwner(identityKey)) {
+      // An admin removing the owner would be a coup, and would orphan the
+      // sphere. Owners leave by leaving, which hands ownership on.
+      throw StateError('The owner of "${sphere.name}" cannot be removed');
+    }
 
     final next = sphere.copyWith(
       epoch: sphere.epoch + 1,
@@ -365,6 +535,7 @@ class SphereService extends ChangeNotifier {
     );
 
     await _applyLocally(next);
+    await _record(next, MembershipOp.opRemove, identityKey, _myIdentityKey!);
     // Deliberately broadcast only to the remaining members: the removed member
     // never receives the new epoch key, which is what makes removal real.
     await _broadcast(next, MembershipOp.opRemove, identityKey);
@@ -385,24 +556,221 @@ class SphereService extends ChangeNotifier {
     );
 
     await _applyLocally(next);
+    await _record(next, MembershipOp.opPromote, identityKey, _myIdentityKey!);
     await _broadcast(next, MembershipOp.opPromote, identityKey);
   }
 
+  /// Take admin away from someone.
+  ///
+  /// Only the owner may demote another admin, and anyone may demote
+  /// themselves. Letting any admin demote any other would turn a disagreement
+  /// between admins into a race, decided by whichever operation reached the
+  /// most devices first. Routing it through a single owner makes the outcome
+  /// unambiguous, and stepping down yourself needs nobody's permission.
+  Future<void> demote(String sphereId, String identityKey) async {
+    _requireReady();
+    final sphere = _spheres[sphereId];
+    if (sphere == null) throw StateError('Unknown sphere $sphereId');
+    final me = _myIdentityKey!;
+
+    final member = sphere.memberFor(identityKey);
+    if (member == null || !member.isAdmin) return;
+
+    if (member.isOwner) {
+      throw StateError(
+        'The owner cannot be demoted. Transfer ownership first, or leave.',
+      );
+    }
+    if (identityKey != me && !sphere.isOwner(me)) {
+      throw StateError('Only the owner can demote another admin');
+    }
+
+    final next = sphere.copyWith(
+      epoch: sphere.epoch + 1,
+      members: sphere.members
+          .map((m) => m.identityKey == identityKey
+              ? m.copyWith(role: SphereRole.member)
+              : m)
+          .toList(),
+    );
+
+    await _applyLocally(next);
+    await _record(next, MembershipOp.opDemote, identityKey, me);
+    await _broadcast(next, MembershipOp.opDemote, identityKey);
+  }
+
+  /// Change the name or description. Admins and the owner may do this.
+  Future<void> rename(
+    String sphereId, {
+    String? name,
+    String? description,
+  }) async {
+    final sphere = _requireAdmin(sphereId);
+    final newName = (name ?? sphere.name).trim();
+    final newDescription = (description ?? sphere.description).trim();
+    if (newName.isEmpty) throw StateError('A sphere needs a name');
+    if (newName == sphere.name && newDescription == sphere.description) return;
+
+    final next = sphere.copyWith(
+      epoch: sphere.epoch + 1,
+      name: newName,
+      description: newDescription,
+    );
+
+    await _applyLocally(next);
+    await _record(next, MembershipOp.opRename, '', _myIdentityKey!,
+        detail: newName);
+    await _broadcast(next, MembershipOp.opRename, '');
+  }
+
+  // ── Ownership ──────────────────────────────────────────────────────────────
+
+  /// How long an offer of ownership stays good for.
+  ///
+  /// Bounded so an offer made and forgotten cannot be cashed in much later,
+  /// against a sphere whose membership has moved on.
+  static const Duration transferOfferValidity = Duration(days: 7);
+
+  /// Offers of ownership made to us, by sphere id.
+  final Map<String, SignedStatement> _transferOffers = {};
+
+  /// Offers of ownership addressed to us that are still good.
+  List<SignedStatement> get ownershipOffers => _transferOffers.values
+      .where((o) => !_offerExpired(o, DateTime.now().millisecondsSinceEpoch))
+      .toList(growable: false);
+
+  SignedStatement? ownershipOfferFor(String sphereId) {
+    final offer = _transferOffers[sphereId];
+    if (offer == null) return null;
+    if (_offerExpired(offer, DateTime.now().millisecondsSinceEpoch)) return null;
+    return offer;
+  }
+
+  static bool _offerExpired(SignedStatement offer, int nowMs) =>
+      nowMs - offer.timestampMs > transferOfferValidity.inMilliseconds;
+
+  /// Offer ownership to another member.
+  ///
+  /// Nothing changes yet: the offer only becomes a transfer when the successor
+  /// accepts it. Ownership carries obligations, and dropping it on somebody who
+  /// has stopped using the app would be exactly the orphaned sphere the role
+  /// exists to prevent.
+  ///
+  /// The offer is broadcast to everyone, not just the successor. Members need
+  /// it to verify the eventual transfer, and a pending change of ownership is
+  /// something a sphere should be able to see coming.
+  Future<void> offerOwnership(String sphereId, String successor) async {
+    _requireReady();
+    final sphere = _spheres[sphereId];
+    if (sphere == null) throw StateError('Unknown sphere $sphereId');
+    final me = _myIdentityKey!;
+
+    if (!sphere.isOwner(me)) {
+      throw StateError('Only the owner can offer ownership');
+    }
+    if (successor == me) throw StateError('You already own this sphere');
+    if (!sphere.contains(successor)) {
+      throw StateError('Ownership can only go to a member');
+    }
+
+    final offer = _sign(
+      kind: SignedStatement.kindTransferOffer,
+      sphereId: sphereId,
+      atEpoch: sphere.epoch,
+      subject: successor,
+      timestampMs: DateTime.now().millisecondsSinceEpoch,
+    );
+
+    await _record(sphere, 'transfer-offer', successor, me);
+    await _sendStatement(sphere, offer);
+    notifyListeners();
+  }
+
+  /// Accept an offer of ownership, becoming the owner.
+  ///
+  /// We execute this ourselves rather than asking the outgoing owner to,
+  /// because they may already be gone — which is often precisely why they
+  /// handed it over. The offer travels with the operation as proof, so every
+  /// member verifies our authority from the previous owner's signature instead
+  /// of taking our word for it.
+  Future<void> acceptOwnership(String sphereId) async {
+    _requireReady();
+    final sphere = _spheres[sphereId];
+    if (sphere == null) throw StateError('Unknown sphere $sphereId');
+    final me = _myIdentityKey!;
+
+    final offer = ownershipOfferFor(sphereId);
+    if (offer == null) {
+      throw StateError('There is no current offer of ownership to accept');
+    }
+    if (offer.subject != me) {
+      throw StateError('That offer of ownership was not made to you');
+    }
+    if (!sphere.isOwner(offer.by)) {
+      throw StateError('The member who offered this is no longer the owner');
+    }
+
+    final next = sphere.copyWith(
+      epoch: sphere.epoch + 1,
+      members: _membersAfterTransfer(sphere, offer.by, me),
+    );
+
+    _transferOffers.remove(sphereId);
+    await _persistOffers();
+    await _applyLocally(next);
+    await _record(next, MembershipOp.opTransfer, me, me);
+    await _broadcast(next, MembershipOp.opTransfer, me, proof: [offer]);
+  }
+
+  /// The member list a transfer must produce: the outgoing owner keeps admin,
+  /// the successor takes owner, nothing else moves.
+  static List<SphereMember> _membersAfterTransfer(
+    Sphere sphere,
+    String from,
+    String to,
+  ) =>
+      sphere.members.map((m) {
+        if (m.identityKey == from) return m.copyWith(role: SphereRole.admin);
+        if (m.identityKey == to) return m.copyWith(role: SphereRole.owner);
+        return m;
+      }).toList();
+
   /// Leave a sphere, discarding its keys so its content becomes unreadable here.
+  ///
+  /// Leaving is unconditional — nobody should be held in a sphere they are
+  /// uncomfortable in, least of all by a rule this app invented. An owner who
+  /// leaves therefore hands ownership on in the same operation, to the
+  /// longest-serving admin, or the longest-serving member if there is no other
+  /// admin. Every device derives the same successor from the member list, so
+  /// this needs no negotiation and cannot leave the sphere disagreeing.
   Future<void> leave(String sphereId) async {
     final sphere = _spheres[sphereId];
     if (sphere == null) return;
     final me = _myIdentityKey!;
 
+    final remaining =
+        sphere.members.where((m) => m.identityKey != me).toList();
+    final heir = sphere.isOwner(me) ? sphere.successorAfter(me) : null;
+
     final next = sphere.copyWith(
       epoch: sphere.epoch + 1,
-      members: sphere.members.where((m) => m.identityKey != me).toList(),
+      members: heir == null
+          ? remaining
+          : remaining
+              .map((m) => m.identityKey == heir
+                  ? m.copyWith(role: SphereRole.owner)
+                  : m)
+              .toList(),
     );
     await _broadcastOp(next, MembershipOp.opLeave, me, includeKey: false);
 
     _spheres.remove(sphereId);
+    _audit.remove(sphereId);
+    _transferOffers.remove(sphereId);
     keyring.forget(sphereId);
     await keyring.persist();
+    await _persistAudit();
+    await _persistOffers();
     await _persist();
     notifyListeners();
   }
@@ -417,8 +785,70 @@ class SphereService extends ChangeNotifier {
 
   // ── Outbound ───────────────────────────────────────────────────────────────
 
-  Future<void> _broadcast(Sphere sphere, String op, String target) =>
-      _broadcastOp(sphere, op, target, includeKey: true);
+  Future<void> _broadcast(
+    Sphere sphere,
+    String op,
+    String target, {
+    List<SignedStatement> proof = const [],
+  }) =>
+      _broadcastOp(sphere, op, target, includeKey: true, proof: proof);
+
+  /// Sign a statement as ourselves.
+  SignedStatement _sign({
+    required String kind,
+    required String sphereId,
+    required int atEpoch,
+    required String subject,
+    required int timestampMs,
+  }) {
+    final me = _myIdentityKey!;
+    final signature = ed.sign(
+      ed.PrivateKey(hex.decode(_myIdentitySecret!)),
+      SignedStatement.bytesToSign(
+        kind: kind,
+        sphereId: sphereId,
+        atEpoch: atEpoch,
+        subject: subject,
+        by: me,
+        timestampMs: timestampMs,
+      ),
+    );
+    return SignedStatement(
+      kind: kind,
+      sphereId: sphereId,
+      atEpoch: atEpoch,
+      subject: subject,
+      by: me,
+      timestampMs: timestampMs,
+      signatureHex: hex.encode(signature),
+    );
+  }
+
+  /// Send a standalone statement to every other member.
+  Future<void> _sendStatement(Sphere sphere, SignedStatement statement) async {
+    final send = sendToPeer;
+    final sessions = _sessions;
+    if (send == null || sessions == null) return;
+
+    final payload = jsonEncode({'statement': statement.toJson()});
+    for (final peer in sphere.othersThan(_myIdentityKey!)) {
+      try {
+        final sealed = await sessions.seal(
+          peerIdentityKey: peer,
+          peerKeyExchangePublicKey: _resolveExchangeKey?.call(peer),
+          type: 'sphere_op',
+          plaintext: payload,
+          mode: SealMode.wrap,
+        );
+        await send(peer, sealed);
+      } on NoSessionException {
+        DebugLogService().warn(
+            'Sphere', 'No encryption key for $peer yet; they will not see this');
+      } catch (e) {
+        DebugLogService().error('Sphere', 'Could not send statement: $e');
+      }
+    }
+  }
 
   /// Send a signed membership operation, and optionally the new epoch key,
   /// to every current member.
@@ -427,6 +857,7 @@ class SphereService extends ChangeNotifier {
     String op,
     String target, {
     required bool includeKey,
+    List<SignedStatement> proof = const [],
   }) async {
     final send = sendToPeer;
     final sessions = _sessions;
@@ -442,7 +873,9 @@ class SphereService extends ChangeNotifier {
       timestampMs: DateTime.now().millisecondsSinceEpoch,
       members: sphere.members,
       name: sphere.name,
+      description: sphere.description,
       kind: sphere.kind,
+      proof: proof,
     );
 
     final signature = ed.sign(
@@ -488,6 +921,13 @@ class SphereService extends ChangeNotifier {
   ) async {
     try {
       final payload = jsonDecode(payloadJson) as Map<String, dynamic>;
+
+      final statementJson = payload['statement'];
+      if (statementJson is Map<String, dynamic>) {
+        await _handleIncomingStatement(senderIdentityKey, statementJson);
+        return;
+      }
+
       final op = MembershipOp.fromJson(payload['op'] as Map<String, dynamic>);
 
       if (op.by != senderIdentityKey) {
@@ -539,35 +979,37 @@ class SphereService extends ChangeNotifier {
         notifyListeners();
         return;
       } else {
-        if (!existing.isAdmin(op.by) && op.op != MembershipOp.opLeave) {
-          DebugLogService()
-              .warn('Sphere', 'Rejecting op: ${op.by} is not an admin');
-          return;
-        }
         if (op.epoch <= existing.epoch) {
           // Already applied, or an attempt to replay an older state.
           return;
         }
+        final refusal = _authorityRefusal(existing, op);
+        if (refusal != null) {
+          DebugLogService().warn('Sphere', 'Rejecting op: $refusal');
+          return;
+        }
       }
-
-      // A member who leaves removes only themselves.
-      if (op.op == MembershipOp.opLeave && op.target != op.by) return;
 
       final updated = Sphere(
         id: op.sphereId,
         name: op.name,
+        description: op.description,
         kind: op.kind,
         createdBy: existing.createdBy,
         createdAt: existing.createdAt,
         epoch: op.epoch,
-        members: op.members,
+        members: Sphere.normaliseOwnership(op.members, existing.createdBy),
       );
 
       // If we were removed, drop the sphere and its keys.
       if (!updated.contains(_myIdentityKey!)) {
         _spheres.remove(op.sphereId);
+        _audit.remove(op.sphereId);
+        _transferOffers.remove(op.sphereId);
         keyring.forget(op.sphereId);
         await keyring.persist();
+        await _persistAudit();
+        await _persistOffers();
         await _persist();
         notifyListeners();
         DebugLogService()
@@ -590,11 +1032,147 @@ class SphereService extends ChangeNotifier {
       }
 
       _spheres[op.sphereId] = updated;
+      await _record(updated, op.op, op.target, op.by,
+          detail: op.op == MembershipOp.opRename ? op.name : '',
+          at: DateTime.fromMillisecondsSinceEpoch(op.timestampMs));
       await _persist();
       notifyListeners();
     } catch (e) {
       DebugLogService().error('Sphere', 'Could not apply membership op: $e');
     }
+  }
+
+  /// Why [op] may not be applied to [existing], or null if it may be.
+  ///
+  /// Authority used to be one blanket question — is the author an admin? That
+  /// is too coarse now that operations differ in who is entitled to make them,
+  /// and too trusting: an admin could send any member list they liked. For the
+  /// operations added here the resulting membership is *recomputed* from state
+  /// we already hold and compared, so the author gets to trigger a change but
+  /// not to define it.
+  String? _authorityRefusal(Sphere existing, MembershipOp op) {
+    switch (op.op) {
+      case MembershipOp.opLeave:
+        // A member who leaves removes only themselves.
+        if (op.target != op.by) return 'a leave may only remove its author';
+        if (!existing.contains(op.by)) return '${op.by} is not a member';
+        final heir =
+            existing.isOwner(op.by) ? existing.successorAfter(op.by) : null;
+        final expected = existing.members
+            .where((m) => m.identityKey != op.by)
+            .map((m) => m.identityKey == heir
+                ? m.copyWith(role: SphereRole.owner)
+                : m)
+            .toList();
+        return _membersMatch(expected, op.members)
+            ? null
+            : 'the member list does not match a leave by ${op.by}';
+
+      case MembershipOp.opTransfer:
+        if (op.by != op.target) {
+          return 'ownership is claimed by the successor, not handed over';
+        }
+        if (!existing.contains(op.by)) return '${op.by} is not a member';
+
+        final owner = existing.ownerKey;
+        if (owner == null) return 'this sphere has no owner to transfer from';
+
+        final offer = op.proof.where((p) =>
+            p.kind == SignedStatement.kindTransferOffer &&
+            p.sphereId == existing.id &&
+            p.by == owner &&
+            p.subject == op.target);
+        if (offer.isEmpty) return 'no offer of ownership from the owner';
+        final proof = offer.first;
+        if (!proof.isSignatureValid) return 'the offer of ownership is forged';
+        if (_offerExpired(proof, op.timestampMs)) {
+          return 'the offer of ownership has expired';
+        }
+
+        return _membersMatch(
+                _membersAfterTransfer(existing, owner, op.target), op.members)
+            ? null
+            : 'the member list does not match a transfer to ${op.target}';
+
+      case MembershipOp.opDemote:
+        final subject = existing.memberFor(op.target);
+        if (subject == null || !subject.isAdmin) {
+          return '${op.target} is not an admin';
+        }
+        if (subject.isOwner) return 'the owner cannot be demoted';
+        if (op.by != op.target && !existing.isOwner(op.by)) {
+          return 'only the owner can demote another admin';
+        }
+        final demoted = existing.members
+            .map((m) => m.identityKey == op.target
+                ? m.copyWith(role: SphereRole.member)
+                : m)
+            .toList();
+        return _membersMatch(demoted, op.members)
+            ? null
+            : 'the member list does not match a demotion of ${op.target}';
+
+      case MembershipOp.opRename:
+        if (!existing.isAdmin(op.by)) return '${op.by} is not an admin';
+        if (op.name.trim().isEmpty) return 'a sphere needs a name';
+        return _membersMatch(existing.members, op.members)
+            ? null
+            : 'a rename may not change the member list';
+
+      case MembershipOp.opRemove:
+        if (!existing.isAdmin(op.by)) return '${op.by} is not an admin';
+        if (existing.isOwner(op.target)) return 'the owner cannot be removed';
+        return null;
+
+      default:
+        if (!existing.isAdmin(op.by)) return '${op.by} is not an admin';
+        return null;
+    }
+  }
+
+  /// Whether two member lists name the same people in the same roles. Order is
+  /// not significant; it is a set comparison in list form.
+  static bool _membersMatch(List<SphereMember> a, List<SphereMember> b) {
+    if (a.length != b.length) return false;
+    String describe(SphereMember m) => '${m.identityKey}:${m.role.name}';
+    final left = a.map(describe).toList()..sort();
+    final right = b.map(describe).toList()..sort();
+    for (var i = 0; i < left.length; i++) {
+      if (left[i] != right[i]) return false;
+    }
+    return true;
+  }
+
+  /// Hold an offer of ownership made to us.
+  Future<void> _handleIncomingStatement(
+    String senderIdentityKey,
+    Map<String, dynamic> json,
+  ) async {
+    final statement = SignedStatement.fromJson(json);
+    if (statement.by != senderIdentityKey) return;
+    if (!statement.isSignatureValid) {
+      DebugLogService().warn('Sphere', 'Rejecting statement: bad signature');
+      return;
+    }
+    if (statement.kind != SignedStatement.kindTransferOffer) return;
+
+    final sphere = _spheres[statement.sphereId];
+    if (sphere == null || !sphere.isOwner(statement.by)) {
+      DebugLogService().warn(
+          'Sphere', 'Rejecting ownership offer: ${statement.by} is not owner');
+      return;
+    }
+
+    await _record(sphere, 'transfer-offer', statement.subject, statement.by,
+        at: DateTime.fromMillisecondsSinceEpoch(statement.timestampMs));
+
+    // Everyone records the offer for the audit log, but only the person it
+    // names can act on it.
+    if (statement.subject == _myIdentityKey) {
+      _transferOffers[statement.sphereId] = statement;
+      await _persistOffers();
+    }
+    notifyListeners();
   }
 
   bool _signatureValid(MembershipOp op, dynamic signatureHex) {
@@ -708,6 +1286,33 @@ class SphereService extends ChangeNotifier {
       }
     }
 
+    final auditRaw = await prefs.getString(_prefsAuditKey);
+    if (auditRaw != null) {
+      try {
+        final decoded = jsonDecode(auditRaw) as Map<String, dynamic>;
+        decoded.forEach((sphereId, entries) {
+          _audit[sphereId] = (entries as List<dynamic>)
+              .map((e) => SphereEvent.fromJson(e as Map<String, dynamic>))
+              .toList();
+        });
+      } catch (e) {
+        DebugLogService().error('Sphere', 'Could not read the audit log: $e');
+      }
+    }
+
+    final offersRaw = await prefs.getString(_prefsOffersKey);
+    if (offersRaw != null) {
+      try {
+        for (final item in jsonDecode(offersRaw) as List<dynamic>) {
+          final offer = SignedStatement.fromJson(item as Map<String, dynamic>);
+          _transferOffers[offer.sphereId] = offer;
+        }
+      } catch (e) {
+        DebugLogService()
+            .error('Sphere', 'Could not read ownership offers: $e');
+      }
+    }
+
     final raw = await prefs.getString(_prefsKey);
     if (raw == null) return;
 
@@ -728,6 +1333,21 @@ class SphereService extends ChangeNotifier {
     await prefs.setString(
       _prefsInvitesKey,
       jsonEncode(_invites.values.map((i) => i.toJson()).toList()),
+    );
+  }
+
+  Future<void> _persistAudit() async {
+    await SecureStore.instance.setString(
+      _prefsAuditKey,
+      jsonEncode(_audit.map((sphereId, entries) =>
+          MapEntry(sphereId, entries.map((e) => e.toJson()).toList()))),
+    );
+  }
+
+  Future<void> _persistOffers() async {
+    await SecureStore.instance.setString(
+      _prefsOffersKey,
+      jsonEncode(_transferOffers.values.map((o) => o.toJson()).toList()),
     );
   }
 

@@ -204,12 +204,34 @@ void main() {
       final sphere = build([
         SphereMember(
             identityKey: aliceId,
-            role: SphereRole.admin,
+            role: SphereRole.owner,
             joinedAt: DateTime(2026),
             invitedBy: aliceId),
       ]);
 
       expect(Sphere.fromJson(jsonDecode(jsonEncode(sphere.toJson()))), sphere);
+    });
+
+    test('a sphere saved before owners existed gains one on load', () {
+      // Every device derives the same answer — the creator, if still a member
+      // — so an old sphere acquires an owner without anyone sending anything.
+      final legacy = build([
+        SphereMember(
+            identityKey: aliceId,
+            role: SphereRole.admin,
+            joinedAt: DateTime(2026),
+            invitedBy: aliceId),
+        SphereMember(
+            identityKey: 'bob',
+            role: SphereRole.member,
+            joinedAt: DateTime(2026),
+            invitedBy: aliceId),
+      ]);
+
+      final loaded = Sphere.fromJson(jsonDecode(jsonEncode(legacy.toJson())));
+
+      expect(loaded.ownerKey, aliceId);
+      expect(loaded.isAdmin('bob'), isFalse);
     });
   });
 }
