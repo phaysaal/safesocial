@@ -100,7 +100,15 @@ the only symptom is clients reporting `Unauthorized`. It is pinned to 2025-01-01
 standard `Ed25519` algorithm name. Do not lower it.
 
 **Deploy the worker before shipping a client build that expects v2**, and vice versa: the
-route names changed, so the two versions do not interoperate.
+route names changed, so the two versions do not interoperate. Any already-installed v1
+client stops working the moment this deploys.
+
+**The v2 migration deletes all v1 data.** v2 addresses Durable Objects by new names, so
+objects created by v1 would become unreachable but not deleted — and v1 had no alarms, so
+they would sit in storage indefinitely, contradicting the retention promise above. The
+`v2` migration drops the old class, discarding that storage at deploy time. Anything still
+queued for an offline v1 user is lost, which is the intended outcome: it cannot be
+delivered to a client that no longer speaks the protocol.
 
 ## Self-hosting
 

@@ -18,9 +18,22 @@ routes = [
 # expire old mail on a timer rather than only when something is written.
 [durable_objects]
 bindings = [
-  { name = "RELAY_ROOM", class_name = "RelayRoom" }
+  { name = "RELAY_ROOM", class_name = "RelayRoomV2" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RelayRoom"]
+
+# v2 addresses Durable Objects by new names (mbx_*, inbox_*, blob_*, prekey_*),
+# so every object created by v1 becomes unreachable the moment this deploys —
+# but unreachable is not deleted. v1 had no alarms, so those objects, which hold
+# real queued messages, would sit in storage indefinitely and quietly contradict
+# the 30-day retention this relay claims.
+#
+# Deleting the old class discards that storage at deploy time. Safe to do now
+# and only now: v2 has not run, so there is nothing of its own to lose.
+[[migrations]]
+tag = "v2"
+deleted_classes = ["RelayRoom"]
+new_sqlite_classes = ["RelayRoomV2"]

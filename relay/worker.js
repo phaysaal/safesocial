@@ -114,7 +114,7 @@ export default {
   },
 };
 
-export class RelayRoom {
+export class RelayRoomV2 {
   constructor(state, env) {
     this.state = state;
     this.env = env;
