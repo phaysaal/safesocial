@@ -6,6 +6,7 @@ import 'services/contact_service.dart';
 import 'services/debug_log_service.dart';
 import 'services/feed_service.dart';
 import 'services/identity_service.dart';
+import 'services/library_service.dart';
 import 'services/sphere_migration.dart';
 import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
@@ -29,6 +30,7 @@ Future<void> wireIdentity({
   required FeedService feedService,
   required AlbumService albumService,
   required SphereService sphereService,
+  required LibraryService libraryService,
   required RelayService relayService,
 }) async {
   if (!identityService.isOnboarded) return;
@@ -99,6 +101,10 @@ Future<void> wireIdentity({
     spheres: sphereService,
   );
   albumService.attachSpheres(sphereService);
+  feedService.mutedSpheres = () => {
+        for (final s in sphereService.spheres)
+          if (libraryService.isMuted(s.id)) s.id
+      };
   feedService.onAlbumItem = albumService.handleSealedItem;
 
   // One place that opens every channel for a contact, wherever the contact

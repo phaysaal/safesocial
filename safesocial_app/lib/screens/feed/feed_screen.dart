@@ -391,6 +391,7 @@ class _QuickAccessRow extends StatelessWidget {
 
     final items = [
       (Icons.blur_on, 'Spheres', '/spheres'),
+      (Icons.bookmark_border, 'Saved', '/saved'),
       (Icons.photo_album_outlined, 'Albums', '/albums'),
       (Icons.auto_awesome_outlined, 'Memories', '/memories'),
       (Icons.search_outlined, 'Search', '/search'),

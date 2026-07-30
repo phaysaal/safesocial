@@ -10,6 +10,7 @@ import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
+import '../../services/library_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/relay_service.dart';
@@ -80,6 +81,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       feedService: context.read<FeedService>(),
       albumService: context.read<AlbumService>(),
       sphereService: context.read<SphereService>(),
+      libraryService: context.read<LibraryService>(),
       relayService: context.read<RelayService>(),
     );
   }

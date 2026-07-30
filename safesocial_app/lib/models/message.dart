@@ -1,5 +1,34 @@
 import 'package:equatable/equatable.dart';
 
+/// One person's reaction to a message.
+class MessageReaction with EquatableMixin {
+  /// Ed25519 identity key of whoever reacted.
+  final String reactorId;
+  final String emoji;
+  final DateTime timestamp;
+
+  const MessageReaction({
+    required this.reactorId,
+    required this.emoji,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'reactorId': reactorId,
+        'emoji': emoji,
+        'timestamp': timestamp.toIso8601String(),
+      };
+
+  static MessageReaction fromJson(Map<String, dynamic> json) => MessageReaction(
+        reactorId: json['reactorId'] as String,
+        emoji: json['emoji'] as String,
+        timestamp: DateTime.parse(json['timestamp'] as String),
+      );
+
+  @override
+  List<Object?> get props => [reactorId, emoji, timestamp];
+}
+
 /// A chat message between two peers in the Sphere network.
 class Message with EquatableMixin {
   final String id;
@@ -23,6 +52,12 @@ class Message with EquatableMixin {
   /// that was meant to disappear.
   final String? replyToStoryId;
 
+  /// Set when this message quotes an earlier one in the same conversation.
+  final String? replyToMessageId;
+
+  /// Reactions from either participant, keyed by who left them.
+  final List<MessageReaction> reactions;
+
   const Message({
     required this.id,
     required this.senderId,
@@ -33,6 +68,8 @@ class Message with EquatableMixin {
     this.mediaRefs = const [],
     this.audioRef,
     this.replyToStoryId,
+    this.replyToMessageId,
+    this.reactions = const [],
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -49,6 +86,11 @@ class Message with EquatableMixin {
           [],
       audioRef: json['audioRef'] as String?,
       replyToStoryId: json['replyToStoryId'] as String?,
+      replyToMessageId: json['replyToMessageId'] as String?,
+      reactions: (json['reactions'] as List<dynamic>?)
+              ?.map((e) => MessageReaction.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
     );
   }
 
@@ -63,6 +105,11 @@ class Message with EquatableMixin {
       'mediaRefs': mediaRefs,
       'audioRef': audioRef,
       if (replyToStoryId != null) 'replyToStoryId': replyToStoryId,
+      if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
+      // Omitted when empty: reactions arrive separately, so most messages on
+      // the wire carry none and there is no reason to send an empty list.
+      if (reactions.isNotEmpty)
+        'reactions': reactions.map((r) => r.toJson()).toList(),
     };
   }
 
@@ -76,6 +123,8 @@ class Message with EquatableMixin {
     List<String>? mediaRefs,
     String? audioRef,
     String? replyToStoryId,
+    String? replyToMessageId,
+    List<MessageReaction>? reactions,
   }) {
     return Message(
       id: id ?? this.id,
@@ -87,11 +136,13 @@ class Message with EquatableMixin {
       mediaRefs: mediaRefs ?? this.mediaRefs,
       audioRef: audioRef ?? this.audioRef,
       replyToStoryId: replyToStoryId ?? this.replyToStoryId,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      reactions: reactions ?? this.reactions,
     );
   }
 
   @override
   List<Object?> get props =>
       [id, senderId, recipientId, content, timestamp, delivered, mediaRefs,
-        audioRef, replyToStoryId];
+        audioRef, replyToStoryId, replyToMessageId, reactions];
 }

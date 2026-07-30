@@ -64,6 +64,11 @@ class SecureStore {
     'spheres_albums',
     'spheres_outbox_v1',
     'spheres_sessions_v1',
+    // Local curation. Saved posts are content ids, and muted spheres and
+    // pinned chats reveal who someone talks to most — all worth encrypting.
+    'spheres_saved_v1',
+    'spheres_muted_spheres_v1',
+    'spheres_pinned_chats_v1',
   ];
 
   static bool _isSensitive(String key) =>

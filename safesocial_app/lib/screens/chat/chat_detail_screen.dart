@@ -37,6 +37,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final RecorderController _recorderController;
   bool _isRecording = false;
 
+  /// Message being replied to, shown above the composer until sent or cleared.
+  Message? _replyingTo;
+
   @override
   void initState() {
     super.initState();
@@ -65,10 +68,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
+    final replyId = _replyingTo?.id;
     _messageController.clear();
-    await _send(() => context
-        .read<ChatService>()
-        .sendMessage(widget.conversationId, text));
+    setState(() => _replyingTo = null);
+
+    await _send(() => context.read<ChatService>().sendMessage(
+          widget.conversationId,
+          text,
+          replyToMessageId: replyId,
+        ));
   }
 
   /// Run a send, surfacing the reason if it could not be encrypted.
@@ -336,6 +344,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           message.senderId == 'self';
 
                       return MessageBubble(
+                        myKey: myPublicKey,
+                        resolveMessage: (id) {
+                          for (final m in messages) {
+                            if (m.id == id) return m;
+                          }
+                          return null;
+                        },
+                        onReply: (msg) => setState(() => _replyingTo = msg),
+                        onReact: (msg, emoji) => context
+                            .read<ChatService>()
+                            .reactToMessage(
+                                widget.conversationId, msg.id, emoji),
                         message: message,
                         isMine: isMine,
                         onDelete: (msg) {
@@ -358,9 +378,63 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
             child: SafeArea(
               top: false,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  // What we're replying to, dismissable.
+                  if (_replyingTo != null)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                      margin: const EdgeInsets.only(bottom: 4),
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border(
+                          left: BorderSide(color: cs.primary, width: 3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _replyingTo!.senderId == myPublicKey
+                                      ? 'Replying to yourself'
+                                      : 'Replying to $displayName',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: cs.primary),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _replyingTo!.content.isNotEmpty
+                                      ? _replyingTo!.content
+                                      : (_replyingTo!.audioRef != null
+                                          ? 'Voice note'
+                                          : 'Photo'),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: cs.onSurfaceVariant),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () =>
+                                setState(() => _replyingTo = null),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
                   if (!_isRecording) ...[
                     // Emoticon picker
                     IconButton(
@@ -454,6 +528,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         ),
                       ),
                     ),
+                    ],
+                  ),
                 ],
               ),
             ),

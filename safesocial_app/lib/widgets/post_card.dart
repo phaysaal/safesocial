@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/post.dart';
 import '../services/contact_service.dart';
 import '../services/feed_service.dart';
+import '../services/library_service.dart';
 import '../services/identity_service.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
@@ -120,6 +121,14 @@ class _PostCardState extends State<PostCard> {
                   icon: Icon(Icons.more_horiz, color: cs.onSurfaceVariant),
                   onSelected: (value) => _handlePostMenu(context, value, post),
                   itemBuilder: (ctx) => [
+                    PopupMenuItem(
+                      value: 'save',
+                      child: Text(
+                        context.read<LibraryService>().isSaved(post.id)
+                            ? 'Remove from saved'
+                            : 'Save post',
+                      ),
+                    ),
                     const PopupMenuItem(value: 'hide', child: Text('Hide post')),
                     if (post.authorId != myKey) ...[
                       const PopupMenuItem(value: 'mute', child: Text('Mute this person')),
@@ -362,6 +371,17 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _handlePostMenu(BuildContext context, String action, Post post) {
+    if (action == 'save') {
+      final library = context.read<LibraryService>();
+      final wasSaved = library.isSaved(post.id);
+      library.toggleSave(post.id);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(wasSaved ? 'Removed from saved' : 'Saved'),
+        duration: const Duration(seconds: 2),
+      ));
+      return;
+    }
+
     switch (action) {
       case 'hide':
         context.read<FeedService>().hidePost(post.id);

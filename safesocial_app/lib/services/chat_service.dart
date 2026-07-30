@@ -116,7 +116,8 @@ class ChatService extends ChangeNotifier {
   Future<void> sendMessage(String contactPublicKey, String content,
       {List<String>? mediaRefs,
       String? audioRef,
-      String? replyToStoryId}) async {
+      String? replyToStoryId,
+      String? replyToMessageId}) async {
     final sessions = _sessions;
     if (sessions == null || !sessions.isReady) {
       throw StateError('ChatService has no identity yet');
@@ -131,6 +132,7 @@ class ChatService extends ChangeNotifier {
       mediaRefs: mediaRefs ?? [],
       audioRef: audioRef,
       replyToStoryId: replyToStoryId,
+      replyToMessageId: replyToMessageId,
     );
 
     // Send the image itself, not a path into our own sandbox. Chat previously
@@ -186,6 +188,66 @@ class ChatService extends ChangeNotifier {
     return message.copyWith(mediaRefs: saved);
   }
 
+  /// React to a message, or remove an existing reaction by sending the same
+  /// emoji again.
+  ///
+  /// Reactions travel as their own envelope rather than as a message edit:
+  /// resending the whole message would break ordering and re-notify.
+  Future<void> reactToMessage(
+      String peerKey, String messageId, String emoji) async {
+    final sessions = _sessions;
+    final me = _myPublicKey;
+    if (sessions == null || me == null) return;
+
+    final removed = _applyReaction(peerKey, messageId, me, emoji);
+
+    try {
+      final sealed = await sessions.seal(
+        peerIdentityKey: peerKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
+        type: 'chat_reaction',
+        plaintext: jsonEncode({
+          'message_id': messageId,
+          'emoji': emoji,
+          'removed': removed,
+        }),
+      );
+      await _relayService.sendViaRelay(peerKey, sealed);
+    } catch (e) {
+      DebugLogService().warn('Chat', 'Could not send reaction: $e');
+    }
+  }
+
+  /// Toggle a reaction locally. Returns true if it was removed.
+  bool _applyReaction(
+      String peerKey, String messageId, String reactorId, String emoji) {
+    final messages = _conversations[peerKey];
+    if (messages == null) return false;
+
+    final index = messages.indexWhere((m) => m.id == messageId);
+    if (index == -1) return false;
+
+    final reactions =
+        List<MessageReaction>.from(messages[index].reactions);
+    final existing = reactions.indexWhere(
+        (r) => r.reactorId == reactorId && r.emoji == emoji);
+
+    final removed = existing != -1;
+    if (removed) {
+      reactions.removeAt(existing);
+    } else {
+      // One reaction per person, as in every messenger people are used to.
+      reactions.removeWhere((r) => r.reactorId == reactorId);
+      reactions.add(MessageReaction(
+          reactorId: reactorId, emoji: emoji, timestamp: DateTime.now()));
+    }
+
+    messages[index] = messages[index].copyWith(reactions: reactions);
+    _persistMessages(peerKey);
+    notifyListeners();
+    return removed;
+  }
+
   /// Tell a sender we have their message, so their copy stops showing as unsent.
   Future<void> _sendReceipt(String peerKey, String messageId) async {
     final sessions = _sessions;
@@ -213,6 +275,17 @@ class ChatService extends ChangeNotifier {
         raw: raw,
         resolveExchangeKey: (key) => _resolveExchangeKey?.call(key),
       );
+
+      if (opened.type == 'chat_reaction') {
+        final payload = jsonDecode(opened.plaintext);
+        final messageId = payload['message_id'];
+        final emoji = payload['emoji'];
+        if (messageId is String && emoji is String) {
+          // Attributed to the verified sender, never to a field they set.
+          _applyReaction(opened.from, messageId, opened.from, emoji);
+        }
+        return;
+      }
 
       if (opened.type == 'receipt') {
         final id = jsonDecode(opened.plaintext)['id'];

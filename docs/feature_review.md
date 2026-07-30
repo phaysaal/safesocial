@@ -32,13 +32,13 @@ cheap, which is the good news.
 | Read receipts, typing | Know it arrived and they're replying | **Partial** — receipts yes, typing no | S |
 | Photo in a chat | Pick, send, appears | **Built** | — |
 | Voice note | Hold, talk, release | **Built** | — |
-| React to a message | Long-press, emoji | **Missing** — reactions exist on posts, not messages | S |
-| Reply to a specific message | Quote-reply in thread | **Missing** | S |
+| React to a message | Long-press, emoji | **Built** | — |
+| Reply to a specific message | Quote-reply in thread | **Built** | — |
 | Post to a sphere | Text/photo, choose audience | **Built** | — |
 | Like / react to a post | One tap | **Built** | — |
-| Comment | Add, see others | **Built** — but flat, no threading | S (threading) |
+| Comment | Add, see others | **Built** — threading already rendered | — |
 | Story: post, view, reply | 24h, see who watched | **Built** | — |
-| **Save a post** | Bookmark to collections | **Missing** | S |
+| **Save a post** | Bookmark to collections | **Built** — with collections | — |
 | Search my stuff | Find a message or post | **Built** | — |
 | Voice/video call | One tap from a chat | **Built** | — |
 
@@ -64,10 +64,10 @@ local-only, all are used dozens of times a day, and their absence is felt immedi
 | Feature | Status | Effort | Note |
 |---|---|---|---|
 | Search messages, posts, spheres, people | **Built** | — | Local, no server sees the query |
-| Saves / collections | **Missing** | S | |
+| Saves / collections | **Built** | — | `/saved`, private to the device |
 | Archive a sphere or chat | **Missing** | S | Hide without leaving or deleting |
-| Mute a sphere or chat | **Partial** | S | Contact mute exists; not per-sphere |
-| Pin a chat to the top | **Missing** | S | |
+| Mute a sphere or chat | **Built** | — | Muted spheres drop out of the feed |
+| Pin a chat to the top | **Built** (service) | S | Chat list still to use it |
 | Unread counts / badges | **Partial** | M | Needs a real notification service |
 | Memories / on-this-day | **Built** | — | |
 | Media gallery per sphere | **Missing** | M | "All photos in this sphere" |
@@ -256,9 +256,10 @@ operations already exist, so it is largely a rendering job.
 
 ## 4. Suggested order
 
-**First — the daily loop.** Message reactions, message replies, saves, comment threading,
-per-sphere mute, pin a chat. All small, all felt immediately. This is what makes it feel
-like a real app rather than a demo.
+**First — the daily loop.** ~~Message reactions, message replies, saves, comment threading,
+per-sphere mute, pin a chat.~~ **Done.** Comment threading turned out to be already
+rendered. Remaining from this block: typing indicators, and having the chat list actually
+apply the pin order.
 
 **Second — governance.** Ownership as a distinct role, transfer with acceptance, demotion,
 rename, audit log, second-admin-by-default. Mostly extensions of machinery that already

@@ -38,10 +38,16 @@ class FeedService extends ChangeNotifier {
   List<Post> postsIn(String sphereId) =>
       _visible(_posts.where((p) => !p.isStory && p.sphereId == sphereId));
 
+  /// Sphere ids the user has muted. Supplied by the app so FeedService need
+  /// not depend on LibraryService.
+  Set<String> Function()? mutedSpheres;
+
   List<Post> _visible(Iterable<Post> source) {
     final spheres = _spheres;
+    final muted = mutedSpheres?.call() ?? const <String>{};
     return source.where((p) {
       if (_hiddenPostIds.contains(p.id)) return false;
+      if (muted.contains(p.sphereId)) return false;
       if (spheres == null) return false;
       final sphere = spheres.sphere(p.sphereId);
       if (sphere == null) return false;

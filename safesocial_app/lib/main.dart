@@ -6,6 +6,7 @@ import 'app_wiring.dart';
 import 'crypto/session_manager.dart';
 import 'services/identity_service.dart';
 import 'services/sphere_service.dart';
+import 'services/library_service.dart';
 import 'services/outbox_service.dart';
 import 'services/call_config.dart';
 import 'services/relay_config.dart';
@@ -41,6 +42,7 @@ void main() async {
   final outboxService = OutboxService();
   final sphereService = SphereService();
   final relayConfig = RelayConfig();
+  final libraryService = LibraryService();
   final callConfig = CallConfig();
 
   // Before anything touches storage: without the key loaded, early reads miss
@@ -52,6 +54,7 @@ void main() async {
   // Must precede any relay traffic, or the first requests go to the default host.
   await relayConfig.load();
   await callConfig.load();
+  await libraryService.load();
 
   // Wire services
   syncService.attachServices(identityService);
@@ -75,6 +78,7 @@ void main() async {
     feedService: feedService,
     albumService: albumService,
     sphereService: sphereService,
+    libraryService: libraryService,
     relayService: relayService,
   );
 
@@ -104,6 +108,7 @@ void main() async {
         Provider<SessionManager>.value(value: sessionManager),
         ChangeNotifierProvider.value(value: outboxService),
         ChangeNotifierProvider.value(value: sphereService),
+        ChangeNotifierProvider.value(value: libraryService),
         ChangeNotifierProvider.value(value: relayConfig),
         ChangeNotifierProvider.value(value: callConfig),
         ChangeNotifierProvider.value(value: DebugLogService()),
