@@ -90,19 +90,21 @@ Can:
 
 - The Ed25519 identity key and the X25519 key are in the platform keystore
   (`flutter_secure_storage`).
-- **Everything else is not.** Message history, sphere keys, ratchet state, contacts
-  and posts are plaintext JSON in SharedPreferences. Anyone able to read the app's
-  data directory — a rooted or jailbroken device, a forensic extraction, malware with
-  the right permissions — reads all of it.
-- Moving to SQLCipher is outstanding and is the highest-value hardening task left.
-- Cloud backup is off (`allowBackup="false"`), so this does not leave via Android Auto
+- **Everything else is encrypted at rest.** Message history, sphere keys, ratchet
+  state, contacts and posts are sealed with XChaCha20-Poly1305 under a key held in the
+  same keystore, and each value is bound to its own storage key so a blob cannot be
+  relocated. Reading the app's data directory is no longer sufficient.
+- **Key names remain visible.** Someone reading the store learns that conversations
+  exist and roughly how many, but not with whom or what was said.
+- This does **not** stop a live compromised process, which can ask the keystore for the
+  key exactly as the app does, nor an attacker who can unlock the device.
+- Cloud backup is off (`allowBackup="false"`), so none of this leaves via Android Auto
   Backup.
 
-Forward secrecy limits the damage only partially. Direct messages advance a KDF chain
-and drop used keys, so a device seized later cannot decrypt DMs it has already read
-and discarded — but the plaintext history is still on disk, which makes that
-protection largely theoretical today. Sphere content has no forward secrecy at all:
-the epoch key opens everything published during that epoch.
+Forward secrecy is now meaningful rather than theoretical: direct messages advance a
+KDF chain and drop used keys, and the history those keys protected is no longer sitting
+in the clear beside them. Sphere content still has no forward secrecy — the epoch key
+opens everything published during that epoch.
 
 ### 2.5 A TURN operator
 
@@ -154,8 +156,7 @@ This is why the app does not describe itself as implementing the Double Ratchet.
 
 ## 5. Known gaps, ranked
 
-1. **Local storage is unencrypted.** Undermines several protections above.
-2. **Never run.** Unit-tested, but no real message has crossed between two devices.
+1. **Never run.** Unit-tested, but no real message has crossed between two devices.
    Unknown unknowns dominate this list.
 3. **Unaudited.** No independent review of the protocol or the implementation.
 4. **Mailbox addresses do not rotate**, so long-lived pairs are observable as such.
@@ -172,7 +173,6 @@ This is why the app does not describe itself as implementing the Double Ratchet.
 
 ## 6. Before calling this a secure messenger
 
-In order: encrypt local storage, run it on real devices, then commission an
-independent review. Positioning it as a secure messenger before those three is not
+In order: run it on real devices, then commission an independent review. Positioning it as a secure messenger before those three is not
 defensible. If any claim in this document stops being true, update it — do not quietly
 drop it.

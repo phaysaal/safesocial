@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 
 import 'debug_log_service.dart';
 
@@ -236,8 +236,8 @@ class OutboxService extends ChangeNotifier {
   // ── Persistence ───────────────────────────────────────────────────────────
 
   Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
+    final prefs = SecureStore.instance;
+    final raw = await prefs.getString(_prefsKey);
     if (raw == null) return;
 
     try {
@@ -264,7 +264,7 @@ class OutboxService extends ChangeNotifier {
   }
 
   Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setString(
       _prefsKey,
       jsonEncode(_entries.map((e) => e.toJson()).toList()),

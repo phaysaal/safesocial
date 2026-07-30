@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/secure_store.dart';
 
 import 'spheres_crypto.dart';
 
@@ -58,12 +58,12 @@ class SphereKeyring {
 
   // ── Persistence ───────────────────────────────────────────────────────────
   //
-  // Plaintext in SharedPreferences for now, like the rest of local state. That
-  // means these keys are exposed to anyone who can read the app sandbox; moving
-  // to SQLCipher is Phase 2's remaining storage item.
+  // Through SecureStore, so these keys are encrypted at rest. They cannot be
+  // re-derived, so losing them makes a sphere's history permanently
+  // unreadable — which is also why they are in backups.
 
   Future<void> persist() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     final encoded = _keys.map((sphereId, epochs) => MapEntry(
           sphereId,
           epochs.map((epoch, key) => MapEntry('$epoch', base64Encode(key))),
@@ -72,8 +72,8 @@ class SphereKeyring {
   }
 
   Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
+    final prefs = SecureStore.instance;
+    final raw = await prefs.getString(_prefsKey);
     if (raw == null) return;
 
     try {

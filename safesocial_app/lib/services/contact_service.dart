@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:convert/convert.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 
 import '../models/contact.dart';
 import 'debug_log_service.dart';
@@ -254,8 +254,8 @@ class ContactService extends ChangeNotifier {
   }
 
   Future<void> loadContacts() async {
-    final prefs = await SharedPreferences.getInstance();
-    final json = prefs.getString(_prefsContactsKey);
+    final prefs = SecureStore.instance;
+    final json = await prefs.getString(_prefsContactsKey);
     if (json != null) {
       final List<dynamic> list = jsonDecode(json);
       _contacts.clear();
@@ -265,7 +265,7 @@ class ContactService extends ChangeNotifier {
   }
 
   Future<void> _persistContacts() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setString(_prefsContactsKey, jsonEncode(_contacts.map((e) => e.toJson()).toList()));
   }
 }

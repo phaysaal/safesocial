@@ -82,15 +82,15 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(indent: 56),
           ListTile(
-            leading: Icon(Icons.warning_amber_outlined, color: cs.error),
+            leading: Icon(Icons.lock_outline, color: cs.primary),
             title: const Text('Storage On This Device'),
             subtitle: const Text(
-              'Messages and encryption keys are stored unencrypted, so anyone '
-              'who can read this app\'s data can read them. Only your identity '
-              'key is in the secure keystore.',
+              'Messages, keys and history are encrypted at rest under a key in '
+              'the platform keystore. Someone reading this app\'s files still '
+              'sees how many conversations exist, but not with whom.',
             ),
             isThreeLine: true,
-            trailing: Icon(Icons.error_outline, color: cs.error, size: 20),
+            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
           ),
           const Divider(indent: 56),
           ListTile(
@@ -911,10 +911,10 @@ class _PreAlphaBanner extends StatelessWidget {
           Expanded(
             child: Text(
               'Pre-alpha build. Messages, posts, albums and calls are '
-              'encrypted, and backups and recovery work — but none of this has '
-              'been independently audited, and data on this device is stored '
-              'unencrypted. Do not rely on it if being read would put you at '
-              'risk.',
+              'encrypted, local data is encrypted at rest, and backups and '
+              'recovery work — but none of this has been independently audited '
+              'and none of it has been tested between real devices. Do not rely '
+              'on it if being read would put you at risk.',
               style: TextStyle(color: cs.onErrorContainer, fontSize: 12, height: 1.4),
             ),
           ),

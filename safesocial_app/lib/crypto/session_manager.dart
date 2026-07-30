@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:convert/convert.dart';
 import 'package:cryptography/cryptography.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/secure_store.dart';
 
 import 'envelope.dart';
 import 'mailbox.dart';
@@ -27,10 +27,11 @@ class NoSessionException implements Exception {
 /// state. Losing this store therefore costs message ordering, not the ability
 /// to communicate — a fresh session decrypts new messages fine.
 ///
-/// Persistence note: ratchet state currently lands in SharedPreferences as
-/// plaintext JSON, so forward secrecy holds against someone watching the
-/// network but not against someone who reads the device's storage. Phase 2
-/// moves this into the encrypted database.
+/// Persistence note: ratchet state is stored through SecureStore, so it is
+/// encrypted at rest. Forward secrecy therefore holds against someone who
+/// reads the device's storage as well as someone watching the network — though
+/// not against a live compromised process, which can ask the keystore for the
+/// key exactly as the app does.
 class SessionManager {
   static const _prefsKey = 'spheres_sessions_v1';
 
@@ -193,7 +194,7 @@ class SessionManager {
   // ── Persistence ───────────────────────────────────────────────────────────
 
   Future<void> persist() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setString(
       _prefsKey,
       jsonEncode(_sessions.map((k, v) => MapEntry(k, v.toJson()))),
@@ -201,8 +202,8 @@ class SessionManager {
   }
 
   Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
+    final prefs = SecureStore.instance;
+    final raw = await prefs.getString(_prefsKey);
     if (raw == null) return;
 
     try {

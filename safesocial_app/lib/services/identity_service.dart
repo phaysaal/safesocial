@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:convert/convert.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -227,14 +227,14 @@ class IdentityService extends ChangeNotifier {
   /// Load identity from local storage (hybrid Secure + SharedPrefs).
   Future<void> loadIdentity() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = SecureStore.instance;
       
-      final profileJson = prefs.getString(_prefsProfileKey);
+      final profileJson = await prefs.getString(_prefsProfileKey);
       if (profileJson != null) {
         _currentIdentity = UserProfile.fromJson(jsonDecode(profileJson));
       }
       
-      final pubKey = prefs.getString(_prefsPubKeyKey);
+      final pubKey = await prefs.getString(_prefsPubKeyKey);
       final secretKey = await _secureStorage.read(key: _secureSecretKey);
 
       if (pubKey != null && secretKey != null) {
@@ -243,7 +243,7 @@ class IdentityService extends ChangeNotifier {
         DebugLogService().success('Identity', 'Secure identity restored');
       } else {
         // Migration from old SharedPreferences keypair if exists
-        final legacyJson = prefs.getString('spheres_identity_keypair');
+        final legacyJson = await prefs.getString('spheres_identity_keypair');
         if (legacyJson != null) {
           final data = jsonDecode(legacyJson);
           _keypair = IdentityKeyPair(publicKey: data['key'], secretKey: data['secret']);
@@ -262,7 +262,7 @@ class IdentityService extends ChangeNotifier {
 
   /// PERSISTENT MEMORY: Reset everything.
   Future<void> resetEverything() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.clear();
     await _secureStorage.deleteAll();
     
@@ -340,7 +340,7 @@ class IdentityService extends ChangeNotifier {
 
   Future<void> _persistIdentity() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = SecureStore.instance;
       if (_keypair != null) {
         await prefs.setString(_prefsPubKeyKey, _keypair!.publicKey);
         await _secureStorage.write(key: _secureSecretKey, value: _keypair!.secretKey);

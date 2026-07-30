@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../crypto/vault.dart';
@@ -55,9 +55,9 @@ class BackupService extends ChangeNotifier {
   /// Ed25519 secret key in cleartext (base64 of JSON — base64 is an encoding,
   /// not encryption), and should be treated as the identity itself.
   Future<String> createBackup({String? passphrase}) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
 
-    final pubKey = prefs.getString('spheres_identity_pubkey');
+    final pubKey = await prefs.getString('spheres_identity_pubkey');
     final secretKey = await _secureStorage.read(key: 'spheres_identity_secret');
     final exchangeSecret =
         await _secureStorage.read(key: 'spheres_identity_x25519_secret');
@@ -69,19 +69,19 @@ class BackupService extends ChangeNotifier {
     // Everything under the backed-up keys, plus every conversation's messages.
     final store = <String, String>{};
     for (final key in _backedUpKeys) {
-      final value = prefs.getString(key);
+      final value = await prefs.getString(key);
       if (value != null) store[key] = value;
     }
-    for (final key in prefs.getKeys()) {
+    for (final key in await prefs.getKeys()) {
       if (key.startsWith('spheres_msgs_')) {
-        final value = prefs.getString(key);
+        final value = await prefs.getString(key);
         if (value != null) store[key] = value;
       }
     }
 
-    final profile = prefs.getString('spheres_identity_profile');
-    final contacts = prefs.getString('spheres_contacts');
-    final posts = prefs.getString('spheres_feed_posts');
+    final profile = await prefs.getString('spheres_identity_profile');
+    final contacts = await prefs.getString('spheres_contacts');
+    final posts = await prefs.getString('spheres_feed_posts');
 
     final payload = {
       // Kept flat for compatibility with version 2 readers.
@@ -194,7 +194,7 @@ class BackupService extends ChangeNotifier {
     }
 
     // Validated: safe to overwrite.
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
 
     if (data['identity'] != null) {
       await prefs.setString('spheres_identity_profile', jsonEncode(data['identity']));

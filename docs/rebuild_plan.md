@@ -691,9 +691,13 @@ identity, verified.
 
 Remaining, in the order that matters:
 
-1. **Encrypt local storage.** Message history, sphere keys and ratchet state are plaintext
-   JSON in SharedPreferences. This undermines several protections the rest of the system
-   provides, and is the highest-value work left in the project.
+1. ~~**Encrypt local storage**~~ — done. `SecureStore` seals every sensitive value with
+   XChaCha20-Poly1305 under a key in the platform keystore, binding each value to its own
+   storage key, with a one-time migration for existing installs. SQLCipher would be the
+   textbook answer and brings indexed queries too, but it is a native dependency and this
+   work cannot be built or run on a device — a plugin that failed to link would break the
+   app in a way no test here would catch. The interface is narrow enough that swapping the
+   backing store later is a contained change.
 2. **Run it on two real devices.** Nothing in seven phases has exchanged a message. Unknown
    unknowns dominate every other risk here.
 3. **Independent security review**, which cannot sensibly happen before 1 and 2.

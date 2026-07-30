@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
 
 import '../crypto/envelope.dart';
@@ -265,8 +265,8 @@ class ChatService extends ChangeNotifier {
   }
 
   Future<void> loadConversations() async {
-    final prefs = await SharedPreferences.getInstance();
-    final keysJson = prefs.getString(_prefsConversationsKey);
+    final prefs = SecureStore.instance;
+    final keysJson = await prefs.getString(_prefsConversationsKey);
     if (keysJson != null) {
       final Map<String, dynamic> keys = jsonDecode(keysJson);
       for (var entry in keys.entries) {
@@ -278,8 +278,8 @@ class ChatService extends ChangeNotifier {
   }
 
   Future<void> _loadMessages(String contactKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    final msgsJson = prefs.getString('$_prefsMsgPrefix$contactKey');
+    final prefs = SecureStore.instance;
+    final msgsJson = await prefs.getString('$_prefsMsgPrefix$contactKey');
     if (msgsJson != null) {
       final List<dynamic> msgs = jsonDecode(msgsJson);
       _conversations[contactKey] = msgs.map((m) => Message.fromJson(m)).toList();
@@ -287,7 +287,7 @@ class ChatService extends ChangeNotifier {
   }
 
   Future<void> _persistMessages(String contactKey) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     final msgs = _conversations[contactKey] ?? [];
     await prefs.setString('$_prefsMsgPrefix$contactKey', jsonEncode(msgs.map((m) => m.toJson()).toList()));
     
@@ -301,7 +301,7 @@ class ChatService extends ChangeNotifier {
 
     // Actually delete the stored messages. Previously only the index entry was
     // removed, leaving the message history readable on disk indefinitely.
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.remove('$_prefsMsgPrefix$contactKey');
     await _outbox?.removeForPeer(contactKey);
 
@@ -316,7 +316,7 @@ class ChatService extends ChangeNotifier {
   }
 
   Future<void> _persistConversationKeys() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     final keys = _conversations.keys.toList();
     await prefs.setString(_prefsConversationsKey, jsonEncode(Map.fromIterable(keys)));
   }

@@ -9,6 +9,7 @@ import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
 import 'services/call_config.dart';
 import 'services/relay_config.dart';
+import 'services/secure_store.dart';
 import 'services/chat_service.dart';
 import 'services/feed_service.dart';
 import 'services/contact_service.dart';
@@ -41,6 +42,10 @@ void main() async {
   final sphereService = SphereService();
   final relayConfig = RelayConfig();
   final callConfig = CallConfig();
+
+  // Before anything touches storage: without the key loaded, early reads miss
+  // encrypted values and would rewrite them in the clear.
+  await SecureStore.instance.init();
 
   // Load theme
   await themeService.load();

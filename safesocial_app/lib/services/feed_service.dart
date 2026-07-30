@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
 
 import '../crypto/blob.dart';
@@ -170,12 +170,13 @@ class FeedService extends ChangeNotifier {
   }
 
   Future<void> loadPosts() async {
-    final prefs0 = await SharedPreferences.getInstance();
-    _sendViewReceipts = prefs0.getBool('spheres_story_view_receipts') ?? true;
+    final prefs0 = SecureStore.instance;
+    _sendViewReceipts =
+        await prefs0.getBool('spheres_story_view_receipts') ?? true;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final json = prefs.getString(_postsKey);
+      final prefs = SecureStore.instance;
+      final json = await prefs.getString(_postsKey);
       if (json != null) {
         final list = jsonDecode(json) as List<dynamic>;
         _posts.clear();
@@ -190,7 +191,7 @@ class FeedService extends ChangeNotifier {
           _posts.add(p);
         }
       }
-      final hiddenJson = prefs.getStringList(_hiddenKey);
+      final hiddenJson = await prefs.getStringList(_hiddenKey);
       if (hiddenJson != null) {
         _hiddenPostIds.addAll(hiddenJson);
       }
@@ -466,7 +467,7 @@ class FeedService extends ChangeNotifier {
 
   Future<void> setSendViewReceipts(bool value) async {
     _sendViewReceipts = value;
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setBool('spheres_story_view_receipts', value);
     notifyListeners();
   }
@@ -626,12 +627,12 @@ class FeedService extends ChangeNotifier {
   }
 
   Future<void> _persistHidden() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setStringList(_hiddenKey, _hiddenPostIds.toList());
   }
 
   Future<void> _persistPosts() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     // Only persist non-expired stories
     final now = DateTime.now();
     final validPosts = _posts.where((p) => !(p.isStory && p.expiresAt != null && p.expiresAt!.isBefore(now)));

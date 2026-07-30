@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 
 import '../models/sphere.dart';
 import 'debug_log_service.dart';
@@ -24,8 +24,8 @@ class SphereMigration {
 
   /// Run once per install. Returns the number of spheres created.
   static Future<int> run(SphereService sphereService) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_doneKey) == true) return 0;
+    final prefs = SecureStore.instance;
+    if (await prefs.getBool(_doneKey) == true) return 0;
     if (!sphereService.isReady) return 0;
 
     var created = 0;
@@ -41,10 +41,10 @@ class SphereMigration {
   }
 
   static Future<int> _migrateGroups(
-    SharedPreferences prefs,
+    SecureStore prefs,
     SphereService sphereService,
   ) async {
-    final raw = prefs.getString(_legacyGroupsKey);
+    final raw = await prefs.getString(_legacyGroupsKey);
     if (raw == null) return 0;
 
     var created = 0;
@@ -73,10 +73,10 @@ class SphereMigration {
   }
 
   static Future<int> _migrateRings(
-    SharedPreferences prefs,
+    SecureStore prefs,
     SphereService sphereService,
   ) async {
-    final raw = prefs.getString(_legacyRingsKey);
+    final raw = await prefs.getString(_legacyRingsKey);
     if (raw == null) return 0;
 
     var created = 0;

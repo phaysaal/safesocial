@@ -5,7 +5,7 @@ import 'package:convert/convert.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 
 import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
@@ -694,9 +694,9 @@ class SphereService extends ChangeNotifier {
 
   Future<void> load() async {
     await keyring.load();
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
 
-    final invitesRaw = prefs.getString(_prefsInvitesKey);
+    final invitesRaw = await prefs.getString(_prefsInvitesKey);
     if (invitesRaw != null) {
       try {
         for (final item in jsonDecode(invitesRaw) as List<dynamic>) {
@@ -708,7 +708,7 @@ class SphereService extends ChangeNotifier {
       }
     }
 
-    final raw = prefs.getString(_prefsKey);
+    final raw = await prefs.getString(_prefsKey);
     if (raw == null) return;
 
     try {
@@ -724,7 +724,7 @@ class SphereService extends ChangeNotifier {
   }
 
   Future<void> _persistInvites() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setString(
       _prefsInvitesKey,
       jsonEncode(_invites.values.map((i) => i.toJson()).toList()),
@@ -732,7 +732,7 @@ class SphereService extends ChangeNotifier {
   }
 
   Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setString(
       _prefsKey,
       jsonEncode(_spheres.values.map((s) => s.toJson()).toList()),

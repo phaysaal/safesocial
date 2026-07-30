@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
 
 import '../crypto/mailbox.dart';
@@ -53,8 +53,8 @@ class AlbumService extends ChangeNotifier {
   }
 
   Future<void> loadAlbums() async {
-    final prefs = await SharedPreferences.getInstance();
-    final json = prefs.getString(_albumsKey);
+    final prefs = SecureStore.instance;
+    final json = await prefs.getString(_albumsKey);
     if (json != null) {
       try {
         final List<dynamic> list = jsonDecode(json);
@@ -198,7 +198,7 @@ class AlbumService extends ChangeNotifier {
   }
 
   Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStore.instance;
     await prefs.setString(_albumsKey, jsonEncode(_albums.map((e) => e.toJson()).toList()));
   }
 }
