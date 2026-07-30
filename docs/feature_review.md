@@ -29,7 +29,7 @@ cheap, which is the good news.
 | Feature | What people expect | Status | Effort |
 |---|---|---|---|
 | Send/receive a message | Instant, ordered, never lost | **Built** | — |
-| Read receipts, typing | Know it arrived and they're replying | **Partial** — receipts yes, typing no | S |
+| Read receipts, typing | Know it arrived and they're replying | **Built** | S |
 | Photo in a chat | Pick, send, appears | **Built** | — |
 | Voice note | Hold, talk, release | **Built** | — |
 | React to a message | Long-press, emoji | **Built** | — |
@@ -67,7 +67,7 @@ local-only, all are used dozens of times a day, and their absence is felt immedi
 | Saves / collections | **Built** | — | `/saved`, private to the device |
 | Archive a sphere or chat | **Missing** | S | Hide without leaving or deleting |
 | Mute a sphere or chat | **Built** | — | Muted spheres drop out of the feed |
-| Pin a chat to the top | **Built** (service) | S | Chat list still to use it |
+| Pin a chat to the top | **Built** | S | Long-press a chat to pin |
 | Unread counts / badges | **Partial** | M | Needs a real notification service |
 | Memories / on-this-day | **Built** | — | |
 | Media gallery per sphere | **Missing** | M | "All photos in this sphere" |
@@ -258,8 +258,15 @@ operations already exist, so it is largely a rendering job.
 
 **First — the daily loop.** ~~Message reactions, message replies, saves, comment threading,
 per-sphere mute, pin a chat.~~ **Done.** Comment threading turned out to be already
-rendered. Remaining from this block: typing indicators, and having the chat list actually
-apply the pin order.
+rendered. Typing indicators and the chat list's pin ordering followed; the whole
+block is now closed.
+
+Typing indicators are opt-out and reciprocal, matching how story view receipts
+already work here: switching them off stops your own signals *and* hides other
+people's, so the setting cannot be used to watch without being watched. Outbound
+signals are throttled to one every three seconds, inbound ones expire after
+seven, and they never enter the outbox — a typing signal that arrives late is
+worse than one that never arrives.
 
 **Second — governance.** Ownership as a distinct role, transfer with acceptance, demotion,
 rename, audit log, second-admin-by-default. Mostly extensions of machinery that already

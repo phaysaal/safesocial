@@ -40,6 +40,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   /// Message being replied to, shown above the composer until sent or cleared.
   Message? _replyingTo;
 
+  /// Captured in initState: dispose() cannot safely read from context.
+  ChatService? _chatService;
+
   @override
   void initState() {
     super.initState();
@@ -49,15 +52,26 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ..iosEncoder = IosEncoder.kAudioFormatMPEG4AAC
       ..sampleRate = 44100;
 
-    context.read<ChatService>().setActiveConversation(widget.conversationId);
+    _chatService = context.read<ChatService>();
+    _chatService!.setActiveConversation(widget.conversationId);
     _messageController.addListener(() {
       final has = _messageController.text.trim().isNotEmpty;
       if (has != _hasText) setState(() => _hasText = has);
+
+      final chat = context.read<ChatService>();
+      if (has) {
+        // Throttled inside the service, so this is safe per keystroke.
+        chat.notifyTyping(widget.conversationId);
+      } else {
+        chat.notifyTyping(widget.conversationId, stopped: true);
+      }
     });
   }
 
   @override
   void dispose() {
+    // Otherwise the indicator lingers on their side until it times out.
+    _chatService?.notifyTyping(widget.conversationId, stopped: true);
     _recorderController.dispose();
     _messageController.dispose();
     _scrollController.dispose();
@@ -247,8 +261,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Builder(builder: (ctx) {
-                    final relayOk = chatService.isRelayConnected(widget.conversationId);
-                    final connected = relayOk;
+                    final typing =
+                        chatService.isTyping(widget.conversationId);
+                    if (typing) {
+                      return Text(
+                        'typing…',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 11,
+                          color: cs.primary,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      );
+                    }
+                    final connected =
+                        chatService.isRelayConnected(widget.conversationId);
                     return Text(
                       connected
                           ? 'Relay Connected'

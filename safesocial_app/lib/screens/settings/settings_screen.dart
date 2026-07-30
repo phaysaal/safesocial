@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import '../../app_info.dart';
+import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/call_config.dart';
 import '../../services/relay_config.dart';
@@ -211,6 +212,21 @@ class SettingsScreen extends StatelessWidget {
               isThreeLine: true,
               value: feed.sendViewReceipts,
               onChanged: feed.setSendViewReceipts,
+            );
+          }),
+          const Divider(indent: 56),
+          Builder(builder: (context) {
+            final chat = context.watch<ChatService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.edit_outlined, color: cs.primary),
+              title: const Text('Typing Indicators'),
+              subtitle: const Text(
+                'Show people when you are writing to them. Turning this off '
+                'also hides when they are writing to you.',
+              ),
+              isThreeLine: true,
+              value: chat.sendTypingSignals,
+              onChanged: chat.setSendTypingSignals,
             );
           }),
           const Divider(indent: 56),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import 'debug_log_service.dart';
 import 'media_service.dart';
 import 'outbox_service.dart';
 import 'relay_service.dart';
+import 'typing_tracker.dart';
 
 /// Manages chat conversations over the relay.
 ///
@@ -24,6 +26,62 @@ class ChatService extends ChangeNotifier {
   final RelayService _relayService = RelayService();
   SessionManager? _sessions;
   OutboxService? _outbox;
+
+  final TypingTracker _typing = TypingTracker();
+  Timer? _typingSweep;
+
+  /// Whether to tell people when we are typing.
+  ///
+  /// A typing indicator broadcasts your activity keystroke by keystroke. Most
+  /// apps make that unconditional; in one whose whole argument is not leaking
+  /// behaviour it should be a choice. Default on, so it behaves as expected.
+  bool _sendTypingSignals = true;
+  bool get sendTypingSignals => _sendTypingSignals;
+
+  Future<void> setSendTypingSignals(bool value) async {
+    _sendTypingSignals = value;
+    if (!value) _typing.clear();
+    await SecureStore.instance.setBool('spheres_typing_signals', value);
+    notifyListeners();
+  }
+
+  bool isTyping(String peerKey) {
+    // Reciprocal, like read receipts elsewhere: if you will not say when you
+    // are typing, you do not get to see when others are.
+    if (!_sendTypingSignals) return false;
+    return _typing.isTyping(peerKey);
+  }
+
+  /// Tell a peer we are typing, at most once every few seconds.
+  Future<void> notifyTyping(String peerKey, {bool stopped = false}) async {
+    if (!_sendTypingSignals) return;
+    final sessions = _sessions;
+    if (sessions == null) return;
+    if (!_typing.shouldSend(peerKey, stopped: stopped)) return;
+
+    try {
+      final sealed = await sessions.seal(
+        peerIdentityKey: peerKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
+        type: 'typing',
+        plaintext: jsonEncode({'stopped': stopped}),
+      );
+      // Deliberately not queued in the outbox: a typing signal that arrives
+      // late is worse than one that never arrives at all.
+      await _relayService.sendViaRelay(peerKey, sealed);
+    } catch (_) {
+      // Never surface a failure for something this ephemeral.
+    }
+  }
+
+  void _startTypingSweep() {
+    _typingSweep?.cancel();
+    // Expiry is time-based, so something has to redraw when it lapses.
+    _typingSweep = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_typing.sweep()) notifyListeners();
+    });
+  }
+
 
   /// Resolves a contact's X25519 public key by their identity key. Supplied by
   /// the app so ChatService does not need to depend on ContactService.
@@ -64,6 +122,7 @@ class ChatService extends ChangeNotifier {
     _relayService.onMessageReceived = (contactKey, raw) {
       _handleRelayMessage(contactKey, raw);
     };
+    _startTypingSweep();
   }
 
   /// Called with (senderIdentityKey, payload) for verified `sphere_op`
@@ -149,6 +208,7 @@ class ChatService extends ChangeNotifier {
 
     // Keep the local copy pointing at the local file.
     _addMessageLocally(contactPublicKey, message);
+    unawaited(notifyTyping(contactPublicKey, stopped: true));
 
     // Durable hand-off. If the socket is down the message waits here and is
     // retried on reconnect or on the next tick — including across app restarts.
@@ -276,6 +336,14 @@ class ChatService extends ChangeNotifier {
         resolveExchangeKey: (key) => _resolveExchangeKey?.call(key),
       );
 
+      if (opened.type == 'typing') {
+        final stopped = jsonDecode(opened.plaintext)['stopped'] == true;
+        if (_typing.noteSignal(opened.from, stopped: stopped)) {
+          notifyListeners();
+        }
+        return;
+      }
+
       if (opened.type == 'chat_reaction') {
         final payload = jsonDecode(opened.plaintext);
         final messageId = payload['message_id'];
@@ -337,7 +405,16 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  @override
+  void dispose() {
+    _typingSweep?.cancel();
+    super.dispose();
+  }
+
   Future<void> loadConversations() async {
+    _sendTypingSignals =
+        await SecureStore.instance.getBool('spheres_typing_signals') ?? true;
+
     final prefs = SecureStore.instance;
     final keysJson = await prefs.getString(_prefsConversationsKey);
     if (keysJson != null) {

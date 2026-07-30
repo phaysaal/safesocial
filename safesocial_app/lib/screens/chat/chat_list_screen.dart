@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
+import '../../services/library_service.dart';
 import '../../widgets/avatar.dart';
 
 /// Screen displaying a list of active chat conversations.
@@ -16,8 +17,12 @@ class ChatListScreen extends StatelessWidget {
     final chatService = context.watch<ChatService>();
     final contactService = context.watch<ContactService>();
 
+    final library = context.watch<LibraryService>();
+
     final conversations = chatService.conversations;
-    final conversationIds = chatService.getConversationIds();
+    // Pinned conversations first; the service keeps the user's pin order.
+    final conversationIds =
+        library.sortChats(chatService.getConversationIds());
 
     return Scaffold(
       appBar: AppBar(
@@ -43,21 +48,46 @@ class ChatListScreen extends StatelessWidget {
                 
                 final displayName = contact?.displayName ?? contactKey;
                 final lastMessage = messages.isNotEmpty ? messages.last : null;
+                final pinned = library.isPinned(contactKey);
 
                 return ListTile(
                   leading: UserAvatar(
                     displayName: displayName,
                     size: AvatarSize.medium,
                   ),
-                  title: Text(
-                    displayName,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  title: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (pinned) ...[
+                        const SizedBox(width: 6),
+                        Icon(
+                          Icons.push_pin,
+                          size: 13,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ],
+                    ],
                   ),
-                  subtitle: Text(
-                    lastMessage?.content ?? 'No messages yet',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  subtitle: chatService.isTyping(contactKey)
+                      ? Text(
+                          'typing…',
+                          style: TextStyle(
+                            color: theme.colorScheme.primary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        )
+                      : Text(
+                          lastMessage?.content ?? 'No messages yet',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                   trailing: lastMessage != null
                       ? Text(
                           _formatTime(lastMessage.timestamp),
@@ -65,9 +95,37 @@ class ChatListScreen extends StatelessWidget {
                         )
                       : null,
                   onTap: () => context.push('/chat/$contactKey'),
+                  onLongPress: () =>
+                      _showChatActions(context, library, contactKey, pinned),
                 );
               },
             ),
+    );
+  }
+
+  void _showChatActions(
+    BuildContext context,
+    LibraryService library,
+    String contactKey,
+    bool pinned,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(pinned ? Icons.push_pin_outlined : Icons.push_pin),
+              title: Text(pinned ? 'Unpin chat' : 'Pin chat'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                library.togglePin(contactKey);
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
