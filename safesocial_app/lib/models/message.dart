@@ -11,6 +11,18 @@ class Message with EquatableMixin {
   final List<String> mediaRefs;
   final String? audioRef;
 
+  /// Set when this message is a reply to a story.
+  ///
+  /// A story reply is a private message to the author, not a comment the
+  /// sphere can see — so it travels on the ratcheted direct path like any
+  /// other message and simply carries the story it answers.
+  ///
+  /// Only the id is carried. The story itself is not copied in: the author
+  /// already has it, and stories expire, so a reply to one that has gone is
+  /// shown as replying to an expired story rather than resurrecting content
+  /// that was meant to disappear.
+  final String? replyToStoryId;
+
   const Message({
     required this.id,
     required this.senderId,
@@ -20,6 +32,7 @@ class Message with EquatableMixin {
     this.delivered = false,
     this.mediaRefs = const [],
     this.audioRef,
+    this.replyToStoryId,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -35,6 +48,7 @@ class Message with EquatableMixin {
               .toList() ??
           [],
       audioRef: json['audioRef'] as String?,
+      replyToStoryId: json['replyToStoryId'] as String?,
     );
   }
 
@@ -48,6 +62,7 @@ class Message with EquatableMixin {
       'delivered': delivered,
       'mediaRefs': mediaRefs,
       'audioRef': audioRef,
+      if (replyToStoryId != null) 'replyToStoryId': replyToStoryId,
     };
   }
 
@@ -60,6 +75,7 @@ class Message with EquatableMixin {
     bool? delivered,
     List<String>? mediaRefs,
     String? audioRef,
+    String? replyToStoryId,
   }) {
     return Message(
       id: id ?? this.id,
@@ -70,10 +86,12 @@ class Message with EquatableMixin {
       delivered: delivered ?? this.delivered,
       mediaRefs: mediaRefs ?? this.mediaRefs,
       audioRef: audioRef ?? this.audioRef,
+      replyToStoryId: replyToStoryId ?? this.replyToStoryId,
     );
   }
 
   @override
   List<Object?> get props =>
-      [id, senderId, recipientId, content, timestamp, delivered, mediaRefs, audioRef];
+      [id, senderId, recipientId, content, timestamp, delivered, mediaRefs,
+        audioRef, replyToStoryId];
 }

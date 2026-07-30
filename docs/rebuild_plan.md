@@ -579,6 +579,9 @@ Carried into later phases:
 **Exit:** a user can do everything they expect from a mainstream social app, entirely within
 spheres, with no path that produces unscoped content.
 
+**Phase 4 is complete except push notifications**, which is blocked on a product decision
+rather than on work — see the note at the end of this phase.
+
 **Progress — the data-loss and dead-feature bugs are fixed.**
 
 - **Comments** are persisted and broadcast to the sphere, and verified against the
@@ -626,8 +629,12 @@ Remaining in Phase 4:
   Notification preferences are still absent because notifications themselves are.
 - ~~**Story view receipts**~~ — done, and deliberately narrower than the mainstream
   version: a receipt goes to the author alone rather than to the sphere, so members do not
-  learn who else is watching, and it can be switched off in settings. Story *replies* are
-  still outstanding.
+  learn who else is watching, and it can be switched off in settings.
+- ~~**Story replies**~~ — done. A reply is a private message to the author rather than a
+  sphere-visible comment, so it rides the ratcheted direct path and gets forward secrecy
+  that sphere-sealed content does not. It carries only the story's id: stories expire, and
+  a reply should not resurrect content that was meant to disappear, so a reply to an
+  expired story says exactly that.
 - ~~**TURN**~~ — now configurable (`CallConfig`): custom STUN/TURN servers, or TURN off
   entirely so calls only connect over a direct path. The default is still the free public
   `openrelay.metered.ca`, which is stated plainly in the UI along with what a TURN server

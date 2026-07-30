@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/post.dart';
+import '../../services/chat_service.dart';
+import '../../crypto/session_manager.dart';
 import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
@@ -30,7 +32,9 @@ class StoryViewerScreen extends StatefulWidget {
 class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTickerProviderStateMixin {
   late PageController _pageController;
   late AnimationController _animController;
+  final _replyController = TextEditingController();
   int _currentIndex = 0;
+  bool _sendingReply = false;
   static const Duration _storyDuration = Duration(seconds: 5);
 
   @override
@@ -61,6 +65,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
   void dispose() {
     _pageController.dispose();
     _animController.dispose();
+    _replyController.dispose();
     super.dispose();
   }
 
@@ -166,6 +171,99 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
             ),
           ),
       ],
+    );
+  }
+
+  /// Reply privately to the story's author.
+  ///
+  /// A story reply is a direct message, not a comment the sphere can see —
+  /// which also means it travels on the ratcheted path and gets the forward
+  /// secrecy that sphere-sealed content does not.
+  Future<void> _sendReply() async {
+    final text = _replyController.text.trim();
+    if (text.isEmpty || _sendingReply) return;
+
+    final story = widget.stories[_currentIndex];
+    final messenger = ScaffoldMessenger.of(context);
+
+    setState(() => _sendingReply = true);
+    try {
+      await context.read<ChatService>().sendMessage(
+            story.authorId,
+            text,
+            replyToStoryId: story.id,
+          );
+      _replyController.clear();
+      if (mounted) FocusScope.of(context).unfocus();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Reply sent'), duration: Duration(seconds: 2)),
+      );
+    } on NoSessionException {
+      messenger.showSnackBar(const SnackBar(
+        content: Text(
+          'Cannot encrypt to them yet — their encryption key has not arrived.',
+        ),
+      ));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not send: $e')));
+    } finally {
+      if (mounted) setState(() => _sendingReply = false);
+      if (mounted) _animController.forward();
+    }
+  }
+
+  /// Composer shown under someone else's story.
+  Widget _buildReplyBar() {
+    final me = context.watch<IdentityService>().publicKey;
+    final story = widget.stories[_currentIndex];
+    if (me == null || story.authorId == me) return const SizedBox.shrink();
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        12,
+        4,
+        12,
+        12 + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _replyController,
+              style: const TextStyle(color: Colors.white),
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _sendReply(),
+              // Pause the countdown while typing, or the story advances
+              // mid-sentence.
+              onTap: () => _animController.stop(),
+              decoration: InputDecoration(
+                hintText: 'Reply privately…',
+                hintStyle: const TextStyle(color: Colors.white54),
+                filled: true,
+                fillColor: Colors.white12,
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: _sendingReply
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.send_rounded, color: Colors.white),
+            onPressed: _sendingReply ? null : _sendReply,
+          ),
+        ],
+      ),
     );
   }
 
@@ -290,6 +388,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
                 ),
                 const Spacer(),
           _buildViewerBar(),
+          _buildReplyBar(),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white, shadows: [Shadow(color: Colors.black54, blurRadius: 4)]),
                   onPressed: () => context.pop(),

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'package:provider/provider.dart';
+
 import '../models/message.dart';
+import '../models/post.dart';
+import '../services/feed_service.dart';
 import 'emoticon_picker.dart';
 import 'media_preview.dart';
 import 'voice_note_player.dart';
@@ -59,6 +63,15 @@ class MessageBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              // Story context, when this message answers one.
+              if (message.replyToStoryId != null) ...[
+                _StoryReplyContext(
+                  storyId: message.replyToStoryId!,
+                  isMine: isMine,
+                ),
+                const SizedBox(height: 6),
+              ],
+
               // Media previews
               if (message.mediaRefs.isNotEmpty) ...[
                 Wrap(
@@ -148,6 +161,79 @@ class MessageBubble extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The story a reply refers to.
+///
+/// Stories expire, and the reply deliberately does not copy the content in, so
+/// this says so plainly rather than showing a blank quote or resurrecting
+/// something that was meant to disappear.
+class _StoryReplyContext extends StatelessWidget {
+  final String storyId;
+  final bool isMine;
+
+  const _StoryReplyContext({required this.storyId, required this.isMine});
+
+  @override
+  Widget build(BuildContext context) {
+    final posts = context.watch<FeedService>().allPosts;
+    Post? story;
+    for (final post in posts) {
+      if (post.id == storyId) story = post;
+    }
+
+    final expired = story == null ||
+        (story.expiresAt != null && story.expiresAt!.isBefore(DateTime.now()));
+
+    final label = expired
+        ? 'Replied to a story that has expired'
+        : (isMine ? 'You replied to a story' : 'Replied to your story');
+
+    final preview = expired ? null : story.content;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(10),
+        border: Border(
+          left: BorderSide(color: Colors.white.withValues(alpha: 0.6), width: 3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_stories_outlined,
+                  size: 12, color: Colors.white70),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (preview != null && preview.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              preview,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white60, fontSize: 11),
+            ),
+          ],
+        ],
       ),
     );
   }

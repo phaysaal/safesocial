@@ -114,7 +114,9 @@ class ChatService extends ChangeNotifier {
   /// sent when it was never encrypted or delivered is what made the old
   /// behaviour misleading.
   Future<void> sendMessage(String contactPublicKey, String content,
-      {List<String>? mediaRefs, String? audioRef}) async {
+      {List<String>? mediaRefs,
+      String? audioRef,
+      String? replyToStoryId}) async {
     final sessions = _sessions;
     if (sessions == null || !sessions.isReady) {
       throw StateError('ChatService has no identity yet');
@@ -128,6 +130,7 @@ class ChatService extends ChangeNotifier {
       timestamp: DateTime.now(),
       mediaRefs: mediaRefs ?? [],
       audioRef: audioRef,
+      replyToStoryId: replyToStoryId,
     );
 
     // Send the image itself, not a path into our own sandbox. Chat previously
