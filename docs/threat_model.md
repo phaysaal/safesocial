@@ -59,6 +59,10 @@ Can:
 - **See IP addresses**, via Cloudflare. The worker does not log them; Cloudflare's own
   logging is outside our control. Tor or a VPN is the only mitigation.
 
+**One exception, on the deployed instance.** Objects created by the v1 relay are now
+unreachable but were not deleted, and v1 set no expiry, so that data persists outside the
+retention window described above. See `relay/README.md` for why and how to clear it.
+
 ### 2.2 A network observer
 
 Sees TLS to one hostname, learning that the app is in use and when. Content,

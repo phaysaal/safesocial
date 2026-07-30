@@ -103,12 +103,16 @@ standard `Ed25519` algorithm name. Do not lower it.
 route names changed, so the two versions do not interoperate. Any already-installed v1
 client stops working the moment this deploys.
 
-**The v2 migration deletes all v1 data.** v2 addresses Durable Objects by new names, so
-objects created by v1 would become unreachable but not deleted — and v1 had no alarms, so
-they would sit in storage indefinitely, contradicting the retention promise above. The
-`v2` migration drops the old class, discarding that storage at deploy time. Anything still
-queued for an offline v1 user is lost, which is the intended outcome: it cannot be
-delivered to a client that no longer speaks the protocol.
+**Orphaned v1 data persists.** v2 addresses Durable Objects by new names, so every object
+v1 created is now unreachable — but unreachable is not deleted, and v1 set no alarms, so
+that storage remains. It is not covered by the retention row above.
+
+Purging it needs a `deleted_classes` migration, and Cloudflare refuses that while any
+binding references the class (error 10061). Doing it properly means deploying once with
+the Durable Object binding removed and again to restore it, which leaves a window where
+every request fails. That was judged not worth doing to a live relay for data that is
+already unreachable. If you want it gone, run those two deploys back to back during a
+maintenance window, or delete the Worker and recreate it.
 
 ## Self-hosting
 
