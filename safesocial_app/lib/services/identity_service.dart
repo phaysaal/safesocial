@@ -130,6 +130,7 @@ class IdentityService extends ChangeNotifier {
       );
 
       await _persistIdentity();
+      _logInviteLinkForDebugging();
       notifyListeners();
     } catch (e) {
       DebugLogService().error('Identity', 'Failed to create identity: $e');
@@ -254,6 +255,7 @@ class IdentityService extends ChangeNotifier {
         }
       }
       
+      _logInviteLinkForDebugging();
       notifyListeners();
     } catch (e) {
       debugPrint('[IdentityService] Load failed: $e');
@@ -336,6 +338,23 @@ class IdentityService extends ChangeNotifier {
     } else {
       DebugLogService().error('Identity', 'Failed to publish prekey bundle');
     }
+  }
+
+  /// Print this identity's invite link in debug builds only.
+  ///
+  /// Pairing goes through a QR scan, which two emulators cannot do to each
+  /// other, and nothing else exposes the keys as text — they are encrypted at
+  /// rest. Without this a two-device test cannot get past the first step.
+  /// Both keys here are public; the secrets are never logged, and release
+  /// builds never reach this line.
+  void _logInviteLinkForDebugging() {
+    if (!kDebugMode) return;
+    final identity = _currentIdentity;
+    if (identity == null) return;
+    final exchangeKey = _exchangePublicKeyHex;
+    debugPrint('[SpheresInvite] spheres://add?key=${identity.publicKey}'
+        '&name=${Uri.encodeComponent(identity.displayName)}'
+        '${exchangeKey != null ? '&xk=$exchangeKey' : ''}');
   }
 
   Future<void> _persistIdentity() async {

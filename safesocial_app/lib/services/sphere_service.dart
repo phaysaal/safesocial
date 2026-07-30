@@ -485,6 +485,11 @@ class SphereService extends ChangeNotifier {
 
     _spheres[sphere.id] = sphere;
     keyring.rotate(sphere.id, sphere.epoch);
+    // Every other path that rotates writes the keyring straight after; this
+    // one did not. The key survived only in memory, so the creator of a sphere
+    // lost the ability to post to it at the next restart — permanently, since
+    // the one person who could re-key it was them.
+    await keyring.persist();
     await _record(sphere, MembershipOp.opCreate, '', me, detail: name);
     await _persist();
     notifyListeners();

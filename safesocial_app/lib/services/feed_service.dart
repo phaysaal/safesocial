@@ -175,7 +175,11 @@ class FeedService extends ChangeNotifier {
 
   void initSync(String myPublicKey, String mySecretKey, List<Contact> contacts) {
     _myPublicKey = myPublicKey;
-    _contacts = contacts;
+    // A copy, not the caller's list. ContactService hands out an unmodifiable
+    // view, and connectContact appends to this — so keeping the reference made
+    // every contact added after launch throw, silently leaving their feed
+    // channel unopened. That is the whole "posts never arrive" bug.
+    _contacts = List.of(contacts);
 
     _feedRelay.onMessageReceived = (contactKey, data) {
       _handleIncomingFeedItem(contactKey, data);

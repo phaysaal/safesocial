@@ -213,6 +213,53 @@ void main() {
     });
   });
 
+  group('surviving a restart', () {
+    // Found on two emulators: Alice created a sphere, posted to it, restarted
+    // the app, and the composer then said "No spheres yet". create() rotated
+    // the keyring but never persisted it, so the epoch key lived only in
+    // memory. The creator lost the ability to post to their own sphere, and
+    // nobody could fix it — re-keying needs the key you no longer have.
+    test('a sphere you created is still writable after a restart', () async {
+      final service = serviceFor(alice, aliceSecret);
+      final sphere = await service.create(
+        name: 'Family',
+        kind: SphereKind.group,
+        initialMembers: [bob],
+      );
+
+      final restarted = serviceFor(alice, aliceSecret);
+      await restarted.load();
+
+      expect(restarted.keyring.hasKey(sphere.id, 1), isTrue);
+      expect(restarted.writable.map((s) => s.id), [sphere.id]);
+    });
+
+    test('a sphere you joined is still writable after a restart', () async {
+      // This half already worked — acceptInvite persists — and it is what made
+      // the bug so confusing: the invitee kept working, the creator did not.
+      final service = await bobInAlicesSphere();
+      expect(service.sphere(sphereId), isNotNull);
+
+      final restarted = serviceFor(bob, bobSecret);
+      await restarted.load();
+
+      expect(restarted.sphere(sphereId), isNotNull);
+    });
+
+    test('sealing still works after a restart', () async {
+      final service = serviceFor(alice, aliceSecret);
+      final sphere =
+          await service.create(name: 'Family', kind: SphereKind.group);
+
+      final restarted = serviceFor(alice, aliceSecret);
+      await restarted.load();
+
+      // Threw "No key for ... waiting for an admin to send it" — to the admin.
+      await restarted.sealContent(
+          sphereId: sphere.id, type: 'post', plaintext: 'hello');
+    });
+  });
+
   // ── Demotion ──────────────────────────────────────────────────────────────
 
   group('demotion', () {

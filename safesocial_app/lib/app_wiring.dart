@@ -115,9 +115,24 @@ Future<void> wireIdentity({
     final contact = matches.first;
     if (contact.blocked) return;
 
-    chatService.connectRelay(key);
-    callService.connectSignaling(key);
-    feedService.connectContact(contact);
+    // Each channel is opened independently. They used to run as a bare
+    // sequence, so when connectContact threw, chat and call were already up
+    // but the feed never connected — and the exception escaped into whatever
+    // added the contact, which on the inbound-handshake path meant the reply
+    // handshake was never sent either. One broken channel must not take the
+    // others, or the caller, down with it.
+    void open(String what, void Function() connect) {
+      try {
+        connect();
+      } catch (e) {
+        DebugLogService()
+            .error('Wiring', 'Could not open the $what channel for $key: $e');
+      }
+    }
+
+    open('chat', () => chatService.connectRelay(key));
+    open('call', () => callService.connectSignaling(key));
+    open('feed', () => feedService.connectContact(contact));
   }
 
   contactService.onContactReady = wireContact;
