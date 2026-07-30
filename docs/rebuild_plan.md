@@ -679,9 +679,25 @@ identity, verified.
 
 ### Phase 6 — Hardening *(ongoing)*
 
-Independent security review before any "secure messenger" positioning. Refresh
-`threat_model.md` against what is actually built. Fuzz the wire parsers. Reproducible builds and
-F-Droid distribution.
+**Progress.**
+
+- ~~Refresh `threat_model.md`~~ — done. Rewritten against what is actually built, adversary
+  by adversary, with a ranked list of known gaps. The old one described the Veilid system
+  that was never built.
+- ~~Fuzz the wire parsers~~ — done. `test/crypto/parser_fuzz_test.dart` throws hostile and
+  random input at every parser that sits behind the relay: envelopes, blob references,
+  recovery shards, vaults, spheres, sessions and membership operations. Seeded, so a failure
+  is reproducible. It found nothing, which is a weak signal but the right one to have.
+
+Remaining, in the order that matters:
+
+1. **Encrypt local storage.** Message history, sphere keys and ratchet state are plaintext
+   JSON in SharedPreferences. This undermines several protections the rest of the system
+   provides, and is the highest-value work left in the project.
+2. **Run it on two real devices.** Nothing in seven phases has exchanged a message. Unknown
+   unknowns dominate every other risk here.
+3. **Independent security review**, which cannot sensibly happen before 1 and 2.
+4. Reproducible builds and F-Droid distribution.
 
 ---
 

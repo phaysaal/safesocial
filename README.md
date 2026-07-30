@@ -115,12 +115,12 @@ safesocial/
     architecture_weaknesses.md  Known defects in the shipping build
     privacy_protocol.md   The cryptographic design, now largely implemented
     protocol.md           Original Veilid wire protocol spec (aspirational)
-    threat_model.md       Threat model (describes the intended system)
+    threat_model.md       Threat model — current, describes what is built
 ```
 
-> Note on the docs: `architecture.md`, `protocol.md`, and `threat_model.md` describe the
-> originally intended Veilid-based system, not what is built today. They are kept as
-> design references. `rebuild_plan.md` is the authoritative current plan.
+> Note on the docs: `architecture.md` and `protocol.md` describe the originally intended
+> Veilid-based system, not what is built today, and are kept only as design references.
+> `rebuild_plan.md` is the authoritative plan and `threat_model.md` is current.
 
 ## Part of SafeSelf
 

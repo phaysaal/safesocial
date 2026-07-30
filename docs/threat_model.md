@@ -1,184 +1,178 @@
 # Spheres Threat Model
 
-## Assets
+**Date:** 2026-07-30
+**Applies to:** the system as actually built, verified by reading the source.
 
-The following assets require protection:
+This replaces an earlier threat model that described a Veilid-based peer-to-peer
+system. That system was never built. Everything below describes the relay-based
+architecture that exists.
 
-| Asset | Description | Sensitivity |
-|-------|-------------|-------------|
-| **User identity** | Ed25519 keypair (secret + public key) | Critical -- compromise means full impersonation |
-| **Messages** | Direct and group chat content | High -- private communications |
-| **Contacts** | List of known peers and their public keys | High -- reveals social graph |
-| **Posts** | Feed content authored by the user | Medium -- intended for contacts but not public |
-| **Media** | Photos, videos, voice messages, attachments | High -- may contain personal/sensitive content |
-| **Metadata** | Timestamps, message counts, online status, group membership | Medium -- can reveal patterns even without content |
+**Nothing here has been independently audited, and none of it has been exercised on
+real devices.** Treat every claim as "designed and unit-tested", not "proven".
 
-## Trust Model
+---
 
-| Entity | Trust Level | Rationale |
-|--------|-------------|-----------|
-| **Your device** | Trusted | All secrets live here. If the device is compromised, all bets are off. |
-| **Veilid's cryptographic primitives** | Trusted | Ed25519, x25519, XChaCha20-Poly1305, BLAKE3 are well-studied algorithms. Veilid's implementations are open-source and auditable. |
-| **Veilid network peers** | Untrusted | Any peer may be malicious, surveilling, or controlled by an adversary. |
-| **The network (ISPs, governments)** | Untrusted | Network observers can see that Veilid traffic exists but should not be able to determine its content or endpoints. |
-| **Your contacts** | Partially trusted | They can see content you share with them. They could screenshot, re-share, or be compromised. |
+## 1. What the system is
 
-## Threats and Mitigations
+- Identity is an Ed25519 keypair generated on the device, plus an X25519 subkey for
+  key agreement. There is no account and no server-side record of a user.
+- All content belongs to a **sphere**: a named set of members with a symmetric key
+  that rotates on every membership change. There is no public audience anywhere in
+  the data model.
+- Everything transits one relay (a Cloudflare Worker), addressed by mailboxes derived
+  from secrets only the participants share.
+- Media is encrypted, chunked, and stored as blobs addressed by unguessable
+  capabilities.
 
-### 1. Message Interception
+---
 
-**Threat:** An attacker intercepts messages in transit or reads them from DHT storage.
+## 2. Adversaries, and what each one gets
 
-**Mitigation:** All message content is encrypted with XChaCha20-Poly1305 using a shared secret derived via x25519 Diffie-Hellman key exchange between the sender and recipient. DHT records contain only ciphertext. Without the shared secret, intercepted data is indistinguishable from random bytes.
+### 2.1 The relay operator, or anyone who compels them
 
-**Residual risk:** If an attacker compromises one party's secret key, they can derive the shared secret and decrypt past and future messages (no forward secrecy in the current design -- see Future Improvements).
+**Assumed hostile.** This is the adversary the architecture is shaped around.
 
-### 2. Metadata and Traffic Analysis
+Cannot:
 
-**Threat:** An observer monitors network traffic to determine who is communicating with whom, when, and how often.
+- **Read content.** Everything is sealed with XChaCha20-Poly1305 before it is sent.
+- **Identify participants.** A mailbox address is an Ed25519 public key derived from
+  a shared secret, so it cannot be computed from public keys and traffic cannot be
+  mapped onto a social graph. Chat, feed and call between one pair get distinct
+  addresses, so those channels are not linkable to each other either.
+- **Read anyone's mail.** Access requires signing a challenge with the mailbox key,
+  verified against the address itself. There is no membership list to bypass, and a
+  throwaway keypair proves nothing.
+- **Forge or tamper.** Every envelope is signed by the sender's identity key, and the
+  header is bound as AEAD associated data.
 
-**Mitigation:** All DHT operations go through Veilid private routes (onion routing). The routing context is created with `.with_privacy()`, which means:
-- The sender's IP is hidden behind multiple relay hops.
-- The recipient's IP is hidden behind their own private route.
-- Intermediate nodes see only their immediate predecessor and successor.
+Can:
 
-**Residual risk:** A global passive adversary with visibility into a large fraction of Veilid nodes could theoretically perform timing correlation. This is the same limitation faced by Tor and similar onion routing networks.
+- **See timing** — when an address is active, and how often.
+- **See approximate size.** Payloads are padded into buckets (512 B / 2 K / 8 K /
+  32 K / 128 K), so the operator learns a size class rather than a length.
+- **See longevity.** Addresses are secret-derived but *stable*, so it is observable
+  that some pair has been communicating for months. Rotation is designed but not
+  implemented: it needs a lookback window at least as long as the retention period,
+  or mail queued to a retired mailbox is lost.
+- **Withhold or delete.** A relay can drop messages. Delivery receipts make that
+  visible to the sender, but do not prevent it.
+- **See IP addresses**, via Cloudflare. The worker does not log them; Cloudflare's own
+  logging is outside our control. Tor or a VPN is the only mitigation.
 
-### 3. Identity Theft
+### 2.2 A network observer
 
-**Threat:** An attacker obtains the user's Ed25519 secret key and impersonates them.
+Sees TLS to one hostname, learning that the app is in use and when. Content,
+addresses and identities are inside TLS and encrypted again inside that.
 
-**Mitigation:** The secret key is stored in Veilid's ProtectedStore, which uses:
-- iOS Keychain on Apple devices
-- Android Keystore on Android devices
-- Encrypted file-based vault on desktop platforms
+### 2.3 A malicious contact or sphere member
 
-The key never leaves the ProtectedStore in plaintext during normal operation.
+Cannot:
 
-**Residual risk:** A rooted/jailbroken device or a device with malware capable of keychain extraction could compromise the key.
+- **Impersonate.** Authorship comes from a signature verified before display, and the
+  payload's own author field is cross-checked against it; mismatches are dropped.
+- **Read spheres they are not in.** Content is sealed to a sphere epoch key.
+- **Read anything published after removal.** Removal bumps the epoch and mints a key
+  they never receive. This is cryptographic, not a local flag.
+- **Forge membership changes.** Operations are signed, must come from an admin, and an
+  older epoch cannot be replayed over a newer one.
+- **Add you to a sphere silently.** Invitations require explicit acceptance.
 
-### 4. Message Tampering
+Can:
 
-**Threat:** An attacker modifies message content in transit or in DHT storage.
+- **Keep what they already had.** Removal denies future content, not past content.
+- **Screenshot, copy, or repost.** No DRM, and none is possible.
+- **See who else is in a shared sphere** — membership is visible to members.
+- **Correlate you across the spheres you share.**
 
-**Mitigation:** Every message includes an Ed25519 signature computed over the canonical JSON serialization of all message fields. Recipients verify the signature against the sender's known public key before displaying the message. Tampered messages fail verification and are rejected.
+### 2.4 Someone who has the device
 
-**Residual risk:** None for signed messages. Unsigned data (e.g., DHT record metadata managed by Veilid itself) relies on Veilid's built-in integrity mechanisms.
+**Currently the weakest area.**
 
-### 5. Unauthorized DHT Access
+- The Ed25519 identity key and the X25519 key are in the platform keystore
+  (`flutter_secure_storage`).
+- **Everything else is not.** Message history, sphere keys, ratchet state, contacts
+  and posts are plaintext JSON in SharedPreferences. Anyone able to read the app's
+  data directory — a rooted or jailbroken device, a forensic extraction, malware with
+  the right permissions — reads all of it.
+- Moving to SQLCipher is outstanding and is the highest-value hardening task left.
+- Cloud backup is off (`allowBackup="false"`), so this does not leave via Android Auto
+  Backup.
 
-**Threat:** An attacker reads or writes to DHT records they should not have access to.
+Forward secrecy limits the damage only partially. Direct messages advance a KDF chain
+and drop used keys, so a device seized later cannot decrypt DMs it has already read
+and discarded — but the plaintext history is still on disk, which makes that
+protection largely theoretical today. Sphere content has no forward secrecy at all:
+the epoch key opens everything published during that epoch.
 
-**Mitigation:** Veilid DHT records enforce access control:
-- **Owner-only records** (profiles, posts): Only the keypair owner can write. Anyone can read (but content is encrypted or public by design).
-- **Multi-writer records** (conversations, groups): Only explicitly added writers (identified by public key) can write to their assigned subkeys.
+### 2.5 A TURN operator
 
-An attacker without the appropriate secret key cannot forge writes.
+If a call cannot connect directly it is relayed, and the relay sees both parties' IP
+addresses and the timing and volume of the media. The media itself stays
+SRTP-protected. The default is a free public service, which the UI states; TURN can be
+replaced or switched off entirely in settings.
 
-**Residual risk:** DHT records that are readable by anyone (by design, for profile discovery) expose the ciphertext. This is acceptable because the ciphertext reveals nothing without the decryption key.
+### 2.6 Whoever ships the binary
 
-### 6. Device Compromise
+Unaddressed. There are no reproducible builds, so a user cannot verify that an APK
+matches this source. Release signing now fails rather than falling back to the public
+Android debug key, but the keystore passphrase is weak and known to be.
 
-**Threat:** An attacker gains physical or remote access to the user's device.
+---
 
-**Mitigation:**
-- ProtectedStore encrypts secrets using the OS keychain where available.
-- TableStore data is encrypted at rest by Veilid.
-- Device-level protections (PIN, biometrics, full-disk encryption) provide an additional layer.
+## 3. What this does not protect against
 
-**Residual risk:** A fully compromised device (root access, malware with keychain access) exposes all local data. This is a fundamental limitation of any local-first design. Spheres cannot protect data on a device that the user does not control.
+| Threat | Why not |
+|---|---|
+| A compromised device | Local storage is unencrypted; see 2.4. |
+| Traffic analysis | Timing and size class are visible; there is no cover traffic. |
+| A malicious build | No reproducible builds. |
+| Coercion | Nothing here survives someone being made to unlock their phone. |
+| Screenshots by a member | Not solvable in software. |
+| A relay refusing service | Availability is not a guarantee; the relay is replaceable, not redundant. |
+| Correlation with other platforms | Posting the same content elsewhere links the identities. |
 
-### 7. Network-Level Surveillance
+---
 
-**Threat:** An ISP, government, or network operator monitors the user's internet traffic to identify Spheres usage and communication patterns.
+## 4. Cryptographic summary
 
-**Mitigation:**
-- Private routes hide the true source and destination of all DHT operations.
-- No central servers exist that could be subpoenaed, monitored, or compelled to produce logs.
-- Veilid traffic uses encrypted transports (TLS, WSS) that obscure content from passive observers.
+| Purpose | Primitive |
+|---|---|
+| Identity, signatures | Ed25519 |
+| Key agreement | X25519 |
+| Content encryption | XChaCha20-Poly1305 |
+| Key derivation | HKDF-SHA256, domain-separated per purpose |
+| Passphrase vaults | Argon2id (19 MiB, t=2, p=1), then XChaCha20-Poly1305 |
+| Direct-message forward secrecy | Symmetric KDF chain; keys deleted after use |
+| Sphere content | Per-epoch random key, rotated on membership change |
+| Social recovery | Shamir over GF(256), reconstruction verified against the identity key |
 
-**Residual risk:** An observer can determine that a device is participating in the Veilid network (by recognizing Veilid protocol traffic patterns or bootstrap node connections). They cannot determine what the user is doing within the network.
+Notably **absent**: post-compromise security. There is no Diffie-Hellman ratchet, so
+an attacker who obtains current DM chain state can follow the conversation forward.
+This is why the app does not describe itself as implementing the Double Ratchet.
 
-### 8. Sybil Attacks
+---
 
-**Threat:** An attacker creates many fake Veilid nodes to dominate DHT routing, enabling data interception or denial of service.
+## 5. Known gaps, ranked
 
-**Mitigation:** Veilid implements a peer reputation system that weights long-lived, well-behaving nodes more heavily than new or suspicious ones. DHT records are replicated across multiple peers, reducing the impact of any single malicious node.
+1. **Local storage is unencrypted.** Undermines several protections above.
+2. **Never run.** Unit-tested, but no real message has crossed between two devices.
+   Unknown unknowns dominate this list.
+3. **Unaudited.** No independent review of the protocol or the implementation.
+4. **Mailbox addresses do not rotate**, so long-lived pairs are observable as such.
+5. **No post-compromise security** for direct messages.
+6. **No forward secrecy** for sphere content.
+7. **No reproducible builds.**
+8. **Concurrent multi-device unsupported** — two devices sharing an identity would
+   advance the same ratchet chains and reuse message keys. Linking is presented as
+   moving devices, not running two.
+9. **No push notifications**, deliberately: every practical provider learns that a
+   given device received something, and when.
 
-**Residual risk:** A sufficiently resourced attacker could operate enough nodes to degrade DHT reliability. However, because all content is encrypted and signed, even a successful Sybil attack reveals no plaintext and cannot forge messages.
+---
 
-### 9. Denial of Service
+## 6. Before calling this a secure messenger
 
-**Threat:** An attacker makes the network or specific records unavailable.
-
-**Mitigation:**
-- **Local-first design:** All data is stored locally. The user can read their messages, contacts, and posts even when the network is completely unavailable.
-- **DHT replication:** Records are replicated across multiple Veilid peers. Taking down a subset of peers does not destroy records.
-- **Offline operation:** Spheres is designed to work offline. Messages composed offline are queued and delivered when connectivity is restored.
-
-**Residual risk:** A sustained, large-scale attack on the Veilid network could delay message delivery. It cannot destroy data or prevent local access to already-synced content.
-
-### 10. Key Loss
-
-**Threat:** The user loses their device and with it their identity keypair, permanently losing access to their identity and encrypted data.
-
-**Mitigation:** Spheres provides identity export/backup functionality (`identity_to_string()` / `identity_from_string()`). Users can export their full keypair as a base64 string and store it in a secure location (password manager, printed paper in a safe, etc.).
-
-**Residual risk:** This is entirely the user's responsibility. If the user does not back up their identity and loses their device, the identity is unrecoverable. There is no "forgot password" flow -- this is by design.
-
-## What Spheres Does NOT Protect Against
-
-These threats are explicitly out of scope:
-
-| Threat | Why It Is Out of Scope |
-|--------|----------------------|
-| **Compromised device (root/jailbreak)** | If an attacker has root access to the device, they can extract keys from the keychain, read decrypted messages from memory, and install keyloggers. No application-level protection can defend against this. |
-| **Rubber-hose cryptanalysis** | If a user is physically coerced into unlocking their device or revealing their backup key, Spheres cannot help. This is a physical security problem, not a software problem. |
-| **Screenshots by recipient** | Once a message is decrypted and displayed on a contact's screen, that contact can screenshot, photograph, or transcribe it. Spheres provides no DRM. |
-| **Metadata within shared groups** | Group members can see each other's public keys, display names, message timestamps, and online status. This is inherent to the group functionality. A group member could share this information externally. |
-| **Correlation via shared content** | If a user posts the same text or image on Spheres and a public platform, an observer could correlate the two identities. Spheres cannot prevent users from de-anonymizing themselves. |
-
-## Comparison with Centralized Alternatives
-
-The primary motivation for Spheres is protection against systemic, AI-powered surveillance platforms (Palantir-like systems) that aggregate data from social networks to model psychology, behavior, and predict future actions.
-
-### What surveillance systems can extract from centralized social networks
-
-| Data Category | Available on Centralized Platforms |
-|---------------|-----------------------------------|
-| Real identity | Full name, email, phone number, government ID (some platforms) |
-| Social graph | Complete friend/follower list, interaction frequency, relationship strength |
-| Communication content | Messages (often server-readable, even with "encryption" that holds server-side keys) |
-| Behavioral metadata | Login times, session duration, click patterns, scroll behavior, typing indicators |
-| Location | IP-based geolocation, GPS (if granted), location tags on posts/photos |
-| Psychological profile | Likes, reactions, content engagement patterns, ad click behavior, search history |
-| Content analysis | Posts, photos, videos analyzed by server-side ML for sentiment, topics, faces, objects |
-| Device fingerprint | Browser/app telemetry, device model, OS version, installed apps |
-| Cross-platform correlation | Shared identifiers (email, phone) link profiles across platforms |
-
-### What surveillance systems can extract from Sphere
-
-| Data Category | Available from Spheres |
-|---------------|------------------------|
-| Real identity | None. Identity is a cryptographic keypair with no link to real-world identity. |
-| Social graph | None. Contact lists are local-only (TableStore). No server has a copy. |
-| Communication content | None. Messages are E2E encrypted. No server holds plaintext or keys. |
-| Behavioral metadata | None. No server to log sessions, clicks, or engagement. |
-| Location | None. IP hidden by private routes. No GPS collection. |
-| Psychological profile | None. No engagement tracking, no ad system, no recommendation algorithm. |
-| Content analysis | None. Posts are encrypted and stored on user devices, not on servers. |
-| Device fingerprint | None. No telemetry collection. |
-| Cross-platform correlation | None. No email, phone, or username to correlate. |
-
-**What remains observable:** A network observer can determine that a device is generating Veilid protocol traffic. They cannot determine what the user is doing, who they are communicating with, or what content is being exchanged. A surveillance system aggregating data from ISPs would see "this IP address uses Veilid" -- and nothing else.
-
-## Future Improvements
-
-| Improvement | Description | Impact |
-|-------------|-------------|--------|
-| **Key rotation** | Periodically generate new keypairs and migrate DHT records, limiting the window of compromise if a key is leaked. | Reduces damage from key compromise. |
-| **Forward secrecy** | Implement a Double Ratchet protocol (or similar) for messaging, so that compromise of current keys does not decrypt past messages. | Eliminates retroactive decryption threat. |
-| **Disappearing messages** | Messages that auto-delete after a configurable time, both locally and from DHT. | Reduces exposure window for sensitive conversations. |
-| **Multi-device support** | Sync identity and data across multiple user-owned devices, with per-device sub-keys. | Improves usability without compromising the security model. |
-| **Plausible deniability** | Explore deniable encryption schemes where the existence of hidden content cannot be proven. | Protects against coerced device inspection. |
-| **Verified contacts** | Out-of-band verification ceremony (safety number comparison) to confirm contact authenticity. | Defends against man-in-the-middle during contact exchange. |
+In order: encrypt local storage, run it on real devices, then commission an
+independent review. Positioning it as a secure messenger before those three is not
+defensible. If any claim in this document stops being true, update it — do not quietly
+drop it.
