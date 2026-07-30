@@ -1,0 +1,12 @@
+# Toolchain pinned for reproducible builds
+#
+# Every value here changes the bytes in the APK. Bump them deliberately, in a
+# commit of their own, and record the new expected hashes in the release.
+
+flutter=3.41.5
+flutter_revision=2c9eb20739
+dart=3.11.3
+gradle=8.14
+android_gradle_plugin=8.11.1
+kotlin=2.2.20
+java=17

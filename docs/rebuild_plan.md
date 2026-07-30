@@ -701,7 +701,13 @@ Remaining, in the order that matters:
 2. **Run it on two real devices.** Nothing in seven phases has exchanged a message. Unknown
    unknowns dominate every other risk here.
 3. **Independent security review**, which cannot sensibly happen before 1 and 2.
-4. Reproducible builds and F-Droid distribution.
+4. **Reproducible builds** — set up, not yet demonstrated. Toolchain pinned
+   (`FLUTTER_TOOLCHAIN`, `.flutter-version`, Gradle pinned by hash), releases publish
+   `SHA256SUMS.txt`, `scripts/verify_build.sh` lets anyone rebuild a release and diff it,
+   and a CI job builds the same commit twice and fails if the bytes differ. Nobody has yet
+   seen that check pass, and no release has been published with hashes, so it is
+   "checkable" rather than "proven". A pinned container image and F-Droid metadata are the
+   remaining steps — see `docs/reproducible_builds.md`.
 
 ---
 

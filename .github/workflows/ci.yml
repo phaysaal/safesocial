@@ -23,6 +23,9 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          # Pinned: the Flutter version is the single largest input to the
+          # compiled output, so "stable" would silently change the bytes.
+          flutter-version-file: .flutter-version
           channel: stable
           cache: true
 
@@ -47,6 +50,70 @@ jobs:
       # silently falling back to the public Android debug key.
       - name: Build debug APK
         run: flutter build apk --debug
+
+  reproducible:
+    name: Reproducible build — same inputs, same bytes
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: safesocial_app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .flutter-version
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Build the same commit twice on one runner and compare. This checks
+      # determinism — that the build does not bake in a timestamp, a path or a
+      # random ordering. It does not by itself prove that a *different* machine
+      # gets the same bytes; that additionally needs the pinned toolchain in
+      # FLUTTER_TOOLCHAIN to be honoured, which is why those versions are
+      # pinned rather than floating.
+      #
+      # This check has never been run. Its first result is information, not a
+      # regression: if it fails, the output names the differing entries and
+      # docs/reproducible_builds.md lists the usual culprits.
+      - name: First build
+        run: |
+          flutter build apk --debug
+          cp build/app/outputs/flutter-apk/app-debug.apk /tmp/first.apk
+
+      - name: Clean
+        run: flutter clean && flutter pub get
+
+      - name: Second build
+        run: |
+          flutter build apk --debug
+          cp build/app/outputs/flutter-apk/app-debug.apk /tmp/second.apk
+
+      - name: Compare
+        run: |
+          first=$(sha256sum /tmp/first.apk | cut -d' ' -f1)
+          second=$(sha256sum /tmp/second.apk | cut -d' ' -f1)
+          echo "build 1: $first"
+          echo "build 2: $second"
+          if [ "$first" = "$second" ]; then
+            echo "Reproducible: identical bytes from identical inputs."
+            exit 0
+          fi
+          echo "NOT reproducible — the two builds differ."
+          echo "Entries that differ:"
+          mkdir -p /tmp/a /tmp/b
+          unzip -qq -o /tmp/first.apk -d /tmp/a
+          unzip -qq -o /tmp/second.apk -d /tmp/b
+          diff -rq /tmp/a /tmp/b || true
+          exit 1
 
   relay:
     name: Relay — syntax check

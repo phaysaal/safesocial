@@ -61,6 +61,16 @@ popd >/dev/null
 
 APK_DIR="safesocial_app/build/app/outputs/flutter-apk"
 
+# ── Publish hashes ───────────────────────────────────────────────────────────
+# Without these a user cannot check that a download matches what was built, and
+# reproducing the build proves nothing because there is nothing to compare to.
+echo "Recording build hashes..."
+( cd "$APK_DIR" && sha256sum \
+    app-arm64-v8a-release.apk \
+    app-armeabi-v7a-release.apk \
+    app-x86_64-release.apk ) > "$APK_DIR/SHA256SUMS.txt"
+cat "$APK_DIR/SHA256SUMS.txt"
+
 # ── 3. Update the landing page ───────────────────────────────────────────────
 # Anchored to the Spheres version specifically, so unrelated version strings
 # elsewhere on the page are not rewritten.
@@ -79,9 +89,23 @@ gh release create "$VERSION" \
   "$APK_DIR/app-arm64-v8a-release.apk" \
   "$APK_DIR/app-armeabi-v7a-release.apk" \
   "$APK_DIR/app-x86_64-release.apk" \
+  "$APK_DIR/SHA256SUMS.txt" \
   --repo phaysaal/safesocial \
   --title "v$VERSION" \
-  --generate-notes
+  --notes "$(cat <<NOTES
+Built with the toolchain pinned in \`FLUTTER_TOOLCHAIN\`.
+
+To check a download, or to rebuild this release yourself and compare:
+
+\`\`\`
+scripts/verify_build.sh $VERSION
+\`\`\`
+
+\`\`\`
+$(cat "$APK_DIR/SHA256SUMS.txt")
+\`\`\`
+NOTES
+)"
 
 # ── 6. Deploy the site ───────────────────────────────────────────────────────
 echo "Deploying to Cloudflare Pages..."

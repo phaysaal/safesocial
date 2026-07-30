@@ -115,9 +115,12 @@ replaced or switched off entirely in settings.
 
 ### 2.6 Whoever ships the binary
 
-Unaddressed. There are no reproducible builds, so a user cannot verify that an APK
-matches this source. Release signing now fails rather than falling back to the public
-Android debug key, but the keystore passphrase is weak and known to be.
+Partly addressed. The toolchain is pinned, releases publish SHA-256 hashes, and
+`scripts/verify_build.sh` lets anyone rebuild a release and compare — so verification is
+now *possible*. It has not yet been demonstrated: the CI determinism check has never run,
+and no release has shipped with hashes. Until an independent party reproduces a release,
+treat the binary as unverified. Release signing now fails rather than falling back to the
+public Android debug key, but the keystore passphrase is weak and known to be.
 
 ---
 
@@ -162,7 +165,8 @@ This is why the app does not describe itself as implementing the Double Ratchet.
 4. **Mailbox addresses do not rotate**, so long-lived pairs are observable as such.
 5. **No post-compromise security** for direct messages.
 6. **No forward secrecy** for sphere content.
-7. **No reproducible builds.**
+7. **Reproducible builds are set up but undemonstrated**, and cross-machine
+   reproducibility still needs a pinned container image.
 8. **Concurrent multi-device unsupported** — two devices sharing an identity would
    advance the same ratchet chains and reuse message keys. Linking is presented as
    moving devices, not running two.
