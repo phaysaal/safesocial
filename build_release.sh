@@ -75,8 +75,24 @@ cat "$APK_DIR/SHA256SUMS.txt"
 # Anchored to the Spheres version specifically, so unrelated version strings
 # elsewhere on the page are not rewritten.
 echo "Updating landing page to v$VERSION..."
-sed -i "s/Spheres v[0-9]\+\.[0-9]\+\.[0-9]\+/Spheres v${VERSION}/g" landing/index.html
+PREVIOUS_VERSION=$(grep -oE 'releases/download/[0-9]+\.[0-9]+\.[0-9]+' landing/index.html \
+  | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+
+# Replace every vX.Y.Z, not only "Spheres vX.Y.Z". Narrowing this once left the
+# download button reading v0.4.7 while linking to the 0.5.0 APK — the file was
+# right, the label lied.
+sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v${VERSION}/g" landing/index.html
 sed -i "s|releases/download/[0-9.]\+/app|releases/download/${VERSION}/app|g" landing/index.html
+
+# Belt and braces, because both over- and under-replacing have now bitten:
+# nothing on the page may still name the previous version.
+if [[ -n "$PREVIOUS_VERSION" && "$PREVIOUS_VERSION" != "$VERSION" ]]; then
+  if grep -q "$PREVIOUS_VERSION" landing/index.html; then
+    echo "Error: landing page still mentions $PREVIOUS_VERSION after the bump:" >&2
+    grep -n "$PREVIOUS_VERSION" landing/index.html >&2
+    exit 1
+  fi
+fi
 
 # ── 4. Commit the version bump and landing page ──────────────────────────────
 echo "Committing version bump..."
