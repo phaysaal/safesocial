@@ -10,6 +10,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:cryptography/cryptography.dart';
 
 import '../crypto/spheres_crypto.dart';
+import '../crypto/vault.dart';
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
@@ -159,32 +160,33 @@ class IdentityService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Export the current identity keypair as a passphrase-encrypted vault.
+  /// Export the current identity as a passphrase-encrypted vault.
   ///
-  /// Unavailable: the vault primitives it depended on
-  /// (`spheres_create_vault` / `spheres_unlock_vault`) are placeholders that
-  /// return a fixed string regardless of input, so an "encrypted" export
-  /// contained no key material. Exporting the key unencrypted instead is not
-  /// an acceptable substitute here — it would put the secret key on the system
-  /// clipboard, readable by other apps. Use [BackupService] until real vault
-  /// encryption lands.
+  /// The vault primitives this used to depend on returned a fixed string
+  /// regardless of input, so an "encrypted" export contained no key material.
+  /// It is now real Argon2id + XChaCha20-Poly1305 (see [Vault]). The result is
+  /// safe to put on a clipboard only because it is encrypted — never export
+  /// the raw key that way.
   Future<String> exportIdentity(String passphrase) async {
-    throw UnsupportedError(
-      'Encrypted identity export is not available in this build.',
+    if (_keypair == null) throw Exception('No identity to export');
+
+    return Vault.seal(
+      plaintext: jsonEncode({
+        'key': _keypair!.publicKey,
+        'secret': _keypair!.secretKey,
+        'profile': _currentIdentity?.toJson(),
+      }),
+      passphrase: passphrase,
     );
   }
 
-  /// Import an identity from an unencrypted export blob.
-  ///
-  /// Passphrase-protected blobs cannot be opened — see [exportIdentity].
+  /// Import an identity, from a vault or an unencrypted blob.
   Future<bool> importIdentity(String blob, {String? passphrase}) async {
-    if (passphrase != null && passphrase.isNotEmpty) {
-      throw UnsupportedError(
-        'Passphrase-protected identity import is not available in this build.',
-      );
-    }
     try {
-      final data = jsonDecode(blob);
+      final decoded = Vault.looksLikeVault(blob)
+          ? await Vault.open(vault: blob, passphrase: passphrase ?? '')
+          : blob;
+      final data = jsonDecode(decoded);
       if (data is! Map ||
           data['key'] is! String ||
           data['secret'] is! String ||
@@ -212,6 +214,10 @@ class IdentityService extends ChangeNotifier {
       await _persistIdentity();
       notifyListeners();
       return true;
+    } on VaultException {
+      // Let this through: "wrong passphrase" and "this is not a backup" are
+      // different problems and the user can act on the difference.
+      rethrow;
     } catch (e) {
       debugPrint('[IdentityService] Import failed: $e');
       return false;

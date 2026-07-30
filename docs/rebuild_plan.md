@@ -645,12 +645,19 @@ Remaining in Phase 4:
 
 - Multi-relay support, user-configurable relay, published self-host image.
 - Multi-device via device certificates signed by the identity key, with per-device encryption.
-- Social recovery done properly: enforce the threshold (today `threshold == 1` is accepted, which
-  hands every guardian a complete copy of the secret), authenticate shards, verify the
-  reconstructed secret against the known identity public key before adopting it, and reject
-  malformed shards rather than panicking.
-- Encrypted backup that actually contains the key, covering spheres and messages — not just
-  identity, contacts, and posts.
+- ~~Social recovery~~ — done. Shamir over GF(256) in Dart (`lib/crypto/shamir.dart`), with a
+  threshold of 1 refused outright, duplicate and mismatched shards rejected instead of
+  panicking, and — the load-bearing part — the reconstruction verified against the identity's
+  public key before anything adopts it. Shamir has no integrity of its own, so too few shards
+  or one bad one yields plausible nonsense, which the old path returned as success.
+  Verification recomputes the public key from the seed rather than reading the copy stored in
+  the second half of the private key: `ed.public()` only slices bytes 32..64, so trusting it
+  validates half the secret and misses seed corruption entirely. A test caught that.
+- ~~Encrypted backup~~ — done. `lib/crypto/vault.dart`: Argon2id at OWASP's mobile parameters
+  plus XChaCha20-Poly1305, with the KDF parameters stored in the file and bound as associated
+  data so they cannot be edited down to make brute-forcing cheaper. Backup, identity export
+  and identity import are re-enabled. Backups still cover identity, contacts and posts only —
+  extending them to spheres and messages is outstanding.
 - *Optional, flagged:* opportunistic direct P2P transport; Veilid re-evaluated here.
 
 **Exit:** no single relay operator is structural; a user can self-host; recovery restores a real

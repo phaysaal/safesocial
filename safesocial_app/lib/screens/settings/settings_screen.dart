@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -112,18 +113,18 @@ class SettingsScreen extends StatelessWidget {
                 'different relay rooms. Disabled until rebuilt.',
           ),
           const Divider(indent: 56),
-          const _UnavailableTile(
-            icon: Icons.people_alt,
-            title: 'Social Recovery',
-            reason: 'Guardian shards were never generated or sent. Disabled '
-                'until implemented, so it cannot be relied on.',
+          ListTile(
+            leading: Icon(Icons.people_alt, color: cs.primary),
+            title: const Text('Social Recovery'),
+            subtitle: const Text('Split your identity across trusted people'),
+            onTap: () => context.push('/settings/recovery'),
           ),
           const Divider(indent: 56),
-          const _UnavailableTile(
-            icon: Icons.key,
-            title: 'Export / Import Private Key',
-            reason: 'Passphrase encryption was a placeholder that discarded '
-                'the key. Use Create Backup below instead.',
+          ListTile(
+            leading: Icon(Icons.key, color: cs.primary),
+            title: const Text('Export Private Key'),
+            subtitle: const Text('Passphrase-encrypted, for another device'),
+            onTap: () => _showExportDialog(context, identityService),
           ),
           const Divider(indent: 56),
 
@@ -132,7 +133,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: Icon(Icons.backup, color: cs.primary),
             title: const Text('Create Backup'),
-            subtitle: const Text('Unencrypted — contains your private key'),
+            subtitle: const Text('Encrypted with a passphrase you choose'),
             onTap: () => _createBackup(context, backupService),
           ),
           const Divider(indent: 56),
@@ -322,6 +323,65 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _showExportDialog(
+      BuildContext context, IdentityService identity) async {
+    final controller = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final passphrase = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Export Identity'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Your identity is encrypted with this passphrase before it '
+              'leaves the app. Anyone holding both the export and the '
+              'passphrase becomes you, and it cannot be revoked — choose '
+              'something long, and do not reuse it.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(labelText: 'Passphrase'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Export'),
+          ),
+        ],
+      ),
+    );
+
+    if (passphrase == null) return;
+    if (passphrase.length < 12) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Use at least 12 characters — this protects your identity'),
+      ));
+      return;
+    }
+
+    try {
+      final vault = await identity.exportIdentity(passphrase);
+      await Clipboard.setData(ClipboardData(text: vault));
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Encrypted identity copied to the clipboard'),
+      ));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
   }
 
   Future<void> _showCallServersDialog(
@@ -535,33 +595,61 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Future<void> _createBackup(BuildContext context, BackupService backupService) async {
-    final confirmed = await showDialog<bool>(
+    final controller = TextEditingController();
+    final passphrase = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Create Backup'),
-        content: const Text(
-          'The backup file will contain your private key in readable form.\n\n'
-          'Passphrase encryption is not available in this build, so anyone who '
-          'obtains the file can take over your identity. Store it somewhere you '
-          'trust, and delete it when you no longer need it.',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'The backup holds your identity, contacts and posts. With a '
+              'passphrase it is encrypted; leave it empty and the file '
+              'contains your private key in readable form, so anyone who gets '
+              'it becomes you.\n\n'
+              'A forgotten passphrase cannot be reset — the backup is simply '
+              'unrecoverable.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(
+                labelText: 'Passphrase',
+                helperText: 'Leave empty for an unencrypted backup',
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Create Anyway'),
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Create'),
           ),
         ],
       ),
     );
 
-    if (confirmed != true) return;
+    if (passphrase == null) return;
+    if (passphrase.isNotEmpty && passphrase.length < 12) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Use at least 12 characters, or leave it empty'),
+        ));
+      }
+      return;
+    }
 
     try {
-      final filePath = await backupService.createBackup();
+      final filePath = await backupService.createBackup(
+        passphrase: passphrase.isEmpty ? null : passphrase,
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

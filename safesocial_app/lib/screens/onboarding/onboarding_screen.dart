@@ -85,6 +85,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _showImportDialog(BuildContext context) async {
     final blobController = TextEditingController();
+    final passphraseController = TextEditingController();
 
     await showDialog<void>(
       context: context,
@@ -94,15 +95,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'Paste your backup data below.\n\n'
-              'Passphrase-protected backups cannot be opened in this build — '
-              'the encryption they used was a placeholder that discarded the key.',
+              'Paste your exported identity below. If it was encrypted, enter '
+              'the passphrase you chose.',
             ),
             const SizedBox(height: 16),
             TextField(
               controller: blobController,
               decoration: const InputDecoration(labelText: 'Backup data'),
               maxLines: 4,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: passphraseController,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(
+                labelText: 'Passphrase',
+                helperText: 'Leave empty if the export was not encrypted',
+              ),
             ),
           ],
         ),
@@ -118,7 +129,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               Navigator.pop(ctx);
               try {
                 final idService = context.read<IdentityService>();
-                final ok = await idService.importIdentity(blob);
+                final pass = passphraseController.text;
+                final ok = await idService.importIdentity(
+                  blob,
+                  passphrase: pass.isEmpty ? null : pass,
+                );
                 if (!mounted) return;
                 if (ok) {
                   await _wire();
@@ -146,6 +161,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
     );
     blobController.dispose();
+    passphraseController.dispose();
   }
 
   @override

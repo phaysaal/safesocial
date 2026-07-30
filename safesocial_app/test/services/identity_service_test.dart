@@ -1,29 +1,41 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:spheres_app/crypto/vault.dart';
 import 'package:spheres_app/services/identity_service.dart';
 
-/// Phase 0 guarantee: the identity export/import paths that used to report
-/// success while discarding the key must now fail loudly.
+/// Export and import are real now (Argon2id + XChaCha20-Poly1305 via Vault);
+/// they used to return a fixed placeholder string that discarded the key.
 ///
-/// Only the rejection paths are covered here — they all return before any
-/// storage write, so no platform channel mocks are needed. Success paths need
-/// SharedPreferences and secure storage and are covered once real vault
-/// encryption lands.
+/// Only paths that return before any storage write are covered here, so no
+/// platform channel mocks are needed. The vault itself is covered in
+/// test/crypto/vault_test.dart.
 void main() {
-  test('encrypted export refuses rather than producing a keyless blob', () async {
-    // Previously returned the literal string "placeholder_vault_blob", which
-    // callers wrote to disk and treated as a backup of the identity.
+  test('export with no identity fails instead of emitting an empty vault', () async {
     await expectLater(
       IdentityService().exportIdentity('correct horse battery staple'),
-      throwsA(isA<UnsupportedError>()),
+      throwsA(isA<Exception>()),
     );
   });
 
-  test('passphrase-protected import refuses rather than silently failing', () async {
+  test('a vault with the wrong passphrase does not import', () async {
+    final vault = await Vault.seal(
+      plaintext: jsonEncode({'key': 'aa', 'secret': 'bb'}),
+      passphrase: 'the right one',
+    );
+
     await expectLater(
-      IdentityService().importIdentity('anything', passphrase: 'hunter2'),
-      throwsA(isA<UnsupportedError>()),
+      IdentityService().importIdentity(vault, passphrase: 'the wrong one'),
+      throwsA(isA<VaultException>()),
+    );
+  });
+
+  test('a legacy placeholder blob does not import', () async {
+    // What the old Rust stub produced. It must not be mistaken for an identity.
+    expect(
+      await IdentityService()
+          .importIdentity('{"status":"success","vault_blob":"placeholder_vault_blob"}'),
+      isFalse,
     );
   });
 

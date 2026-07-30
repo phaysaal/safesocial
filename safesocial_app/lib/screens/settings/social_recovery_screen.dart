@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../crypto/social_recovery.dart';
 import '../../services/contact_service.dart';
 import '../../services/rust_core_service.dart';
 import '../../services/identity_service.dart';
@@ -161,35 +165,156 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
     );
   }
 
-  // Social recovery is not implemented. Both entry points previously reported
-  // success without generating, sending, or reconstructing anything — so a
-  // user could believe their guardians held shards when none existed. Until
-  // the real Shamir flow lands (threshold enforcement, shard authentication,
-  // and verification of the reconstructed secret against the identity public
-  // key), these must fail visibly.
-  static const _unavailableMessage =
-      'Social recovery is not available yet. No shards were created or sent.';
+  /// Split the identity and show the shards for distribution.
+  ///
+  /// The shards are shown rather than sent: delivering them over the same
+  /// channels this identity secures would defeat the point, since anyone who
+  /// compromised the account could collect them. Hand them over out of band.
+  Future<void> _setupRecovery(
+      IdentityService identity, RustCoreService rustCore) async {
+    final secret = identity.secretKey;
+    final publicKey = identity.publicKey;
+    if (secret == null || publicKey == null) return;
 
-  Future<void> _setupRecovery(IdentityService identity, RustCoreService rustCore) async {
-    DebugLogService().warn('Recovery', 'Setup attempted — feature not implemented');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(_unavailableMessage)),
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final shards = SocialRecovery.createShards(
+        identitySecretHex: secret,
+        identityPublicKeyHex: publicKey,
+        guardianCount: _selectedGuardians.length,
+        threshold: _threshold,
       );
+
+      DebugLogService().success('Recovery',
+          '${shards.length} shard(s) created, threshold $_threshold');
+
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('$_threshold of ${shards.length} required'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                const Text(
+                  'Give one shard to each guardian, in person or over a channel '
+                  'this identity does not protect. Any '
+                  'threshold of them together can restore you; fewer cannot.',
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                ...shards.asMap().entries.map((entry) {
+                  final guardian = _selectedGuardians[entry.key];
+                  return ListTile(
+                    dense: true,
+                    title: Text('Shard ${entry.value.index} → '
+                        '${guardian.substring(0, 8)}…'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.copy, size: 18),
+                      onPressed: () {
+                        Clipboard.setData(
+                            ClipboardData(text: entry.value.encode()));
+                        messenger.showSnackBar(SnackBar(
+                          content: Text('Shard ${entry.value.index} copied'),
+                        ));
+                      },
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Done')),
+          ],
+        ),
+      );
+    } on RecoveryException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not split: $e')));
     }
   }
 
-  Future<void> _reconstructIdentity(IdentityService identity, RustCoreService rustCore) async {
-    DebugLogService().warn('Recovery', 'Reconstruction attempted — feature not implemented');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Identity reconstruction is not available yet. Your current '
-            'identity has not been changed.',
-          ),
+  /// Rebuild the identity from pasted shards.
+  ///
+  /// Nothing is adopted unless the result verifies against the public key the
+  /// shards name. Shamir has no integrity of its own, so too few shards or one
+  /// bad one produces plausible nonsense — the previous implementation
+  /// reported exactly that as success.
+  Future<void> _reconstructIdentity(
+      IdentityService identity, RustCoreService rustCore) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    final shards = _shardControllers
+        .map((c) => RecoveryShard.tryDecode(c.text))
+        .whereType<RecoveryShard>()
+        .toList();
+
+    final pasted = _shardControllers.where((c) => c.text.trim().isNotEmpty).length;
+    if (shards.length < pasted) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('${pasted - shards.length} shard(s) could not be read'),
+      ));
+      return;
+    }
+    if (shards.isEmpty) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Paste your shards first')));
+      return;
+    }
+
+    final String secret;
+    try {
+      secret = SocialRecovery.reconstruct(shards);
+    } on RecoveryException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Replace this identity?'),
+        content: Text(
+          'The shards rebuilt the identity '
+          '${shards.first.identityPublicKey.substring(0, 8)}… and it verifies.\n\n'
+          'Restoring replaces whatever identity is on this device, which cannot '
+          'be brought back.',
         ),
-      );
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final restored = await identity.importIdentity(jsonEncode({
+      'key': shards.first.identityPublicKey,
+      'secret': secret,
+    }));
+
+    if (!mounted) return;
+    if (restored) {
+      DebugLogService().success('Recovery', 'Identity restored from shards');
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Identity restored. Restart the app to finish.'),
+      ));
+      Navigator.pop(context);
+    } else {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Could not apply the restored identity')));
     }
   }
 }
