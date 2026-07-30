@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spheres_app/crypto/session_manager.dart';
+import 'package:spheres_app/models/removal_vote.dart';
 import 'package:spheres_app/models/sphere.dart';
 import 'package:spheres_app/models/sphere_event.dart';
 import 'package:spheres_app/services/secure_store.dart';
@@ -65,6 +66,42 @@ void main() {
         joinedAt: joinedAt ?? DateTime(2026),
         invitedBy: alice,
       );
+
+  SignedStatement statement({
+    required String kind,
+    required String sphereId,
+    required int atEpoch,
+    required String subject,
+    required String by,
+    required String bySecret,
+    String ref = '',
+    String detail = '',
+    DateTime? at,
+  }) {
+    final ts = (at ?? DateTime.now()).millisecondsSinceEpoch;
+    final bytes = SignedStatement.bytesToSign(
+      kind: kind,
+      sphereId: sphereId,
+      atEpoch: atEpoch,
+      subject: subject,
+      by: by,
+      timestampMs: ts,
+      ref: ref,
+      detail: detail,
+    );
+    return SignedStatement(
+      kind: kind,
+      sphereId: sphereId,
+      atEpoch: atEpoch,
+      subject: subject,
+      by: by,
+      timestampMs: ts,
+      ref: ref,
+      detail: detail,
+      signatureHex:
+          hex.encode(ed.sign(ed.PrivateKey(hex.decode(bySecret)), bytes)),
+    );
+  }
 
   SignedStatement offer({
     required String sphereId,
@@ -927,6 +964,484 @@ void main() {
       );
 
       expect(service.sphere(sphereId)!.contains(alice), isTrue);
+    });
+  });
+
+  // ── Removal by vote ───────────────────────────────────────────────────────
+
+  group('removal by vote', () {
+    late String dave, daveSecret;
+
+    setUp(() {
+      final d = ed.generateKey();
+      dave = idOf(d);
+      daveSecret = secretOf(d);
+    });
+
+    /// Alice owns a sphere of four: Bob, Carol and Dave are plain members.
+    Future<SphereService> bobInFoursome() async {
+      final service = serviceFor(bob, bobSecret);
+      await service.handleIncomingOp(
+        alice,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 1,
+          op: MembershipOp.opCreate,
+          target: '',
+          author: alice,
+          authorSecret: aliceSecret,
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(carol, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+      await service.acceptInvite(sphereId);
+      return service;
+    }
+
+    SignedStatement proposalBy(String who, String whoSecret, String subject,
+            {DateTime? at}) =>
+        statement(
+          kind: SignedStatement.kindRemovalProposal,
+          sphereId: sphereId,
+          atEpoch: 1,
+          subject: subject,
+          by: who,
+          bySecret: whoSecret,
+          detail: 'Kept posting spoilers',
+          at: at,
+        );
+
+    SignedStatement voteBy(String who, String whoSecret, SignedStatement on,
+            {bool yes = true, DateTime? at}) =>
+        statement(
+          kind: SignedStatement.kindRemovalVote,
+          sphereId: sphereId,
+          atEpoch: 1,
+          subject: on.subject,
+          by: who,
+          bySecret: whoSecret,
+          ref: on.id,
+          detail: yes ? 'yes' : 'no',
+          at: at,
+        );
+
+    Future<void> deliver(SphereService to, String from, SignedStatement s) =>
+        to.handleIncomingOp(from, jsonEncode({'statement': s.toJson()}));
+
+    test('a member can propose removing another', () async {
+      final service = await bobInFoursome();
+
+      await service.proposeRemoval(sphereId, carol, 'Kept posting spoilers');
+
+      final open = service.proposalsFor(sphereId);
+      expect(open, hasLength(1));
+      expect(open.single.subject, carol);
+      expect(open.single.detail, 'Kept posting spoilers');
+    });
+
+    test('the reason is signed, so it cannot be rewritten in transit', () {
+      final proposal = proposalBy(carol, carolSecret, dave);
+
+      final tampered = SignedStatement(
+        kind: proposal.kind,
+        sphereId: proposal.sphereId,
+        atEpoch: proposal.atEpoch,
+        subject: proposal.subject,
+        by: proposal.by,
+        timestampMs: proposal.timestampMs,
+        detail: 'Something far worse',
+        signatureHex: proposal.signatureHex,
+      );
+
+      expect(tampered.isSignatureValid, isFalse);
+    });
+
+    test('a proposal from a stranger is refused', () async {
+      final service = await bobInFoursome();
+
+      await deliver(service, mallory, proposalBy(mallory, mallorySecret, carol));
+
+      expect(service.proposalsFor(sphereId), isEmpty);
+    });
+
+    test('a proposal against the owner is refused', () async {
+      final service = await bobInFoursome();
+
+      await deliver(service, carol, proposalBy(carol, carolSecret, alice));
+
+      expect(service.proposalsFor(sphereId), isEmpty);
+    });
+
+    test('the subject cannot vote on their own removal', () async {
+      final service = serviceFor(carol, carolSecret);
+      await service.handleIncomingOp(
+        alice,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 1,
+          op: MembershipOp.opCreate,
+          target: '',
+          author: alice,
+          authorSecret: aliceSecret,
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(carol, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+      await service.acceptInvite(sphereId);
+
+      final proposal = proposalBy(bob, bobSecret, carol);
+      await deliver(service, bob, proposal);
+
+      // Otherwise a sphere of two deadlocks permanently, and in any sphere the
+      // subject holds a veto over their own accountability.
+      expect(
+        () => service.voteOnRemoval(proposal.id, inFavour: false),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('the proposer does not get a second vote', () async {
+      final service = await bobInFoursome();
+      await service.proposeRemoval(sphereId, carol, 'reason');
+      final proposal = service.proposalsFor(sphereId).single;
+
+      expect(
+        () => service.voteOnRemoval(proposal.id, inFavour: true),
+        throwsA(isA<StateError>()),
+      );
+      // Their proposal is their view; counting it twice would let a proposer
+      // in a small sphere carry a vote alone.
+      expect(service.tallyFor(proposal).inFavour, 0);
+    });
+
+    test('votes accumulate and the tally reflects them', () async {
+      final service = await bobInFoursome();
+      final proposal = proposalBy(bob, bobSecret, carol);
+      await deliver(service, bob, proposal);
+
+      await deliver(service, dave, voteBy(dave, daveSecret, proposal));
+
+      final tally = service.tallyFor(proposal);
+      expect(tally.eligible, 2); // Alice and Dave; not Bob, not Carol.
+      expect(tally.inFavour, 1);
+    });
+
+    test('a voter can change their mind, and only the later vote counts',
+        () async {
+      final service = await bobInFoursome();
+      final proposal = proposalBy(bob, bobSecret, carol);
+      await deliver(service, bob, proposal);
+
+      final t0 = DateTime.now();
+      await deliver(service, dave,
+          voteBy(dave, daveSecret, proposal, yes: true, at: t0));
+      await deliver(
+          service,
+          dave,
+          voteBy(dave, daveSecret, proposal,
+              yes: false, at: t0.add(const Duration(minutes: 1))));
+
+      expect(service.tallyFor(proposal).inFavour, 0);
+      expect(service.tallyFor(proposal).against, 1);
+    });
+
+    test('an older vote cannot overwrite a newer one', () async {
+      // A replayed earlier vote must not undo someone's change of mind.
+      final service = await bobInFoursome();
+      final proposal = proposalBy(bob, bobSecret, carol);
+      await deliver(service, bob, proposal);
+
+      final t0 = DateTime.now();
+      await deliver(
+          service,
+          dave,
+          voteBy(dave, daveSecret, proposal,
+              yes: false, at: t0.add(const Duration(minutes: 1))));
+      await deliver(service, dave,
+          voteBy(dave, daveSecret, proposal, yes: true, at: t0));
+
+      expect(service.tallyFor(proposal).against, 1);
+    });
+
+    test('a vote arriving after the window closes does not count', () async {
+      final service = await bobInFoursome();
+      final old = DateTime.now().subtract(const Duration(hours: 80));
+      final proposal = proposalBy(bob, bobSecret, carol, at: old);
+      await deliver(service, bob, proposal);
+
+      await deliver(service, dave,
+          voteBy(dave, daveSecret, proposal, at: DateTime.now()));
+
+      expect(service.tallyFor(proposal).inFavour, 0);
+      expect(service.tallyFor(proposal).outcome,
+          RemovalOutcome.expiredWithoutQuorum);
+    });
+
+    test('a vote for a proposal we never saw is ignored, not invented',
+        () async {
+      final service = await bobInFoursome();
+      final unseen = proposalBy(carol, carolSecret, dave);
+
+      await deliver(service, dave, voteBy(dave, daveSecret, unseen));
+
+      expect(service.proposalsFor(sphereId), isEmpty);
+    });
+
+    test('two open votes about the same person are refused', () async {
+      final service = await bobInFoursome();
+      await service.proposeRemoval(sphereId, carol, 'first');
+
+      expect(
+        () => service.proposeRemoval(sphereId, carol, 'again'),
+        throwsA(isA<StateError>()),
+      );
+    });
+  });
+
+  group('carrying out a vote', () {
+    late String dave, daveSecret;
+
+    setUp(() {
+      final d = ed.generateKey();
+      dave = idOf(d);
+      daveSecret = secretOf(d);
+    });
+
+    List<SphereMember> foursome() => [
+          member(alice, SphereRole.owner),
+          member(bob, SphereRole.member),
+          member(carol, SphereRole.member),
+          member(dave, SphereRole.member),
+        ];
+
+    Future<SphereService> deviceFor(String who, String secret) async {
+      final service = serviceFor(who, secret);
+      await service.handleIncomingOp(
+        alice,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 1,
+          op: MembershipOp.opCreate,
+          target: '',
+          author: alice,
+          authorSecret: aliceSecret,
+          members: foursome(),
+        ),
+      );
+      await service.acceptInvite(sphereId);
+      return service;
+    }
+
+    SignedStatement proposal() => statement(
+          kind: SignedStatement.kindRemovalProposal,
+          sphereId: sphereId,
+          atEpoch: 1,
+          subject: carol,
+          by: bob,
+          bySecret: bobSecret,
+          detail: 'reason',
+        );
+
+    SignedStatement yesFrom(String who, String secret, SignedStatement on) =>
+        statement(
+          kind: SignedStatement.kindRemovalVote,
+          sphereId: sphereId,
+          atEpoch: 1,
+          subject: carol,
+          by: who,
+          bySecret: secret,
+          ref: on.id,
+          detail: 'yes',
+        );
+
+    test('a removal carrying the votes is accepted from a non-admin', () async {
+      // The point of the design: the executor may be any member, often the
+      // only one online. Their authority is the proof, not their role.
+      final service = await deviceFor(dave, daveSecret);
+      final p = proposal();
+
+      await service.handleIncomingOp(
+        bob,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 2,
+          op: MembershipOp.opRemove,
+          target: carol,
+          author: bob,
+          authorSecret: bobSecret,
+          proof: [p, yesFrom(alice, aliceSecret, p), yesFrom(dave, daveSecret, p)],
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+
+      expect(service.sphere(sphereId)!.contains(carol), isFalse);
+    });
+
+    test('a removal with no votes at all is refused', () async {
+      final service = await deviceFor(dave, daveSecret);
+
+      await service.handleIncomingOp(
+        bob,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 2,
+          op: MembershipOp.opRemove,
+          target: carol,
+          author: bob,
+          authorSecret: bobSecret,
+          proof: [proposal()],
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+
+      expect(service.sphere(sphereId)!.contains(carol), isTrue);
+    });
+
+    test('a removal with forged votes is refused', () async {
+      final service = await deviceFor(dave, daveSecret);
+      final p = proposal();
+      final real = yesFrom(alice, aliceSecret, p);
+
+      // Mallory's signature, wearing Alice's name.
+      final forged = SignedStatement(
+        kind: real.kind,
+        sphereId: real.sphereId,
+        atEpoch: real.atEpoch,
+        subject: real.subject,
+        by: alice,
+        timestampMs: real.timestampMs,
+        ref: real.ref,
+        detail: 'yes',
+        signatureHex: yesFrom(mallory, mallorySecret, p).signatureHex,
+      );
+
+      await service.handleIncomingOp(
+        bob,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 2,
+          op: MembershipOp.opRemove,
+          target: carol,
+          author: bob,
+          authorSecret: bobSecret,
+          proof: [p, forged, yesFrom(dave, daveSecret, p)],
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+
+      expect(service.sphere(sphereId)!.contains(carol), isTrue);
+    });
+
+    test('the subject cannot be counted as voting for their own removal',
+        () async {
+      final service = await deviceFor(dave, daveSecret);
+      final p = proposal();
+
+      await service.handleIncomingOp(
+        bob,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 2,
+          op: MembershipOp.opRemove,
+          target: carol,
+          author: bob,
+          authorSecret: bobSecret,
+          // Carol's own "vote" padding the count towards quorum.
+          proof: [p, yesFrom(carol, carolSecret, p)],
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+
+      expect(service.sphere(sphereId)!.contains(carol), isTrue);
+    });
+
+    test('votes from a different proposal cannot be reused', () async {
+      final service = await deviceFor(dave, daveSecret);
+      final real = proposal();
+      final other = statement(
+        kind: SignedStatement.kindRemovalProposal,
+        sphereId: sphereId,
+        atEpoch: 1,
+        subject: dave,
+        by: bob,
+        bySecret: bobSecret,
+        detail: 'a different argument',
+      );
+
+      await service.handleIncomingOp(
+        bob,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 2,
+          op: MembershipOp.opRemove,
+          target: carol,
+          author: bob,
+          authorSecret: bobSecret,
+          // Votes cast about Dave, presented as votes about Carol.
+          proof: [
+            real,
+            yesFrom(alice, aliceSecret, other),
+            yesFrom(dave, daveSecret, other),
+          ],
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+
+      expect(service.sphere(sphereId)!.contains(carol), isTrue);
+    });
+
+    test('an admin still removes unilaterally, no votes needed', () async {
+      // Keeping this is deliberate: in a small sphere a vote is heavy. What
+      // changed is that the action is now visible to everyone in the log.
+      final service = await deviceFor(dave, daveSecret);
+
+      await service.handleIncomingOp(
+        alice,
+        signedOp(
+          sphereId: sphereId,
+          epoch: 2,
+          op: MembershipOp.opRemove,
+          target: carol,
+          author: alice,
+          authorSecret: aliceSecret,
+          members: [
+            member(alice, SphereRole.owner),
+            member(bob, SphereRole.member),
+            member(dave, SphereRole.member),
+          ],
+        ),
+      );
+
+      expect(service.sphere(sphereId)!.contains(carol), isFalse);
+      expect(service.eventsFor(sphereId).first.op, MembershipOp.opRemove);
     });
   });
 

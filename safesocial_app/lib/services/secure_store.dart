@@ -64,6 +64,7 @@ class SecureStore {
     // Who did what in which sphere, and who has been offered ownership of one.
     'spheres_sphere_audit_v1',
     'spheres_transfer_offers_v1',
+    'spheres_removal_proposals_v1',
     'spheres_albums',
     'spheres_outbox_v1',
     'spheres_sessions_v1',

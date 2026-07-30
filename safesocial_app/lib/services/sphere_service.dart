@@ -11,6 +11,7 @@ import '../crypto/session_manager.dart';
 import '../crypto/sphere_keyring.dart';
 import '../crypto/spheres_crypto.dart';
 import '../models/sphere.dart';
+import '../models/removal_vote.dart';
 import '../models/sphere_event.dart';
 import 'debug_log_service.dart';
 
@@ -24,6 +25,15 @@ import 'debug_log_service.dart';
 /// themselves rather than trusting whoever transmitted it.
 class SignedStatement {
   static const kindTransferOffer = 'transfer-offer';
+
+  /// A proposal to remove a member. [subject] is who would go, [detail] is the
+  /// reason, and the statement's own signature is the proposal's identity.
+  static const kindRemovalProposal = 'removal-proposal';
+
+  /// A vote on a proposal. [ref] is the proposal it answers, and [detail] is
+  /// 'yes' or 'no' — bound by the signature, so a vote cannot be flipped or
+  /// replayed onto a different proposal.
+  static const kindRemovalVote = 'removal-vote';
 
   final String kind;
   final String sphereId;
@@ -39,6 +49,15 @@ class SignedStatement {
   final String by;
 
   final int timestampMs;
+
+  /// What this statement answers, when it answers something — the signature of
+  /// the proposal a vote is cast on. Empty otherwise.
+  final String ref;
+
+  /// Free text whose meaning depends on [kind]: a reason for a proposal, a
+  /// 'yes' or 'no' for a vote.
+  final String detail;
+
   final String signatureHex;
 
   const SignedStatement({
@@ -49,7 +68,13 @@ class SignedStatement {
     required this.by,
     required this.timestampMs,
     required this.signatureHex,
+    this.ref = '',
+    this.detail = '',
   });
+
+  /// A statement's signature is its identity: unique, and bound to everything
+  /// the statement says.
+  String get id => signatureHex;
 
   /// Newline-delimited for the same reason as everything else here: no field
   /// can contain a newline, so the encoding cannot be made ambiguous.
@@ -60,6 +85,8 @@ class SignedStatement {
     required String subject,
     required String by,
     required int timestampMs,
+    String ref = '',
+    String detail = '',
   }) =>
       Uint8List.fromList(utf8.encode([
         'spheres-statement',
@@ -69,6 +96,10 @@ class SignedStatement {
         subject,
         by,
         '$timestampMs',
+        ref,
+        // Newlines would make the encoding ambiguous, so they are stripped
+        // rather than trusted. Callers should not send them in the first place.
+        detail.replaceAll('\n', ' '),
       ].join('\n')));
 
   Uint8List signedBytes() => bytesToSign(
@@ -78,6 +109,8 @@ class SignedStatement {
         subject: subject,
         by: by,
         timestampMs: timestampMs,
+        ref: ref,
+        detail: detail,
       );
 
   /// Whether the signature really is [by]'s.
@@ -101,6 +134,8 @@ class SignedStatement {
         'by': by,
         'ts': timestampMs,
         'sig': signatureHex,
+        if (ref.isNotEmpty) 'ref': ref,
+        if (detail.isNotEmpty) 'detail': detail,
       };
 
   static SignedStatement fromJson(Map<String, dynamic> json) => SignedStatement(
@@ -111,6 +146,8 @@ class SignedStatement {
         by: json['by'] as String,
         timestampMs: json['ts'] as int,
         signatureHex: json['sig'] as String,
+        ref: json['ref'] as String? ?? '',
+        detail: json['detail'] as String? ?? '',
       );
 }
 
@@ -288,6 +325,7 @@ class SphereService extends ChangeNotifier {
   static const _prefsInvitesKey = 'spheres_invites_v1';
   static const _prefsAuditKey = 'spheres_sphere_audit_v1';
   static const _prefsOffersKey = 'spheres_transfer_offers_v1';
+  static const _prefsProposalsKey = 'spheres_removal_proposals_v1';
 
   /// Entries kept per sphere. Enough to cover any argument worth having, and
   /// bounded so a long-lived sphere cannot grow local storage without limit.
@@ -627,6 +665,229 @@ class SphereService extends ChangeNotifier {
     await _broadcast(next, MembershipOp.opRename, '');
   }
 
+  // ── Removing someone by vote ───────────────────────────────────────────────
+
+  /// How long a removal vote stays open.
+  ///
+  /// People are offline. A vote that closes in an hour disenfranchises anyone
+  /// asleep, and a decision nobody could take part in is not legitimacy, it is
+  /// just a faster way to reach the same place.
+  static const Duration removalWindow = Duration(hours: 72);
+
+  /// How long before the same person can be proposed again after a failed
+  /// vote, so a majority cannot wear a minority down by repetition.
+  static const Duration removalCooldown = Duration(days: 7);
+
+  /// Open and recently-closed proposals, by their id (the proposal signature).
+  final Map<String, SignedStatement> _proposals = {};
+
+  /// Votes, keyed by proposal id then voter.
+  final Map<String, Map<String, SignedStatement>> _votes = {};
+
+  /// Proposals in a sphere, newest first.
+  List<SignedStatement> proposalsFor(String sphereId) {
+    final list = _proposals.values
+        .where((p) => p.sphereId == sphereId)
+        .toList()
+      ..sort((a, b) => b.timestampMs.compareTo(a.timestampMs));
+    return list;
+  }
+
+  SignedStatement? proposal(String proposalId) => _proposals[proposalId];
+
+  /// Our own vote on a proposal, if we have cast one.
+  bool? myVoteOn(String proposalId) {
+    final vote = _votes[proposalId]?[_myIdentityKey];
+    if (vote == null) return null;
+    return vote.detail == 'yes';
+  }
+
+  /// Where a proposal stands right now.
+  RemovalTally tallyFor(SignedStatement proposal, {DateTime? now}) {
+    final at = now ?? DateTime.now();
+    final sphere = _spheres[proposal.sphereId];
+    final cast = _votes[proposal.id] ?? const <String, SignedStatement>{};
+
+    // Recomputed against current membership, not membership at proposal time:
+    // someone who has since left should not be counted as an absent voter.
+    final eligible = sphere == null
+        ? 0
+        : sphere.members
+            .where((m) =>
+                m.identityKey != proposal.by && m.identityKey != proposal.subject)
+            .length;
+
+    var yes = 0;
+    var no = 0;
+    for (final entry in cast.entries) {
+      if (sphere != null && !sphere.contains(entry.key)) continue;
+      if (entry.key == proposal.subject || entry.key == proposal.by) continue;
+      if (entry.value.detail == 'yes') {
+        yes++;
+      } else {
+        no++;
+      }
+    }
+
+    final closesAt = DateTime.fromMillisecondsSinceEpoch(proposal.timestampMs)
+        .add(removalWindow);
+    return RemovalTally(
+      eligible: eligible,
+      inFavour: yes,
+      against: no,
+      withinWindow: at.isBefore(closesAt),
+    );
+  }
+
+  DateTime closesAt(SignedStatement proposal) =>
+      DateTime.fromMillisecondsSinceEpoch(proposal.timestampMs)
+          .add(removalWindow);
+
+  /// Propose removing a member. Any member may do this.
+  Future<void> proposeRemoval(
+    String sphereId,
+    String subject,
+    String reason,
+  ) async {
+    _requireReady();
+    final sphere = _spheres[sphereId];
+    if (sphere == null) throw StateError('Unknown sphere $sphereId');
+    final me = _myIdentityKey!;
+
+    final refusal =
+        removalProposalRefusal(sphere: sphere, proposer: me, subject: subject);
+    if (refusal != null) throw StateError(refusal);
+
+    final now = DateTime.now();
+    for (final existing in proposalsFor(sphereId)) {
+      if (existing.subject != subject) continue;
+      final tally = tallyFor(existing, now: now);
+      if (tally.outcome == RemovalOutcome.open) {
+        throw StateError('There is already an open vote about this person');
+      }
+      final since =
+          now.difference(DateTime.fromMillisecondsSinceEpoch(existing.timestampMs));
+      if (since < removalCooldown) {
+        final days = (removalCooldown - since).inDays + 1;
+        throw StateError(
+          'A vote about this person closed recently. Another can be raised in '
+          '$days day${days == 1 ? '' : 's'}.',
+        );
+      }
+    }
+
+    final statement = _sign(
+      kind: SignedStatement.kindRemovalProposal,
+      sphereId: sphereId,
+      atEpoch: sphere.epoch,
+      subject: subject,
+      timestampMs: now.millisecondsSinceEpoch,
+      detail: reason.trim(),
+    );
+
+    _proposals[statement.id] = statement;
+    await _persistProposals();
+    await _record(sphere, 'removal-proposal', subject, me, detail: reason.trim());
+    await _sendStatement(sphere, statement);
+    notifyListeners();
+  }
+
+  /// Cast a vote. Voting again replaces the earlier vote — people change their
+  /// minds, and the alternative is a first-click-wins race.
+  Future<void> voteOnRemoval(String proposalId, {required bool inFavour}) async {
+    _requireReady();
+    final proposal = _proposals[proposalId];
+    if (proposal == null) throw StateError('That vote no longer exists');
+    final sphere = _spheres[proposal.sphereId];
+    if (sphere == null) throw StateError('You are not in this sphere');
+    final me = _myIdentityKey!;
+
+    if (me == proposal.subject) {
+      throw StateError('You cannot vote on your own removal');
+    }
+    if (me == proposal.by) {
+      throw StateError('Proposing already counts as your view');
+    }
+    if (tallyFor(proposal).outcome != RemovalOutcome.open) {
+      throw StateError('That vote has closed');
+    }
+
+    final vote = _sign(
+      kind: SignedStatement.kindRemovalVote,
+      sphereId: proposal.sphereId,
+      atEpoch: sphere.epoch,
+      subject: proposal.subject,
+      timestampMs: DateTime.now().millisecondsSinceEpoch,
+      ref: proposalId,
+      detail: inFavour ? 'yes' : 'no',
+    );
+
+    _votes.putIfAbsent(proposalId, () => {})[me] = vote;
+    await _persistProposals();
+    await _sendStatement(sphere, vote);
+    notifyListeners();
+    await _executeIfPassed(proposal);
+  }
+
+  /// Carry out a removal that has passed.
+  ///
+  /// The votes travel with the operation, so every member verifies the outcome
+  /// from the signatures rather than trusting whoever happened to execute it.
+  Future<void> executeRemoval(String proposalId) async {
+    _requireReady();
+    final proposal = _proposals[proposalId];
+    if (proposal == null) throw StateError('That vote no longer exists');
+    final sphere = _spheres[proposal.sphereId];
+    if (sphere == null) throw StateError('You are not in this sphere');
+
+    if (!tallyFor(proposal).hasPassed) {
+      throw StateError('That vote has not passed');
+    }
+    if (!sphere.contains(proposal.subject)) return; // Someone got there first.
+
+    final proof = <SignedStatement>[
+      proposal,
+      ...(_votes[proposal.id] ?? const <String, SignedStatement>{})
+          .values
+          .where((v) => v.detail == 'yes'),
+    ];
+
+    final next = sphere.copyWith(
+      epoch: sphere.epoch + 1,
+      members: sphere.members
+          .where((m) => m.identityKey != proposal.subject)
+          .toList(),
+    );
+
+    await _applyLocally(next);
+    await _record(next, MembershipOp.opRemove, proposal.subject, _myIdentityKey!,
+        detail: 'by vote');
+    await _broadcast(next, MembershipOp.opRemove, proposal.subject, proof: proof);
+  }
+
+  /// Execute automatically once a vote passes, so a decision does not sit
+  /// waiting for somebody to notice.
+  ///
+  /// Admins act first because they are the ones expected to. If the sphere has
+  /// no admin left — the orphaned case — any member may, since otherwise the
+  /// vote would be decided and permanently unenforceable.
+  Future<void> _executeIfPassed(SignedStatement proposal) async {
+    final sphere = _spheres[proposal.sphereId];
+    if (sphere == null) return;
+    if (!tallyFor(proposal).hasPassed) return;
+    if (!sphere.contains(proposal.subject)) return;
+
+    final me = _myIdentityKey!;
+    final anyAdmin = sphere.members.any((m) => m.isAdmin);
+    if (!sphere.isAdmin(me) && anyAdmin) return;
+
+    try {
+      await executeRemoval(proposal.id);
+    } catch (e) {
+      DebugLogService().error('Sphere', 'Could not carry out a removal: $e');
+    }
+  }
+
   // ── Ownership ──────────────────────────────────────────────────────────────
 
   /// How long an offer of ownership stays good for.
@@ -771,10 +1032,12 @@ class SphereService extends ChangeNotifier {
     _spheres.remove(sphereId);
     _audit.remove(sphereId);
     _transferOffers.remove(sphereId);
+    _forgetProposals(sphereId);
     keyring.forget(sphereId);
     await keyring.persist();
     await _persistAudit();
     await _persistOffers();
+    await _persistProposals();
     await _persist();
     notifyListeners();
   }
@@ -804,8 +1067,13 @@ class SphereService extends ChangeNotifier {
     required int atEpoch,
     required String subject,
     required int timestampMs,
+    String ref = '',
+    String detail = '',
   }) {
     final me = _myIdentityKey!;
+    // Stripped here as well as in the encoding, so what we store matches what
+    // we signed and a recipient's verification cannot disagree with ours.
+    final safeDetail = detail.replaceAll('\n', ' ');
     final signature = ed.sign(
       ed.PrivateKey(hex.decode(_myIdentitySecret!)),
       SignedStatement.bytesToSign(
@@ -815,6 +1083,8 @@ class SphereService extends ChangeNotifier {
         subject: subject,
         by: me,
         timestampMs: timestampMs,
+        ref: ref,
+        detail: safeDetail,
       ),
     );
     return SignedStatement(
@@ -824,6 +1094,8 @@ class SphereService extends ChangeNotifier {
       subject: subject,
       by: me,
       timestampMs: timestampMs,
+      ref: ref,
+      detail: safeDetail,
       signatureHex: hex.encode(signature),
     );
   }
@@ -1010,10 +1282,12 @@ class SphereService extends ChangeNotifier {
         _spheres.remove(op.sphereId);
         _audit.remove(op.sphereId);
         _transferOffers.remove(op.sphereId);
+        _forgetProposals(op.sphereId);
         keyring.forget(op.sphereId);
         await keyring.persist();
         await _persistAudit();
         await _persistOffers();
+        await _persistProposals();
         await _persist();
         notifyListeners();
         DebugLogService()
@@ -1124,14 +1398,72 @@ class SphereService extends ChangeNotifier {
             : 'a rename may not change the member list';
 
       case MembershipOp.opRemove:
-        if (!existing.isAdmin(op.by)) return '${op.by} is not an admin';
         if (existing.isOwner(op.target)) return 'the owner cannot be removed';
-        return null;
+        // Either the author holds the power themselves, or they carry the
+        // votes of members who do. Anything else is somebody helping
+        // themselves to a decision that was not theirs.
+        if (existing.isAdmin(op.by)) return null;
+        return _removalVoteRefusal(existing, op);
 
       default:
         if (!existing.isAdmin(op.by)) return '${op.by} is not an admin';
         return null;
     }
+  }
+
+  /// Why a vote-backed removal is not valid, or null if it is.
+  ///
+  /// The executor may be any member — often the only one online — so their
+  /// authority comes entirely from the proof they carry. Every signature is
+  /// checked here rather than trusted, and the tally is recomputed from
+  /// membership this device already holds.
+  String? _removalVoteRefusal(Sphere existing, MembershipOp op) {
+    final proposals = op.proof.where((p) =>
+        p.kind == SignedStatement.kindRemovalProposal &&
+        p.sphereId == existing.id &&
+        p.subject == op.target);
+    if (proposals.isEmpty) return '${op.by} is not an admin, and carries no vote';
+
+    final proposal = proposals.first;
+    if (!proposal.isSignatureValid) return 'the proposal is forged';
+
+    final refusal = removalProposalRefusal(
+      sphere: existing,
+      proposer: proposal.by,
+      subject: proposal.subject,
+    );
+    if (refusal != null) return 'the proposal was not allowed: $refusal';
+
+    final voters = <String>{};
+    for (final vote in op.proof) {
+      if (vote.kind != SignedStatement.kindRemovalVote) continue;
+      if (vote.ref != proposal.id) continue;
+      if (vote.detail != 'yes') continue;
+      if (!vote.isSignatureValid) return 'a vote is forged';
+      if (!existing.contains(vote.by)) continue;
+      if (vote.by == proposal.by || vote.by == proposal.subject) continue;
+      if (DateTime.fromMillisecondsSinceEpoch(vote.timestampMs)
+          .isAfter(closesAt(proposal))) {
+        continue;
+      }
+      voters.add(vote.by);
+    }
+
+    final eligible = existing.members
+        .where((m) =>
+            m.identityKey != proposal.by && m.identityKey != proposal.subject)
+        .length;
+    // Only the yes votes travel, so the tally is judged on those alone: it has
+    // to clear the quorum and be a majority of what was cast.
+    final tally = RemovalTally(
+      eligible: eligible,
+      inFavour: voters.length,
+      against: 0,
+      withinWindow: false,
+    );
+    if (!tally.quorumMet) return 'not enough members voted';
+    if (!tally.majority) return 'the vote did not carry';
+    return null;
   }
 
   /// Whether two member lists name the same people in the same roles. Order is
@@ -1147,6 +1479,61 @@ class SphereService extends ChangeNotifier {
     return true;
   }
 
+  Future<void> _handleRemovalProposal(SignedStatement statement) async {
+    final sphere = _spheres[statement.sphereId];
+    if (sphere == null) return;
+
+    // The same rule the proposer's device applied, checked independently.
+    final refusal = removalProposalRefusal(
+      sphere: sphere,
+      proposer: statement.by,
+      subject: statement.subject,
+    );
+    if (refusal != null) {
+      DebugLogService().warn('Sphere', 'Rejecting removal proposal: $refusal');
+      return;
+    }
+    if (_proposals.containsKey(statement.id)) return;
+
+    _proposals[statement.id] = statement;
+    await _persistProposals();
+    await _record(sphere, 'removal-proposal', statement.subject, statement.by,
+        detail: statement.detail,
+        at: DateTime.fromMillisecondsSinceEpoch(statement.timestampMs));
+    notifyListeners();
+  }
+
+  Future<void> _handleRemovalVote(SignedStatement vote) async {
+    final proposal = _proposals[vote.ref];
+    if (proposal == null) {
+      // The vote arrived before the proposal it answers. Dropping it is safe:
+      // the voter's device keeps its own copy, and a resend will carry it.
+      DebugLogService()
+          .info('Sphere', 'Ignoring a vote for a proposal we do not have');
+      return;
+    }
+    if (vote.sphereId != proposal.sphereId) return;
+
+    final sphere = _spheres[proposal.sphereId];
+    if (sphere == null) return;
+    if (!sphere.contains(vote.by)) return;
+    if (vote.by == proposal.subject || vote.by == proposal.by) return;
+    if (vote.detail != 'yes' && vote.detail != 'no') return;
+
+    // Late votes do not count, and cannot be used to reopen a closed decision.
+    final at = DateTime.fromMillisecondsSinceEpoch(vote.timestampMs);
+    if (at.isAfter(closesAt(proposal))) return;
+
+    final existing = _votes.putIfAbsent(proposal.id, () => {})[vote.by];
+    // A voter may change their mind; only their latest vote counts.
+    if (existing != null && existing.timestampMs >= vote.timestampMs) return;
+
+    _votes[proposal.id]![vote.by] = vote;
+    await _persistProposals();
+    notifyListeners();
+    await _executeIfPassed(proposal);
+  }
+
   /// Hold an offer of ownership made to us.
   Future<void> _handleIncomingStatement(
     String senderIdentityKey,
@@ -1156,6 +1543,14 @@ class SphereService extends ChangeNotifier {
     if (statement.by != senderIdentityKey) return;
     if (!statement.isSignatureValid) {
       DebugLogService().warn('Sphere', 'Rejecting statement: bad signature');
+      return;
+    }
+    if (statement.kind == SignedStatement.kindRemovalProposal) {
+      await _handleRemovalProposal(statement);
+      return;
+    }
+    if (statement.kind == SignedStatement.kindRemovalVote) {
+      await _handleRemovalVote(statement);
       return;
     }
     if (statement.kind != SignedStatement.kindTransferOffer) return;
@@ -1317,6 +1712,26 @@ class SphereService extends ChangeNotifier {
       }
     }
 
+    final proposalsRaw = await prefs.getString(_prefsProposalsKey);
+    if (proposalsRaw != null) {
+      try {
+        final decoded = jsonDecode(proposalsRaw) as Map<String, dynamic>;
+        for (final item in decoded['proposals'] as List<dynamic>? ?? const []) {
+          final statement =
+              SignedStatement.fromJson(item as Map<String, dynamic>);
+          _proposals[statement.id] = statement;
+        }
+        (decoded['votes'] as Map<String, dynamic>? ?? {}).forEach((id, list) {
+          for (final item in list as List<dynamic>) {
+            final vote = SignedStatement.fromJson(item as Map<String, dynamic>);
+            _votes.putIfAbsent(id, () => {})[vote.by] = vote;
+          }
+        });
+      } catch (e) {
+        DebugLogService().error('Sphere', 'Could not read removal votes: $e');
+      }
+    }
+
     final raw = await prefs.getString(_prefsKey);
     if (raw == null) return;
 
@@ -1345,6 +1760,28 @@ class SphereService extends ChangeNotifier {
       _prefsAuditKey,
       jsonEncode(_audit.map((sphereId, entries) =>
           MapEntry(sphereId, entries.map((e) => e.toJson()).toList()))),
+    );
+  }
+
+  void _forgetProposals(String sphereId) {
+    final ids = _proposals.entries
+        .where((e) => e.value.sphereId == sphereId)
+        .map((e) => e.key)
+        .toList();
+    for (final id in ids) {
+      _proposals.remove(id);
+      _votes.remove(id);
+    }
+  }
+
+  Future<void> _persistProposals() async {
+    await SecureStore.instance.setString(
+      _prefsProposalsKey,
+      jsonEncode({
+        'proposals': _proposals.values.map((p) => p.toJson()).toList(),
+        'votes': _votes.map((id, byVoter) =>
+            MapEntry(id, byVoter.values.map((v) => v.toJson()).toList())),
+      }),
     );
   }
 

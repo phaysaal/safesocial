@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/removal_vote.dart';
 import '../../models/sphere.dart';
 import '../../services/call_service.dart';
 import '../../services/contact_service.dart';
@@ -32,6 +33,11 @@ class SphereDetailScreen extends StatelessWidget {
     final iAmOwner = me != null && sphere.isOwner(me);
     final contacts = context.watch<ContactService>();
     final offer = sphereService.ownershipOfferFor(sphereId);
+    final proposals = sphereService
+        .proposalsFor(sphereId)
+        .where((p) =>
+            sphereService.tallyFor(p).outcome == RemovalOutcome.open)
+        .toList();
 
     String nameFor(String key) {
       if (key == me) return 'You';
@@ -72,6 +78,19 @@ class SphereDetailScreen extends StatelessWidget {
               offeredBy: nameFor(offer.by),
               onAccept: () => _acceptOwnership(context, sphere),
             ),
+          ...proposals.map((proposal) => _RemovalVoteCard(
+                proposal: proposal,
+                tally: sphereService.tallyFor(proposal),
+                closesAt: sphereService.closesAt(proposal),
+                subjectName: nameFor(proposal.subject),
+                proposerName: nameFor(proposal.by),
+                myVote: sphereService.myVoteOn(proposal.id),
+                canVote: me != null &&
+                    me != proposal.by &&
+                    me != proposal.subject,
+                onVote: (inFavour) => _castVote(
+                    context, proposal.id, inFavour: inFavour),
+              )),
           if (sphere.description.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -230,11 +249,23 @@ class SphereDetailScreen extends StatelessWidget {
     final canRemove = iAmAdmin && !isMe && !member.isOwner;
     final canHandOver = iAmOwner && !isMe;
 
+    // Anyone may put it to the sphere, including members with no other powers
+    // — that is the point of having a vote at all.
+    final canPropose = !isMe &&
+        !iAmAdmin &&
+        removalProposalRefusal(
+              sphere: sphere,
+              proposer: context.read<IdentityService>().publicKey ?? '',
+              subject: member.identityKey,
+            ) ==
+            null;
+
     if (!canPromote &&
         !canDemoteThem &&
         !canStepDown &&
         !canRemove &&
-        !canHandOver) {
+        !canHandOver &&
+        !canPropose) {
       return null;
     }
 
@@ -253,6 +284,9 @@ class SphereDetailScreen extends StatelessWidget {
         if (canRemove)
           const PopupMenuItem(
               value: 'remove', child: Text('Remove from sphere')),
+        if (canPropose)
+          const PopupMenuItem(
+              value: 'propose', child: Text('Propose removal…')),
       ],
     );
   }
@@ -282,6 +316,9 @@ class SphereDetailScreen extends StatelessWidget {
           ),
           duration: Duration(seconds: 4),
         ));
+      } else if (action == 'propose') {
+        await _proposeRemoval(context, sphere, member);
+        return;
       } else if (action == 'remove') {
         await service.removeMember(sphere.id, member.identityKey);
         messenger.showSnackBar(
@@ -347,6 +384,84 @@ class SphereDetailScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _castVote(
+    BuildContext context,
+    String proposalId, {
+    required bool inFavour,
+  }) async {
+    final service = context.read<SphereService>();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await service.voteOnRemoval(proposalId, inFavour: inFavour);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+    }
+  }
+
+  Future<void> _proposeRemoval(
+    BuildContext context,
+    Sphere sphere,
+    SphereMember member,
+  ) async {
+    final service = context.read<SphereService>();
+    final messenger = ScaffoldMessenger.of(context);
+    final reasonController = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Put it to the sphere?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Everyone except you and them can vote, for 72 hours. It passes '
+              'on a majority of those who vote, provided enough people do. '
+              'The reason you give is shown to the whole sphere, including '
+              'them.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              autofocus: true,
+              maxLines: 2,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Reason',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Propose')),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final reason = reasonController.text.trim();
+      if (reason.isEmpty) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text('Give a reason — the sphere is being asked to decide'),
+        ));
+      } else {
+        try {
+          await service.proposeRemoval(sphere.id, member.identityKey, reason);
+        } catch (e) {
+          messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+        }
+      }
+    }
+    reasonController.dispose();
   }
 
   Future<bool?> _confirmTransfer(
@@ -534,6 +649,100 @@ class _OwnershipOfferBanner extends StatelessWidget {
               child: const Text('Accept ownership'),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// An open removal vote, shown to everyone in the sphere.
+///
+/// Deliberately not hidden from the person it concerns. There is nobody to
+/// appeal to here, so the least a sphere can do is let someone see that they
+/// are being discussed, and why.
+class _RemovalVoteCard extends StatelessWidget {
+  final SignedStatement proposal;
+  final RemovalTally tally;
+  final DateTime closesAt;
+  final String subjectName;
+  final String proposerName;
+  final bool? myVote;
+  final bool canVote;
+  final void Function(bool inFavour) onVote;
+
+  const _RemovalVoteCard({
+    required this.proposal,
+    required this.tally,
+    required this.closesAt,
+    required this.subjectName,
+    required this.proposerName,
+    required this.myVote,
+    required this.canVote,
+    required this.onVote,
+  });
+
+  String get _remaining {
+    final left = closesAt.difference(DateTime.now());
+    if (left.isNegative) return 'closing';
+    if (left.inHours >= 1) return '${left.inHours}h left';
+    return '${left.inMinutes}m left';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Container(
+      width: double.infinity,
+      color: cs.errorContainer,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$proposerName proposed removing $subjectName',
+            style: TextStyle(
+                color: cs.onErrorContainer, fontWeight: FontWeight.w600),
+          ),
+          if (proposal.detail.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('“${proposal.detail}”',
+                style: TextStyle(
+                    color: cs.onErrorContainer, fontStyle: FontStyle.italic)),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            '${tally.inFavour} for · ${tally.against} against · '
+            '${tally.cast}/${tally.eligible} voted · $_remaining',
+            style: TextStyle(color: cs.onErrorContainer, fontSize: 12),
+          ),
+          if (!tally.quorumMet)
+            Text(
+              'Needs ${tally.quorum} to vote for the result to count.',
+              style: TextStyle(color: cs.onErrorContainer, fontSize: 12),
+            ),
+          const SizedBox(height: 8),
+          if (canVote)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: myVote == false ? null : () => onVote(false),
+                  child: Text(myVote == false ? 'Voted against' : 'Against'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: myVote == true ? null : () => onVote(true),
+                  child: Text(myVote == true ? 'Voted for' : 'For removal'),
+                ),
+              ],
+            )
+          else
+            Text(
+              'You cannot vote on this one.',
+              style: TextStyle(color: cs.onErrorContainer, fontSize: 12),
+            ),
         ],
       ),
     );

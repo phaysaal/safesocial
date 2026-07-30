@@ -179,7 +179,7 @@ now distinct. Two clarifications the implementation forced:
 * **Read-only members are still missing.** `SphereKind.broadcast` already limits posting by
   role, so the gap is a per-member flag rather than a new concept.
 
-### 3.3 Voting to remove — design
+### 3.3 Voting to remove — **built**
 Removal is the one power that most needs legitimacy, because it is the only one that is
 irreversible for the person on the receiving end.
 
@@ -202,7 +202,21 @@ epoch bump and re-key. The membership operation carries the collected signed vot
 every member can verify the outcome independently rather than trusting the executor.
 
 **Abuse.** Rate-limit proposals — one open proposal per subject at a time, and a cooldown
-after a failed one, so a majority cannot harass a minority with repeated votes.
+after a failed one, so a majority cannot harass a minority with repeated votes. Both are in;
+the cooldown is seven days.
+
+Two things the implementation settled that the design left open:
+
+* **A decided vote closes early.** Once the outstanding votes could not change the result,
+  waiting out the remaining hours only delays a conclusion everyone can already compute.
+* **In a small sphere a single voter decides**, because a third of two is one. Stated
+  outright in a test rather than left as an accident of the arithmetic. Demanding more from
+  a group that size produces a rule that deadlocks instead, and anyone unhappy can leave.
+
+**Still hard-coded:** the 72-hour window, the one-third quorum and the simple majority are
+constants, not per-sphere settings. Making them configurable means putting them in the
+signed membership operation so every device agrees on the numbers — worth doing, but it is
+a wire change and was not worth bundling here.
 
 **Admins.** In small spheres a vote is heavy. Keep admin unilateral removal, but make it
 **visible to all members** — an admin action that nobody can see is indistinguishable from
@@ -255,7 +269,7 @@ voting machinery in 3.3.
 | **Demote an admin** | **Built** — owner only |
 | **Demote self** | **Built** |
 | **Transfer ownership** | **Built** — offer, accept, seven-day expiry |
-| **Propose / vote removal** | **Missing** — next |
+| **Propose / vote removal** | **Built** — proposal, votes, quorum, proof-carrying execution |
 | **Rename, edit description** | **Built** |
 | **Sphere icon or colour** | **Missing** |
 | **Member-visible audit log** | **Built** — 200 entries per sphere, on the sphere page |
@@ -295,9 +309,9 @@ seven, and they never enter the outbox — a typing signal that arrives late is
 worse than one that never arrives.
 
 **Second — governance.** ~~Ownership as a distinct role, transfer with acceptance,
-demotion, rename, audit log, second-admin-by-default.~~ **Done.** Remaining in this block:
-voting-based removal (3.3), deleting a sphere, rejoining after leaving, read-only members,
-and invite permissions.
+demotion, rename, audit log, second-admin-by-default, voting-based removal.~~ **Done.**
+Remaining in this block: deleting a sphere, rejoining after leaving, read-only members,
+invite permissions, and per-sphere voting thresholds.
 
 **Third — efficiency.** Multiplex the connections, cap the media cache. Before spheres get
 large, not after.
