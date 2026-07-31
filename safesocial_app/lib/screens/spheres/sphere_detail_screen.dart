@@ -64,6 +64,11 @@ class SphereDetailScreen extends StatelessWidget {
               onPressed: () => _showAddMember(context, sphere),
             ),
           IconButton(
+            icon: const Icon(Icons.forum_outlined),
+            tooltip: 'Sphere chat',
+            onPressed: () => context.push('/sphere/$sphereId/chat'),
+          ),
+          IconButton(
             icon: const Icon(Icons.history),
             tooltip: 'Activity',
             onPressed: () => context.push('/sphere/$sphereId/log'),

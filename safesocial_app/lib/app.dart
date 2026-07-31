@@ -25,6 +25,7 @@ import 'screens/media/media_viewer_screen.dart';
 import 'screens/spheres/sphere_list_screen.dart';
 import 'screens/spheres/create_sphere_screen.dart';
 import 'screens/spheres/sphere_detail_screen.dart';
+import 'screens/spheres/sphere_chat_screen.dart';
 import 'screens/spheres/sphere_log_screen.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/settings/settings_screen.dart';
@@ -172,6 +173,12 @@ class _SpheresAppState extends State<SpheresApp> {
         GoRoute(
           path: '/sphere/:id',
           builder: (context, state) => SphereDetailScreen(
+            sphereId: state.pathParameters['id']!,
+          ),
+        ),
+        GoRoute(
+          path: '/sphere/:id/chat',
+          builder: (context, state) => SphereChatScreen(
             sphereId: state.pathParameters['id']!,
           ),
         ),

@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/sphere.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/library_service.dart';
+import '../../services/sphere_chat_service.dart';
+import '../../services/sphere_service.dart';
 import '../../widgets/avatar.dart';
 
 /// Screen displaying a list of active chat conversations.
@@ -24,6 +27,15 @@ class ChatListScreen extends StatelessWidget {
     final conversationIds =
         library.sortChats(chatService.getConversationIds());
 
+    // Sphere threads sit alongside people. A group conversation is not a
+    // separate place in this app — it is addressed to a sphere instead of a
+    // person, and belongs in the same list.
+    final sphereChat = context.watch<SphereChatService>();
+    final spheres = context.watch<SphereService>();
+    final sphereThreads = sphereChat.activeThreads
+        .where((id) => spheres.sphere(id) != null)
+        .toList();
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -37,12 +49,20 @@ class ChatListScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: conversationIds.isEmpty
+      body: conversationIds.isEmpty && sphereThreads.isEmpty
           ? _buildEmptyState(theme)
           : ListView.builder(
-              itemCount: conversationIds.length,
+              itemCount: sphereThreads.length + conversationIds.length,
               itemBuilder: (context, index) {
-                final contactKey = conversationIds[index];
+                if (index < sphereThreads.length) {
+                  return _sphereTile(
+                    context,
+                    theme,
+                    spheres.sphere(sphereThreads[index])!,
+                    sphereChat,
+                  );
+                }
+                final contactKey = conversationIds[index - sphereThreads.length];
                 final messages = conversations[contactKey]!;
                 final contact = contactService.getContact(contactKey);
                 
@@ -100,6 +120,53 @@ class ChatListScreen extends StatelessWidget {
                 );
               },
             ),
+    );
+  }
+
+  Widget _sphereTile(
+    BuildContext context,
+    ThemeData theme,
+    Sphere sphere,
+    SphereChatService sphereChat,
+  ) {
+    final cs = theme.colorScheme;
+    final last = sphereChat.lastMessageIn(sphere.id);
+    final unread = sphereChat.unreadIn(sphere.id);
+
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: cs.primaryContainer,
+        child: Icon(Icons.forum_outlined, color: cs.onPrimaryContainer),
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              sphere.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '${sphere.members.length}',
+            style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+          ),
+        ],
+      ),
+      subtitle: Text(
+        last?.content ?? 'No messages yet',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: unread > 0
+          ? Badge(label: Text('$unread'))
+          : (last == null
+              ? null
+              : Text(_formatTime(last.timestamp),
+                  style: theme.textTheme.bodySmall)),
+      onTap: () => context.push('/sphere/${sphere.id}/chat'),
     );
   }
 

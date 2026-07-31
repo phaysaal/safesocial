@@ -56,6 +56,8 @@ class SecureStore {
     'spheres_contacts',
     'spheres_conversations',
     'spheres_msgs_',
+    'spheres_sphere_msgs_',
+    'spheres_sphere_chats_v1',
     'spheres_feed_posts',
     'spheres_hidden_posts',
     'spheres_spheres_v1',

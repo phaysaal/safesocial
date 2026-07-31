@@ -30,6 +30,7 @@ cheap, which is the good news.
 |---|---|---|---|
 | Send/receive a message | Instant, ordered, never lost | **Built** | — |
 | Read receipts, typing | Know it arrived and they're replying | **Built** | S |
+| Group chat in a sphere | The single biggest gap against what people expect | **Built** | M |
 | Photo in a chat | Pick, send, appears | **Built** | — |
 | Voice note | Hold, talk, release | **Built** | — |
 | React to a message | Long-press, emoji | **Built** | — |

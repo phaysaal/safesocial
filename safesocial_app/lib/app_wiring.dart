@@ -8,6 +8,7 @@ import 'services/feed_service.dart';
 import 'services/identity_service.dart';
 import 'services/library_service.dart';
 import 'services/sphere_migration.dart';
+import 'services/sphere_chat_service.dart';
 import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
 import 'services/relay_service.dart';
@@ -31,6 +32,7 @@ Future<void> wireIdentity({
   required AlbumService albumService,
   required SphereService sphereService,
   required LibraryService libraryService,
+  required SphereChatService sphereChatService,
   required RelayService relayService,
 }) async {
   if (!identityService.isOnboarded) return;
@@ -80,6 +82,9 @@ Future<void> wireIdentity({
   callService.setMyInfo(publicKey, secretKey);
   callService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
   await sphereService.load();
+  // After spheres, so threads for spheres we have left can be pruned.
+  await sphereChatService.load();
+  await sphereChatService.pruneDepartedSpheres();
   sphereService.configure(
     sessions: sessionManager,
     identityKey: publicKey,
@@ -89,6 +94,18 @@ Future<void> wireIdentity({
   // Membership changes and sphere keys travel over the pairwise chat channels
   // that already exist, so there is no separate transport to keep alive.
   sphereService.sendToPeer = chatService.sendRawToPeer;
+
+  // Group chat is addressed to the sphere, so it travels the same per-member
+  // channels as anything else a sphere sees, and arrives through the feed.
+  sphereChatService.configure(identityKey: publicKey);
+  // The feed channel, not the chat channel: sphere-sealed content is opened
+  // on the receiving side by FeedService.
+  sphereChatService.sendToPeer = feedService.sendSealedToMember;
+  sphereChatService.blockedKeys = () => contactService.contacts
+      .where((c) => c.blocked)
+      .map((c) => c.publicKey)
+      .toSet();
+  feedService.onSphereMessage = sphereChatService.handleIncoming;
   chatService.onSphereOp = sphereService.handleIncomingOp;
 
   // One-time conversion of legacy groups and rings. Runs after configure() so

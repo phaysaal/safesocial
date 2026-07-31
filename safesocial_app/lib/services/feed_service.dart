@@ -95,6 +95,14 @@ class FeedService extends ChangeNotifier {
   /// Receives sealed `album_add` envelopes that arrive on the feed channels.
   Future<void> Function(String sealed)? onAlbumItem;
 
+  /// Called with (author, sphereId, payload) for a verified sphere message.
+  ///
+  /// Group chat rides the same per-member channels as everything else
+  /// addressed to a sphere, so it arrives here. Passing the opened payload
+  /// rather than the sealed bytes avoids decrypting the same envelope twice.
+  Future<void> Function(String from, String sphereId, Map<String, dynamic>)?
+      onSphereMessage;
+
   /// Supply the crypto context so feed channels get pairwise addresses and
   /// content can be sealed to a sphere.
   void attachCrypto(
@@ -146,6 +154,15 @@ class FeedService extends ChangeNotifier {
       _feedRelay.sendViaRelay(member, sealed);
     }
   }
+
+  /// Send already-sealed sphere content to one member.
+  ///
+  /// Anything addressed to a sphere travels this channel — posts, album items
+  /// and group messages alike — because that is where the receiving side opens
+  /// sphere-sealed envelopes. Sending one down the direct chat channel instead
+  /// puts it in front of a decoder that cannot open it.
+  Future<bool> sendSealedToMember(String peerIdentityKey, String sealed) =>
+      _feedRelay.sendViaRelay(peerIdentityKey, sealed);
 
   /// Open a feed channel for a contact added after startup.
   ///
@@ -292,6 +309,12 @@ class FeedService extends ChangeNotifier {
       final opened = await spheres.openContent(data);
       final authorId = opened.from;
       final json = jsonDecode(opened.plaintext);
+
+      if (json['type'] == 'sphere_msg') {
+        await onSphereMessage?.call(
+            authorId, opened.sphereId, json as Map<String, dynamic>);
+        return;
+      }
 
       if (json['type'] == 'album_add') {
         // Album items ride the same per-member channels as feed content.
