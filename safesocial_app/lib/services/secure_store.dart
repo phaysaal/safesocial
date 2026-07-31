@@ -69,6 +69,7 @@ class SecureStore {
     'spheres_removal_proposals_v1',
     'spheres_albums',
     'spheres_outbox_v1',
+    'spheres_feed_outbox_v1',
     'spheres_sessions_v1',
     // Local curation. Saved posts are content ids, and muted spheres and
     // pinned chats reveal who someone talks to most — all worth encrypting.

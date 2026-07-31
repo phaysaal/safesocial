@@ -13,7 +13,10 @@ class RelayConfig extends ChangeNotifier {
   static const _prefsKey = 'spheres_relay_host';
 
   static const String defaultHost = 'relay.spheres.dev';
-  static const String fallbackHost = 'spheres-relay.phaysaal.workers.dev';
+  /// Verified to resolve — the previous value named an account subdomain
+  /// that does not exist, so every failover went nowhere.
+  static const String fallbackHost =
+      'spheres-relay.mahmudulfaisal.workers.dev';
 
   /// Read directly by the transport services, which are not widgets and cannot
   /// watch a provider. Kept in sync by [load] and [setHost].

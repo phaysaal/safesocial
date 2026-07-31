@@ -134,6 +134,7 @@ class RelayService extends ChangeNotifier {
       }
 
       conn.attempt = 0;
+      _attempts.remove(channelKey);
 
       channel.stream.listen(
         (data) {
@@ -180,11 +181,18 @@ class RelayService extends ChangeNotifier {
   /// Reconnect after a delay that grows with consecutive failures.
   ///
   /// Jittered so a relay restart does not bring every client back at once.
+  /// Attempts per channel, kept outside the connection because reconnecting
+  /// replaces it — without this the counter reset every time and the backoff
+  /// never grew, so a channel that could not connect hammered the relay every
+  /// couple of seconds forever.
+  final Map<String, int> _attempts = {};
+
   void _scheduleRetry(String channelKey, Mailbox mailbox, bool isFallback) {
     final conn = _conns[channelKey];
     if (conn == null || conn.closedIntentionally) return;
 
-    conn.attempt++;
+    conn.attempt = (_attempts[channelKey] ?? 0) + 1;
+    _attempts[channelKey] = conn.attempt;
     final backoffMs = _baseRetryDelay.inMilliseconds * (1 << (conn.attempt - 1));
     final cappedMs = backoffMs.clamp(
       _baseRetryDelay.inMilliseconds,
@@ -200,7 +208,11 @@ class RelayService extends ChangeNotifier {
     conn.retryTimer = Timer(delay, () {
       if (conn.closedIntentionally) return;
       _conns.remove(channelKey);
-      connectMailbox(channelKey, mailbox, isFallback: isFallback);
+      // Always come back to the primary. Failing over is for one attempt, not
+      // for good: retrying the fallback forever left a channel that blipped
+      // once permanently stranded on a host it could not reach, with no
+      // messages in or out until the app was restarted.
+      connectMailbox(channelKey, mailbox);
     });
   }
 

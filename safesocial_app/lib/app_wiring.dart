@@ -33,6 +33,7 @@ Future<void> wireIdentity({
   required SphereService sphereService,
   required LibraryService libraryService,
   required SphereChatService sphereChatService,
+  required FeedOutboxService feedOutboxService,
   required RelayService relayService,
 }) async {
   if (!identityService.isOnboarded) return;
@@ -99,8 +100,17 @@ Future<void> wireIdentity({
   // channels as anything else a sphere sees, and arrives through the feed.
   sphereChatService.configure(identityKey: publicKey);
   // The feed channel, not the chat channel: sphere-sealed content is opened
-  // on the receiving side by FeedService.
-  sphereChatService.sendToPeer = feedService.sendSealedToMember;
+  // on the receiving side by FeedService. Queued rather than sent directly, so
+  // nothing is lost when a member — or our own socket — is briefly away.
+  sphereChatService.queueForMember = feedService.queueForMember;
+
+  // The feed queue retries on the feed channel, exactly as the chat queue does
+  // on the pairwise one.
+  await feedOutboxService.load();
+  feedOutboxService.send = feedService.sendSealedToMember;
+  feedService.outbox = feedOutboxService;
+  feedOutboxService.start();
+  await feedOutboxService.pruneCompleted();
   sphereChatService.blockedKeys = () => contactService.contacts
       .where((c) => c.blocked)
       .map((c) => c.publicKey)

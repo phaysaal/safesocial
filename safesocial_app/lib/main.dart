@@ -41,6 +41,9 @@ void main() async {
 
   final sessionManager = SessionManager();
   final outboxService = OutboxService();
+  // A second queue: sphere content goes out on the feed channel, so it needs
+  // its own sender and its own storage, but the same durability.
+  final feedOutboxService = FeedOutboxService();
   final sphereService = SphereService();
   final relayConfig = RelayConfig();
   final libraryService = LibraryService();
@@ -82,6 +85,7 @@ void main() async {
     sphereService: sphereService,
     libraryService: libraryService,
     sphereChatService: sphereChatService,
+    feedOutboxService: feedOutboxService,
     relayService: relayService,
   );
 
@@ -113,6 +117,7 @@ void main() async {
         ChangeNotifierProvider.value(value: sphereService),
         ChangeNotifierProvider.value(value: libraryService),
         ChangeNotifierProvider.value(value: sphereChatService),
+        ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),
         ChangeNotifierProvider.value(value: callConfig),
         ChangeNotifierProvider.value(value: DebugLogService()),

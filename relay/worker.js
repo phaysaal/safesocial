@@ -21,7 +21,7 @@
  * schedules and cover traffic, which are not implemented.
  */
 
-const VERSION = "5.0";
+const VERSION = "5.1";
 
 // ── Limits ───────────────────────────────────────────────────────────────────
 // v1 had none of these: unlimited body size, unlimited keys per identity, and
@@ -291,19 +291,29 @@ export class RelayRoom {
       typeof message === "string" ? message : arrayBufferToBase64(message);
 
     const sockets = this.state.getWebSockets();
-    let delivered = false;
     for (const sock of sockets) {
       if (sock === ws) continue;
       try {
         sock.send(message);
-        delivered = true;
       } catch (_) {}
     }
 
-    // Only queue when nobody was listening. Note this counts *any* other
-    // socket on the mailbox as delivery — acceptable now that reaching a
-    // mailbox requires its key, which v1 did not.
-    if (!delivered) await this.queue(payload);
+    // Always queue. Live delivery above is a latency optimisation, not the
+    // guarantee.
+    //
+    // v5 queued only when no other socket was open, which had two failure
+    // modes and both lost messages outright. A mailbox is shared by the two
+    // parties, so the check could not tell the recipient's socket from a stale
+    // one belonging to the sender — and a hibernatable socket outlives an app
+    // that was killed or swiped away. It also raced: a message sent in the
+    // moment before the relay noticed the recipient had gone was counted as
+    // delivered to a socket that would never read it.
+    //
+    // The cost is that a message delivered live still sits here until the
+    // recipient's next sync acknowledges it, so it is fetched once more and
+    // discarded. Every receive path already discards by message id, so a
+    // duplicate is invisible; a lost message is not.
+    await this.queue(payload);
   }
 
   async webSocketClose() {}

@@ -58,9 +58,12 @@ void main() {
     final sent = <String>[];
     final chat = SphereChatService(spheres)
       ..configure(identityKey: alice)
-      ..sendToPeer = (peer, payload) async {
-        sent.add(peer);
-        return true;
+      ..queueForMember = ({
+        required String id,
+        required String member,
+        required String sealed,
+      }) async {
+        sent.add(member);
       };
     return (chat, sphere, sent);
   }

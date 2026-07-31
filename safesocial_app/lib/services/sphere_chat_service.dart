@@ -46,8 +46,17 @@ class SphereChatService extends ChangeNotifier {
 
   String? _myIdentityKey;
 
-  /// Sends one already-sealed payload to one member. Supplied by the app.
-  Future<bool> Function(String peerIdentityKey, String payload)? sendToPeer;
+  /// Hands one member's copy to a durable queue. Supplied by the app.
+  ///
+  /// A queue rather than a bare send: the relay only stores a message it
+  /// actually receives, so if our socket is down at the moment of sending
+  /// there is nothing anywhere and the message is gone. That is the whole
+  /// reason a message written while someone was offline never arrived.
+  Future<void> Function({
+    required String id,
+    required String member,
+    required String sealed,
+  })? queueForMember;
 
   /// Members we will not send to. Blocking is one-sided and local.
   Set<String> Function()? blockedKeys;
@@ -129,22 +138,27 @@ class SphereChatService extends ChangeNotifier {
     await _persist(sphereId);
     notifyListeners();
 
-    await _fanOut(sphere, sealed);
+    await _fanOut(sphere, sealed, message.id);
     return message;
   }
 
-  Future<void> _fanOut(Sphere sphere, String sealed) async {
-    final send = sendToPeer;
-    if (send == null) return;
+  Future<void> _fanOut(Sphere sphere, String sealed, String messageId) async {
+    final queue = queueForMember;
+    if (queue == null) {
+      DebugLogService()
+          .error('SphereChat', 'No transport attached; the message stays here');
+      return;
+    }
     final blocked = blockedKeys?.call() ?? const <String>{};
 
     for (final member in sphere.members.map((m) => m.identityKey)) {
       if (member == _myIdentityKey || blocked.contains(member)) continue;
       try {
-        await send(member, sealed);
+        // One queue entry per recipient, because each is delivered separately.
+        await queue(id: '$messageId:$member', member: member, sealed: sealed);
       } catch (e) {
-        DebugLogService()
-            .warn('SphereChat', 'Could not reach a member of "${sphere.name}": $e');
+        DebugLogService().error(
+            'SphereChat', 'Could not queue for a member of "${sphere.name}": $e');
       }
     }
   }

@@ -9,6 +9,12 @@ main = "worker.js"
 # pinned well past that change.
 compatibility_date = "2025-01-01"
 
+# The client falls back to <name>.<account>.workers.dev when the custom domain
+# is unreachable. That host has to actually exist: with this off, every
+# failover went to a name that does not resolve, and the retry then stayed on
+# it — a channel that blipped once was stranded until the app restarted.
+workers_dev = true
+
 # Custom domain
 routes = [
   { pattern = "relay.spheres.dev", custom_domain = true }

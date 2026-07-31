@@ -9,6 +9,7 @@ import '../crypto/session_manager.dart';
 import '../models/contact.dart';
 import '../models/post.dart';
 import 'debug_log_service.dart';
+import 'outbox_service.dart';
 import 'media_service.dart';
 import 'relay_service.dart';
 import 'sphere_service.dart';
@@ -95,6 +96,15 @@ class FeedService extends ChangeNotifier {
   /// Receives sealed `album_add` envelopes that arrive on the feed channels.
   Future<void> Function(String sealed)? onAlbumItem;
 
+  /// Durable queue for sphere content. Supplied by the app.
+  ///
+  /// Sending used to be fire-and-forget: the result of [sendSealedToMember]
+  /// was discarded, and it returns false whenever there is no live socket. A
+  /// post written while a member was unreachable — or in the seconds after
+  /// they went offline, when our own socket is reconnecting — was dropped and
+  /// never mentioned again. Queueing makes it survive.
+  OutboxService? outbox;
+
   /// Called with (author, sphereId, payload) for a verified sphere message.
   ///
   /// Group chat rides the same per-member channels as everything else
@@ -151,8 +161,31 @@ class FeedService extends ChangeNotifier {
         _contacts.where((c) => c.blocked).map((c) => c.publicKey).toSet();
     for (final member in sphere.members.map((m) => m.identityKey)) {
       if (member == _myPublicKey || blocked.contains(member)) continue;
-      _feedRelay.sendViaRelay(member, sealed);
+      await queueForMember(
+        id: '$type:${DateTime.now().microsecondsSinceEpoch}:$member',
+        member: member,
+        sealed: sealed,
+      );
     }
+  }
+
+  /// Hand one member's copy to the durable queue, or send it directly if no
+  /// queue is attached.
+  Future<void> queueForMember({
+    required String id,
+    required String member,
+    required String sealed,
+  }) async {
+    final queue = outbox;
+    if (queue == null) {
+      final ok = await _feedRelay.sendViaRelay(member, sealed);
+      if (!ok) {
+        DebugLogService().warn(
+            'Feed', 'Could not reach $member and have nowhere to queue it');
+      }
+      return;
+    }
+    await queue.enqueue(id: id, peer: member, payload: sealed);
   }
 
   /// Send already-sealed sphere content to one member.

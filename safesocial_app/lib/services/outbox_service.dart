@@ -88,7 +88,18 @@ class OutboxEntry {
 /// room reconnects. Both are needed — the tick alone is too slow after a
 /// network change, and the reconnect alone misses transient send failures.
 class OutboxService extends ChangeNotifier {
-  static const _prefsKey = 'spheres_outbox_v1';
+  /// Where this queue is written.
+  ///
+  /// Parameterised because there is more than one channel to be durable on.
+  /// Direct messages travel the pairwise chat channel and sphere content
+  /// travels the feed channel; they need separate queues because they are
+  /// handed to different senders, but they need identical behaviour, and
+  /// having one of them silently drop what it could not send is precisely the
+  /// bug this exists to prevent.
+  final String _prefsKey;
+
+  OutboxService({String storageKey = 'spheres_outbox_v1'})
+      : _prefsKey = storageKey;
 
   /// Give up after this many attempts, so a permanently unreachable peer does
   /// not retry forever.
@@ -300,4 +311,14 @@ class OutboxService extends ChangeNotifier {
     stop();
     super.dispose();
   }
+}
+
+/// The queue for sphere content.
+///
+/// A distinct type only so the two queues can be told apart where they are
+/// injected — the behaviour is identical. Direct messages and sphere content
+/// leave on different channels and must not share a queue, because an entry is
+/// bound to the sender that can deliver it.
+class FeedOutboxService extends OutboxService {
+  FeedOutboxService() : super(storageKey: 'spheres_feed_outbox_v1');
 }

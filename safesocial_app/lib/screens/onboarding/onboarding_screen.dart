@@ -84,6 +84,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       sphereService: context.read<SphereService>(),
       libraryService: context.read<LibraryService>(),
       sphereChatService: context.read<SphereChatService>(),
+      feedOutboxService: context.read<FeedOutboxService>(),
       relayService: context.read<RelayService>(),
     );
   }
