@@ -798,3 +798,32 @@ messages are vanishing into silence has to act — hence the manual
 "Re-establish secure session" in the chat menu. Detection watches the chat
 channel only; feed and sphere traffic use wrapped or sphere keys and do not
 ratchet, so they cannot diverge this way.
+
+## Delivery guarantees
+
+Content sent while the other side was away used to be lost, and three separate
+faults could each cause it. Recorded here because the fix changed an
+architectural assumption.
+
+**The relay always queues now.** It used to queue only when it believed nobody
+was listening, which it could not judge: a mailbox is shared by both parties,
+so a stale socket belonging to the *sender* — hibernatable sockets outlive an
+app that was killed — looked exactly like the recipient being present. Live
+delivery over the WebSocket is now a latency optimisation and the mailbox is
+the guarantee. The cost is that a message delivered live still sits in the
+mailbox until the recipient's next sync acknowledges it, so it is fetched once
+more and discarded; every receive path already discards by message id.
+
+**Everything outbound goes through a durable queue.** Direct messages always
+did. Feed posts and, later, group messages did not: the send result was
+discarded, and it fails whenever there is no live socket, so the content simply
+vanished with nothing said. There are two queues rather than one because a
+queued entry is bound to the channel that can deliver it — direct messages
+travel the pairwise chat channel, sphere content travels the feed channel.
+
+**The fallback relay host has to exist.** It did not: the hostname named an
+account subdomain that was never registered, and `workers_dev` was off. The
+client also passed the fallback flag into its own retry, so one failed
+connection pinned a channel to the dead host permanently. Retries now return to
+the primary, and the attempt counter survives the reconnection that replaces
+the connection object — without that the backoff reset to zero every time.
