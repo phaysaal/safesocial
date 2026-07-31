@@ -65,6 +65,12 @@ class ChatService extends ChangeNotifier {
         peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
         type: 'typing',
         plaintext: jsonEncode({'stopped': stopped}),
+        // Wrapped, not chained. A typing signal is ephemeral and deliberately
+        // never retried, so letting it consume a ratchet step would punch a
+        // hole in a sequence that real messages depend on — and, because it is
+        // sent alongside them rather than queued behind them, would race with
+        // them for the same step.
+        mode: SealMode.wrap,
       );
       // Deliberately not queued in the outbox: a typing signal that arrives
       // late is worse than one that never arrives at all.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -37,6 +38,27 @@ class KdfChain {
 
   static const int maxSkip = 256;
 
+  /// Serialises access to the chain.
+  ///
+  /// Advancing is not atomic — deriving a key and its successor are both
+  /// awaits — so two callers that overlap would read the same chain key and be
+  /// handed the same index. That is not hypothetical: an ephemeral signal sent
+  /// alongside a message does exactly this, and the result is two envelopes
+  /// with one sequence number, the second of which every recipient correctly
+  /// rejects as a replay. The message simply never arrives.
+  ///
+  /// The nonce is random per envelope, so the duplicate key does not put two
+  /// plaintexts under one keystream. The damage is lost messages, not lost
+  /// confidentiality.
+  Future<void> _tail = Future<void>.value();
+
+  Future<T> _serialised<T>(Future<T> Function() action) {
+    final result = _tail.then((_) => action());
+    // Keep the queue moving even when one caller throws.
+    _tail = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
   KdfChain._(this._chainKey, this._index, this._skipped);
 
   KdfChain(Uint8List seed) : this._(seed, 0, {});
@@ -45,7 +67,9 @@ class KdfChain {
   int get skippedCount => _skipped.length;
 
   /// Derive the next message key and advance the chain.
-  Future<({int index, Uint8List key})> next() async {
+  Future<({int index, Uint8List key})> next() => _serialised(_next);
+
+  Future<({int index, Uint8List key})> _next() async {
     final key = await SpheresCrypto.hkdf(
       secret: _chainKey,
       info: _Info.messageKey,
@@ -64,7 +88,9 @@ class KdfChain {
   /// Returns null if [target] is behind the chain and was not retained — that
   /// means either a replay or a message already processed, and the caller must
   /// reject it rather than treating it as new.
-  Future<Uint8List?> keyFor(int target) async {
+  Future<Uint8List?> keyFor(int target) => _serialised(() => _keyFor(target));
+
+  Future<Uint8List?> _keyFor(int target) async {
     if (target < _index) {
       return _skipped.remove(target);
     }
@@ -76,11 +102,11 @@ class KdfChain {
     }
 
     while (_index < target) {
-      final skipped = await next();
+      final skipped = await _next();
       _skipped[skipped.index] = skipped.key;
     }
 
-    final result = await next();
+    final result = await _next();
     return result.key;
   }
 
