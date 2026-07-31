@@ -227,6 +227,30 @@ class OutboxService extends ChangeNotifier {
     }
   }
 
+  /// Mark everything still queued for [peer] as failed, returning how many.
+  ///
+  /// Used when a session restarts. Entries hold sealed bytes and no plaintext,
+  /// by design, so they cannot be re-sealed under the new chain — they would
+  /// retry forever and never arrive. Failing them makes that visible instead
+  /// of pretending they are still on their way.
+  Future<int> failPendingForPeer(String peer) async {
+    var failed = 0;
+    for (final entry in _entries) {
+      if (entry.peer != peer) continue;
+      if (entry.state != OutboxState.pending &&
+          entry.state != OutboxState.sent) {
+        continue;
+      }
+      entry.state = OutboxState.failed;
+      failed++;
+    }
+    if (failed > 0) {
+      await _persist();
+      notifyListeners();
+    }
+    return failed;
+  }
+
   Future<void> removeForPeer(String peer) async {
     _entries.removeWhere((e) => e.peer == peer);
     await _persist();

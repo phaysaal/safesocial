@@ -764,3 +764,37 @@ plan and in `architecture_weaknesses.md`. The load-bearing ones for sequencing:
 - `recovery.rs:16-33` — `threshold == 1` accepted; no threshold enforcement, no shard
   authentication, no verification of the reconstructed secret; panics on malformed shards.
 - `build.gradle.kts:49-53` — release builds fall back to the Android debug signing key.
+
+## Session recovery
+
+Pairwise chains advance in lockstep and nothing repaired them if the two sides
+ever disagreed. Every later message failed to authenticate, the conversation
+was over, and the only symptom was that messages quietly stopped arriving.
+Found on two devices; the cause that time was a race in `KdfChain.next()`, but
+a crash between sealing and persisting, or restoring a backup on one side, does
+the same thing.
+
+Chains can now be restarted. `PairwiseSession.resetEpoch` is folded into the
+chain seeds, so a restart derives genuinely new chains rather than replaying
+the old ones — an old ciphertext must not become valid again. Both sides can
+re-derive because the root comes from a static X25519 agreement, which is the
+one piece of state a divergence cannot damage. The announcement is sealed with
+`SealMode.wrap`, since a request to fix the chain cannot travel on it.
+
+Detection is three consecutive authentication failures from one peer, with a
+five-minute floor between restarts. Three rather than one, because a single
+failure can be a corrupted delivery; a floor, because a restart discards
+in-flight messages and a recurring fault must not become a loop that destroys
+everything after it. The trigger is trustworthy because the envelope signature
+covers the ciphertext as well as the header — an authentication failure that
+passes the signature check can only have come from the real peer.
+
+Queued messages are marked failed rather than dropped. The outbox holds only
+sealed bytes, by design, so they cannot be re-sealed under the new chain; they
+would retry forever and never arrive.
+
+**Known limits.** Only the receiving side detects a fault, so someone whose
+messages are vanishing into silence has to act — hence the manual
+"Re-establish secure session" in the chat menu. Detection watches the chat
+channel only; feed and sphere traffic use wrapped or sphere keys and do not
+ratchet, so they cannot diverge this way.

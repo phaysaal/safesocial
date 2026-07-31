@@ -150,10 +150,20 @@ class PairwiseSession {
   final Uint8List _root;
 
   /// Chain we encrypt with. The peer derives the same chain to decrypt.
-  final KdfChain sending;
+  KdfChain sending;
 
   /// Chain we decrypt the peer's messages with.
-  final KdfChain receiving;
+  KdfChain receiving;
+
+  /// How many times these chains have been restarted.
+  ///
+  /// Chains can only be advanced in lockstep, and nothing repairs them if the
+  /// two sides ever disagree about where they are: every later message fails
+  /// its authentication check, and the conversation is over with no visible
+  /// reason. Restarting is the way back. The counter is folded into the chain
+  /// seeds so a restart produces genuinely new chains rather than replaying
+  /// the old ones — an old ciphertext must not become valid again.
+  int resetEpoch;
 
   PairwiseSession._({
     required this.myIdentityKey,
@@ -161,6 +171,7 @@ class PairwiseSession {
     required Uint8List root,
     required this.sending,
     required this.receiving,
+    this.resetEpoch = 0,
   }) : _root = root;
 
   /// Establish a session from our X25519 key pair and the peer's X25519 public
@@ -193,13 +204,41 @@ class PairwiseSession {
       myIdentityKey: myIdentityKey,
       peerIdentityKey: peerIdentityKey,
       root: root,
-      sending: KdfChain(await _chainSeed(root, myIdentityKey)),
-      receiving: KdfChain(await _chainSeed(root, peerIdentityKey)),
+      sending: KdfChain(await _chainSeed(root, myIdentityKey, 0)),
+      receiving: KdfChain(await _chainSeed(root, peerIdentityKey, 0)),
     );
   }
 
-  static Future<Uint8List> _chainSeed(Uint8List root, String senderKey) =>
-      SpheresCrypto.hkdf(secret: root, info: '${_Info.chain}:$senderKey');
+  /// Restart both chains at [epoch].
+  ///
+  /// Both sides run this with the same number and land on the same fresh
+  /// chains, because the root they share is static — that is the one piece of
+  /// state a divergence cannot damage. Anything still in flight under the old
+  /// chains is lost, which is the price of getting the channel back.
+  ///
+  /// Returns false if [epoch] is not newer than the current one, so a repeated
+  /// or replayed request cannot keep throwing the chains away.
+  Future<bool> resetTo(int epoch) async {
+    if (epoch <= resetEpoch) return false;
+    resetEpoch = epoch;
+    sending = KdfChain(await _chainSeed(_root, myIdentityKey, epoch));
+    receiving = KdfChain(await _chainSeed(_root, peerIdentityKey, epoch));
+    return true;
+  }
+
+  /// Epoch 0 keeps the original derivation, so sessions written before resets
+  /// existed stay readable.
+  static Future<Uint8List> _chainSeed(
+    Uint8List root,
+    String senderKey,
+    int epoch,
+  ) =>
+      SpheresCrypto.hkdf(
+        secret: root,
+        info: epoch == 0
+            ? '${_Info.chain}:$senderKey'
+            : '${_Info.chain}:$senderKey:reset$epoch',
+      );
 
   /// A static key shared by both parties, used to wrap per-item content keys.
   ///
@@ -226,6 +265,7 @@ class PairwiseSession {
         'root': base64Encode(_root),
         'sending': sending.toJson(),
         'receiving': receiving.toJson(),
+        if (resetEpoch != 0) 'resetEpoch': resetEpoch,
       };
 
   static PairwiseSession fromJson(Map<String, dynamic> json) {
@@ -235,6 +275,7 @@ class PairwiseSession {
       root: Uint8List.fromList(base64Decode(json['root'] as String)),
       sending: KdfChain.fromJson(json['sending'] as Map<String, dynamic>),
       receiving: KdfChain.fromJson(json['receiving'] as Map<String, dynamic>),
+      resetEpoch: json['resetEpoch'] as int? ?? 0,
     );
   }
 }

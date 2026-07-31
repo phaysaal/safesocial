@@ -68,6 +68,50 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
   }
 
+  /// Let someone repair a conversation that has stopped working.
+  ///
+  /// The app now notices divergence on its own, but only once messages have
+  /// started failing, and only for the side receiving them. Someone whose
+  /// messages are vanishing into silence needs a way to act without waiting to
+  /// be rescued — and it is the natural thing to reach for when a chat has
+  /// gone quiet in a way that feels wrong.
+  Future<void> _confirmSessionReset(
+      BuildContext context, String displayName) async {
+    final chat = context.read<ChatService>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Re-establish this session?'),
+        content: Text(
+          'Use this if messages with $displayName have stopped getting '
+          'through. Both devices start a fresh encrypted session.\n\n'
+          'Anything already sent but not yet delivered will be lost, and your '
+          'existing conversation history stays exactly as it is.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Re-establish')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await chat.restartSessionManually(widget.conversationId);
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Session re-established. Try sending again.'),
+      ));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+    }
+  }
+
   @override
   void dispose() {
     // Otherwise the indicator lingers on their side until it times out.
@@ -341,9 +385,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ],
                   ),
                 );
+              } else if (value == 'reset') {
+                _confirmSessionReset(context, displayName);
               }
             },
             itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                  value: 'reset', child: Text('Re-establish secure session')),
               const PopupMenuItem(value: 'delete', child: Text('Delete contact')),
             ],
           ),
@@ -351,6 +399,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       body: Column(
         children: [
+          if (chatService.wasRecentlyReset(widget.conversationId))
+            MaterialBanner(
+              backgroundColor: cs.tertiaryContainer,
+              content: Text(
+                'The secure session with $displayName was re-established. '
+                'Messages either of you sent in the last few moments may not '
+                'have arrived — check anything important got through.',
+                style: TextStyle(color: cs.onTertiaryContainer),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () =>
+                      chatService.acknowledgeReset(widget.conversationId),
+                  child: const Text('Got it'),
+                ),
+              ],
+            ),
           // ── Messages ────────────────────────────────────
           Expanded(
             child: messages.isEmpty

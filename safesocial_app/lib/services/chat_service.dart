@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
@@ -342,6 +343,14 @@ class ChatService extends ChangeNotifier {
         resolveExchangeKey: (key) => _resolveExchangeKey?.call(key),
       );
 
+      if (opened.type == 'session_reset') {
+        await _handleSessionReset(opened.from, opened.plaintext);
+        return;
+      }
+
+      // Anything that opens proves the chains agree again.
+      _authFailures.remove(opened.from);
+
       if (opened.type == 'typing') {
         final stopped = jsonDecode(opened.plaintext)['stopped'] == true;
         if (_typing.noteSignal(opened.from, stopped: stopped)) {
@@ -396,8 +405,152 @@ class ChatService extends ChangeNotifier {
       DebugLogService().error('Chat', 'Rejected message from $contactKey: $e');
     } on NoSessionException catch (e) {
       DebugLogService().warn('Chat', 'Cannot decrypt yet: $e');
+    } on SecretBoxAuthenticationError catch (_) {
+      // The signature verified — so this really is from them — but the payload
+      // did not authenticate. That combination means only one thing: the two
+      // sides no longer agree on where the chains are.
+      DebugLogService()
+          .warn('Chat', 'Could not authenticate a message from $contactKey');
+      await _noteAuthenticationFailure(contactKey);
     } catch (e) {
       DebugLogService().error('Chat', 'Failed to handle relay message: $e');
+    }
+  }
+
+  // ── Recovering a broken session ────────────────────────────────────────────
+
+  /// Failures in a row, per peer. Reset by anything that decrypts.
+  final Map<String, int> _authFailures = {};
+
+  /// When we last restarted a session with each peer.
+  final Map<String, DateTime> _lastReset = {};
+
+  /// How many failures in a row before concluding the chains have diverged.
+  ///
+  /// More than one, because a single failure can be a corrupted delivery. Not
+  /// many more, because until this fires the conversation is dead.
+  static const int resetAfterFailures = 3;
+
+  /// Floor on how often a session may restart.
+  ///
+  /// A restart throws away anything in flight, so a fault that keeps recurring
+  /// must not turn into a loop that destroys every message that follows.
+  static const Duration resetCooldown = Duration(minutes: 5);
+
+  /// Peers whose session was restarted recently, so the UI can say so.
+  final Set<String> _recentlyReset = {};
+
+  bool wasRecentlyReset(String peerKey) => _recentlyReset.contains(peerKey);
+
+  void acknowledgeReset(String peerKey) {
+    if (_recentlyReset.remove(peerKey)) notifyListeners();
+  }
+
+  Future<void> _noteAuthenticationFailure(String peerKey) async {
+    final count = (_authFailures[peerKey] ?? 0) + 1;
+    _authFailures[peerKey] = count;
+    if (count < resetAfterFailures) return;
+
+    final last = _lastReset[peerKey];
+    if (last != null && DateTime.now().difference(last) < resetCooldown) {
+      DebugLogService().warn('Chat',
+          'Session with $peerKey still failing, but it was just restarted');
+      return;
+    }
+
+    await _restartSession(peerKey, announce: true);
+  }
+
+  /// Restart a session because the user asked, not because we detected a fault.
+  ///
+  /// Bypasses the failure counter — they are telling us it is broken — but not
+  /// the cooldown, so repeated taps cannot shred whatever is still in flight.
+  Future<void> restartSessionManually(String peerKey) async {
+    final last = _lastReset[peerKey];
+    if (last != null && DateTime.now().difference(last) < resetCooldown) {
+      throw StateError(
+        'This session was just re-established. Give it a minute before '
+        'trying again.',
+      );
+    }
+    await _restartSession(peerKey, announce: true);
+  }
+
+  Future<void> _restartSession(String peerKey, {required bool announce}) async {
+    final sessions = _sessions;
+    if (sessions == null) return;
+
+    try {
+      final epoch = await sessions.beginReset(
+        peerIdentityKey: peerKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
+      );
+      await _afterReset(peerKey, epoch);
+      if (announce) await _announceReset(peerKey, epoch);
+    } catch (e) {
+      DebugLogService().error('Chat', 'Could not restart the session: $e');
+    }
+  }
+
+  /// Tell the peer which epoch we have moved to.
+  ///
+  /// Wrapped rather than chained, because the chain is the broken thing — a
+  /// request to fix it cannot depend on it working.
+  Future<void> _announceReset(String peerKey, int epoch) async {
+    final sessions = _sessions;
+    if (sessions == null) return;
+    try {
+      final sealed = await sessions.seal(
+        peerIdentityKey: peerKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
+        type: 'session_reset',
+        plaintext: jsonEncode({'epoch': epoch}),
+        mode: SealMode.wrap,
+      );
+      await _relayService.sendViaRelay(peerKey, sealed);
+    } catch (e) {
+      DebugLogService().error('Chat', 'Could not announce the restart: $e');
+    }
+  }
+
+  Future<void> _afterReset(String peerKey, int epoch) async {
+    _authFailures.remove(peerKey);
+    _lastReset[peerKey] = DateTime.now();
+    _recentlyReset.add(peerKey);
+
+    // Anything queued was sealed under the chain we just abandoned, and the
+    // outbox holds only ciphertext, so it can never be re-sealed. Failing it
+    // is honest; leaving it to retry forever would not be.
+    final stranded = await _outbox?.failPendingForPeer(peerKey) ?? 0;
+    DebugLogService().warn(
+      'Chat',
+      'Restarted the session with $peerKey at epoch $epoch'
+      '${stranded == 0 ? '' : '; $stranded queued message'
+          '${stranded == 1 ? '' : 's'} could not be recovered'}',
+    );
+    notifyListeners();
+  }
+
+  Future<void> _handleSessionReset(String peerKey, String payload) async {
+    final sessions = _sessions;
+    if (sessions == null) return;
+    try {
+      final epoch = jsonDecode(payload)['epoch'];
+      if (epoch is! int || epoch < 1) return;
+
+      final changed = await sessions.adoptReset(
+        peerIdentityKey: peerKey,
+        peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
+        epoch: epoch,
+      );
+      if (!changed) return;
+
+      await _afterReset(peerKey, epoch);
+      // Echo it back so a peer that has not caught up converges too. Adopting
+      // is idempotent, so this cannot bounce.
+      await _announceReset(peerKey, epoch);
+    } catch (e) {
+      DebugLogService().error('Chat', 'Could not apply a session restart: $e');
     }
   }
 

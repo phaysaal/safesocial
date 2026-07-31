@@ -193,6 +193,48 @@ class SessionManager {
 
   // ── Persistence ───────────────────────────────────────────────────────────
 
+  /// The restart counter for a peer, or 0 if we have no session with them.
+  int resetEpochFor(String peerIdentityKey) =>
+      _sessions[peerIdentityKey]?.resetEpoch ?? 0;
+
+  /// Start a fresh pair of chains with a peer, returning the new epoch.
+  ///
+  /// Called when their messages have stopped authenticating, which means the
+  /// two sides no longer agree on where the chains are. Nothing else recovers
+  /// from that: the root is intact, but every message key derived from here on
+  /// is wrong on one side or the other.
+  Future<int> beginReset({
+    required String peerIdentityKey,
+    required String? peerKeyExchangePublicKey,
+  }) async {
+    final session = await sessionFor(
+      peerIdentityKey: peerIdentityKey,
+      peerKeyExchangePublicKey: peerKeyExchangePublicKey,
+    );
+    await session.resetTo(session.resetEpoch + 1);
+    await persist();
+    return session.resetEpoch;
+  }
+
+  /// Adopt a restart the peer asked for.
+  ///
+  /// Returns true if this actually changed anything. A request for an epoch we
+  /// are already at or past is ignored, so two sides that ask at the same
+  /// moment converge on one answer instead of resetting each other in circles.
+  Future<bool> adoptReset({
+    required String peerIdentityKey,
+    required String? peerKeyExchangePublicKey,
+    required int epoch,
+  }) async {
+    final session = await sessionFor(
+      peerIdentityKey: peerIdentityKey,
+      peerKeyExchangePublicKey: peerKeyExchangePublicKey,
+    );
+    final changed = await session.resetTo(epoch);
+    if (changed) await persist();
+    return changed;
+  }
+
   Future<void> persist() async {
     final prefs = SecureStore.instance;
     await prefs.setString(
