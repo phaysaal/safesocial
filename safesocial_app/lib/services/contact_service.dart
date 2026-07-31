@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
 
 import '../models/contact.dart';
+import '../models/contact_request.dart';
 import 'debug_log_service.dart';
 import 'relay_service.dart';
 
@@ -132,9 +133,131 @@ class ContactService extends ChangeNotifier {
     }
   }
 
+  // ── Requests waiting on the user ───────────────────────────────────────────
+
+  static const _prefsRequestsKey = 'spheres_contact_requests_v1';
+  static const _prefsDeclinedKey = 'spheres_contact_declined_v1';
+
+  final List<ContactRequest> _requests = [];
+
+  /// Keys we have turned down, so a refusal cannot be worn away by repetition.
+  final Set<String> _declined = {};
+
+  List<ContactRequest> get requests => List.unmodifiable(_requests);
+
+  bool hasRequestFrom(String publicKey) =>
+      _requests.any((r) => r.publicKey == publicKey);
+
+  /// Hold an incoming request rather than acting on it.
+  ///
+  /// Nothing is wired and no reply is sent. A reply would confirm to the
+  /// sender that this address is real and someone is running the app, which is
+  /// exactly what an unsolicited request should not be able to learn.
+  Future<void> _holdRequest(
+    String publicKey,
+    String name,
+    String? exchangeKey,
+  ) async {
+    if (publicKey == _myPublicKey) return;
+    if (_declined.contains(publicKey)) {
+      DebugLogService()
+          .info('Contacts', 'Ignoring a request from someone already declined');
+      return;
+    }
+
+    // Already known: this is the other half of an exchange we started, so it
+    // needs no decision — we asked for them.
+    final existing = _contacts.indexWhere((c) => c.publicKey == publicKey);
+    if (existing != -1) {
+      DebugLogService().info('Contacts', '$name is already a contact');
+      if (exchangeKey != null) await setExchangeKey(publicKey, exchangeKey);
+      _sendHandshake(publicKey, 'contact_accept');
+      return;
+    }
+
+    final index = _requests.indexWhere((r) => r.publicKey == publicKey);
+    final request = ContactRequest(
+      publicKey: publicKey,
+      displayName: name,
+      keyExchangePublicKey: exchangeKey,
+      receivedAt: DateTime.now(),
+    );
+    if (index == -1) {
+      _requests.add(request);
+    } else {
+      // A repeat carries a fresher name and key; it is not a second request.
+      _requests[index] = request;
+    }
+
+    DebugLogService().info('Contacts', '$name would like to connect');
+    await _persistRequests();
+    notifyListeners();
+  }
+
+  /// Accept a request: they become a contact and learn our key.
+  Future<void> approveRequest(String publicKey) async {
+    final index = _requests.indexWhere((r) => r.publicKey == publicKey);
+    if (index == -1) return;
+    final request = _requests.removeAt(index);
+    await _persistRequests();
+
+    await addContact(
+      request.publicKey,
+      request.displayName,
+      keyExchangePublicKey: request.keyExchangePublicKey,
+      announce: false,
+    );
+    // Only now do they hear anything back.
+    _sendHandshake(publicKey, 'contact_accept');
+    notifyListeners();
+  }
+
+  /// Turn a request down. They are told nothing.
+  Future<void> declineRequest(String publicKey) async {
+    _requests.removeWhere((r) => r.publicKey == publicKey);
+    _declined.add(publicKey);
+    await _persistRequests();
+    notifyListeners();
+  }
+
+  /// Allow someone previously declined to ask again.
+  Future<void> undoDecline(String publicKey) async {
+    if (_declined.remove(publicKey)) {
+      await _persistRequests();
+      notifyListeners();
+    }
+  }
+
+  Future<void> _persistRequests() async {
+    final prefs = SecureStore.instance;
+    await prefs.setString(_prefsRequestsKey,
+        jsonEncode(_requests.map((r) => r.toJson()).toList()));
+    await prefs.setStringList(_prefsDeclinedKey, _declined.toList());
+  }
+
+  Future<void> _loadRequests() async {
+    final prefs = SecureStore.instance;
+    _declined.addAll(await prefs.getStringList(_prefsDeclinedKey) ?? const []);
+    final raw = await prefs.getString(_prefsRequestsKey);
+    if (raw == null) return;
+    try {
+      for (final item in jsonDecode(raw) as List<dynamic>) {
+        _requests.add(ContactRequest.fromJson(item as Map<String, dynamic>));
+      }
+    } catch (e) {
+      DebugLogService().error('Contacts', 'Could not read requests: $e');
+    }
+  }
+
   /// Add a contact and send a handshake request.
-  Future<void> addContact(String publicKey, String displayName,
-      {bool isPending = false, String? keyExchangePublicKey}) async {
+  Future<void> addContact(
+    String publicKey,
+    String displayName, {
+    String? keyExchangePublicKey,
+    /// Whether to ask them to connect. False when we are answering a request
+    /// they made, where the reply is sent separately.
+    bool announce = true,
+  }) async {
     if (_contacts.any((c) => c.publicKey == publicKey)) return;
 
     // Try to fetch their profile from the relay for the latest name and their
@@ -172,7 +295,8 @@ class ContactService extends ChangeNotifier {
       keyExchangePublicKey: exchangeKey,
       displayName: finalName,
       addedAt: DateTime.now(),
-      isPending: isPending,
+      // Waiting on them, not on us. Cleared when their acceptance arrives.
+      isPending: announce,
     );
 
     _contacts.add(contact);
@@ -183,8 +307,8 @@ class ContactService extends ChangeNotifier {
       onContactReady?.call(publicKey);
     }
 
-    // Send handshake via relay so they add us back
-    if (_myPublicKey != null && !isPending) {
+    // Ask them. They decide.
+    if (_myPublicKey != null && announce) {
       _sendHandshake(publicKey, 'contact_request');
     }
   }
@@ -204,13 +328,11 @@ class ContactService extends ChangeNotifier {
       }
 
       if (type == 'contact_request') {
-        DebugLogService().info('Contacts', 'Incoming contact request from $name');
-        // Automatically add them as a pending contact
-        await addContact(publicKey, name,
-            isPending: true,
-            keyExchangePublicKey: exchangeKey is String ? exchangeKey : null);
-        // Send back our info
-        _sendHandshake(publicKey, 'contact_accept');
+        await _holdRequest(
+          publicKey,
+          name,
+          exchangeKey is String ? exchangeKey : null,
+        );
       } else if (type == 'contact_accept') {
         DebugLogService().success('Contacts', '$name accepted your request');
         _updateContactInfo(publicKey, name, isPending: false);
@@ -334,6 +456,7 @@ class ContactService extends ChangeNotifier {
   }
 
   Future<void> loadContacts() async {
+    await _loadRequests();
     final prefs = SecureStore.instance;
     final json = await prefs.getString(_prefsContactsKey);
     if (json != null) {

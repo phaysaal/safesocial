@@ -73,7 +73,7 @@ void main() {
     expect(ready, isEmpty);
   });
 
-  test('an inbound handshake adds the sender with their exchange key', () async {
+  test('an inbound handshake reaches the scanned party as a request', () async {
     final service = ContactService();
     service.setMyInfo('me', 'Me', exchangeKey: 'x' * 64, secretKey: 'y' * 128);
 
@@ -87,9 +87,17 @@ void main() {
       '"keyExchangePublicKey":"$aliceExchange"}',
     );
 
-    // The scanned party has to end up with the scanner as a contact too;
-    // previously this direction produced nothing at all.
+    // This direction once produced nothing at all, which is the bug this file
+    // exists for. It now produces a decision rather than a fait accompli:
+    // the key is kept so approving is instant, but nothing is wired until it.
+    expect(service.requests.single.publicKey, alice);
+    expect(service.requests.single.keyExchangePublicKey, aliceExchange);
+    expect(ready, isEmpty);
+
+    await service.approveRequest(alice);
+
     expect(service.exchangeKeyFor(alice), aliceExchange);
+    expect(ready, [alice]);
   });
 
   test('a handshake without a public key is ignored', () async {

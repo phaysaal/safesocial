@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/contact.dart';
+import '../../models/contact_request.dart';
 import '../../services/contact_service.dart';
 import '../../widgets/avatar.dart';
 
@@ -16,6 +17,8 @@ class ContactListScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final contactService = context.watch<ContactService>();
     final contacts = contactService.contacts;
+    // Requests sit above the address book: they are the thing waiting on you.
+    final requests = contactService.requests;
 
     return Scaffold(
       appBar: AppBar(
@@ -35,15 +38,19 @@ class ContactListScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: contacts.isEmpty
+      body: contacts.isEmpty && requests.isEmpty
           ? _buildEmptyState(theme)
           : ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: contacts.length,
-              separatorBuilder: (context, index) => const Divider(indent: 72, height: 1),
+              itemCount: requests.length + contacts.length,
+              separatorBuilder: (context, index) =>
+                  const Divider(indent: 72, height: 1),
               itemBuilder: (context, index) {
-                final contact = contacts[index];
-                return _ContactListTile(contact: contact);
+                if (index < requests.length) {
+                  return _RequestTile(request: requests[index]);
+                }
+                return _ContactListTile(
+                    contact: contacts[index - requests.length]);
               },
             ),
     );
@@ -89,7 +96,10 @@ class _ContactListTile extends StatelessWidget {
         style: const TextStyle(fontWeight: FontWeight.w600),
       ),
       subtitle: contact.isPending
-          ? Text('Pending approval...', style: TextStyle(color: cs.secondary, fontSize: 12))
+          // Waiting on them, not on us — and it clears the moment they
+          // approve, which the old label never did.
+          ? Text('Waiting for them to approve',
+              style: TextStyle(color: cs.secondary, fontSize: 12))
           : null,
       trailing: PopupMenuButton<String>(
         onSelected: (value) => _handleMenuAction(context, value, contactService),
@@ -197,6 +207,63 @@ class _ContactListTile extends StatelessWidget {
               Navigator.pop(ctx);
             },
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Someone asking to connect, with the decision still yours.
+class _RequestTile extends StatelessWidget {
+  final ContactRequest request;
+  const _RequestTile({required this.request});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final contacts = context.read<ContactService>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    return Container(
+      color: cs.secondaryContainer,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${request.displayName} would like to connect',
+            style: TextStyle(
+                color: cs.onSecondaryContainer, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            // The name is their claim, not a fact. The key is the identity.
+            'They chose that name themselves. Their key starts '
+            '${request.publicKey.substring(0, 8)}.',
+            style: TextStyle(color: cs.onSecondaryContainer, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () async {
+                  await contacts.declineRequest(request.publicKey);
+                  messenger.showSnackBar(const SnackBar(
+                    content: Text('Declined. They are not told, and they '
+                        'cannot ask again.'),
+                  ));
+                },
+                child: const Text('Decline'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () => contacts.approveRequest(request.publicKey),
+                child: const Text('Approve'),
+              ),
+            ],
           ),
         ],
       ),

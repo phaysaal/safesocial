@@ -54,6 +54,8 @@ class SecureStore {
     'spheres_identity_profile',
     'spheres_identity_pubkey',
     'spheres_contacts',
+    'spheres_contact_requests_v1',
+    'spheres_contact_declined_v1',
     'spheres_conversations',
     'spheres_msgs_',
     'spheres_sphere_msgs_',
