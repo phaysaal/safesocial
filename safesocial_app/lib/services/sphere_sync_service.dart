@@ -123,6 +123,7 @@ class SphereSyncService extends ChangeNotifier {
     if (peers.isEmpty) return;
 
     final digest = _digestFor(sphereId);
+    var asked = 0;
     for (final peer in peers.take(peersPerRound)) {
       try {
         final sealed = await _spheres.sealContent(
@@ -130,11 +131,22 @@ class SphereSyncService extends ChangeNotifier {
           type: 'sphere_content',
           plaintext: jsonEncode({'type': 'sync_digest', 'have': digest}),
         );
-        await send(peer, sealed);
+        // Not queued: a digest describes what we held a moment ago, so a stale
+        // one is worse than none. The next round is never far away.
+        if (await send(peer, sealed)) {
+          asked++;
+        } else {
+          DebugLogService().info(
+              'Sync', 'No route to a peer yet; will try again next round');
+        }
       } catch (e) {
         // Usually a sphere we hold no current key for. Nothing to do but wait.
         DebugLogService().info('Sync', 'Could not ask a peer: $e');
       }
+    }
+    if (asked > 0) {
+      DebugLogService().info('Sync',
+          'Asked $asked peer(s) about "${_spheres.sphere(sphereId)?.name}"');
     }
   }
 

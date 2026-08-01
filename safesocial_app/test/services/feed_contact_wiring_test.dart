@@ -57,6 +57,37 @@ void main() {
     await feed.connectContact(contact('a'));
   });
 
+  test('blocking someone takes effect without a restart', () async {
+    // The contact list held here must be a copy, because connectContact
+    // appends to it — so reading `blocked` from that copy saw a snapshot taken
+    // at startup, and blocking someone did nothing to posts until the app was
+    // restarted. Found on two devices while trying to arrange for a post *not*
+    // to be delivered, which is a fair way to discover that blocking is inert.
+    final contacts = ContactService();
+    await contacts.addContact('a' * 64, 'Alice');
+
+    final feed = FeedService();
+    feed.initSync('me', 'secret', contacts.contacts);
+    feed.blockedKeys = () => contacts.contacts
+        .where((c) => c.blocked)
+        .map((c) => c.publicKey)
+        .toSet();
+
+    expect(feed.blockedForSending, isEmpty);
+
+    await contacts.toggleBlock('a' * 64);
+
+    expect(feed.blockedForSending, {'a' * 64});
+  });
+
+  test('with no live source it still falls back to what it was given', () {
+    final feed = FeedService();
+    feed.initSync('me', 'secret',
+        List.unmodifiable([contact('a', blocked: true), contact('b')]));
+
+    expect(feed.blockedForSending, {'a'});
+  });
+
   test('ContactService still hands out a list callers cannot mutate', () async {
     // The fix belongs in the consumer, not here — this guarantee is why the
     // service can expose its contacts at all.

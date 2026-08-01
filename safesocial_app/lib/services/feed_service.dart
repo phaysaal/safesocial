@@ -28,6 +28,20 @@ class FeedService extends ChangeNotifier {
   String? _myPublicKey;
   List<Contact> _contacts = [];
 
+  /// Who not to send to, asked fresh every time.
+  ///
+  /// The local list is a snapshot taken at startup — it has to be a copy,
+  /// because connectContact appends to it — so reading `blocked` from it meant
+  /// blocking someone had no effect on posts until the app restarted. Blocking
+  /// is a decision that should take hold immediately, so its source is the
+  /// address book itself rather than a stale copy of it.
+  Set<String> Function()? blockedKeys;
+
+  /// Who is skipped when fanning content out.
+  Set<String> get blockedForSending =>
+      blockedKeys?.call() ??
+      _contacts.where((c) => c.blocked).map((c) => c.publicKey).toSet();
+
   /// The home feed: the union of posts across the spheres you belong to.
   ///
   /// A post whose sphere we are not in is not shown even if it reached this
@@ -182,8 +196,7 @@ class FeedService extends ChangeNotifier {
       // Archiving is best effort; failing to keep a copy must not stop a post.
     }
 
-    final blocked =
-        _contacts.where((c) => c.blocked).map((c) => c.publicKey).toSet();
+    final blocked = blockedForSending;
     for (final member in sphere.members.map((m) => m.identityKey)) {
       if (member == _myPublicKey || blocked.contains(member)) continue;
       await queueForMember(

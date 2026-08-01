@@ -118,6 +118,10 @@ Future<void> wireIdentity({
   feedService.outbox = feedOutboxService;
   feedOutboxService.start();
   await feedOutboxService.pruneCompleted();
+  feedService.blockedKeys = () => contactService.contacts
+      .where((c) => c.blocked)
+      .map((c) => c.publicKey)
+      .toSet();
   sphereChatService.blockedKeys = () => contactService.contacts
       .where((c) => c.blocked)
       .map((c) => c.publicKey)
@@ -133,10 +137,12 @@ Future<void> wireIdentity({
   feedService.onSyncDigest = sphereSyncService.handleDigest;
   feedService.onSyncItems = sphereSyncService.handleItems;
   await sphereSyncService.prune();
-  // One round at startup, then occasionally. Cheap when there is nothing to
-  // exchange: a peer with nothing to offer answers with nothing.
-  unawaited(sphereSyncService.syncAll());
-  Timer.periodic(const Duration(minutes: 15), (_) => sphereSyncService.syncAll());
+  // Not immediately: the mailbox sockets are still being established at this
+  // point, and a digest sent before there is a route to send it on is simply
+  // dropped. Delayed once, then on a timer — cheap when there is nothing to
+  // exchange, because a peer with nothing to offer answers with nothing.
+  Timer(const Duration(seconds: 20), sphereSyncService.syncAll);
+  Timer.periodic(const Duration(minutes: 5), (_) => sphereSyncService.syncAll());
   chatService.onSphereOp = sphereService.handleIncomingOp;
 
   // One-time conversion of legacy groups and rings. Runs after configure() so
