@@ -8,7 +8,10 @@ import 'services/feed_service.dart';
 import 'services/identity_service.dart';
 import 'services/library_service.dart';
 import 'services/sphere_migration.dart';
+import 'dart:async';
+
 import 'services/sphere_chat_service.dart';
+import 'services/sphere_sync_service.dart';
 import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
 import 'services/relay_service.dart';
@@ -33,6 +36,7 @@ Future<void> wireIdentity({
   required SphereService sphereService,
   required LibraryService libraryService,
   required SphereChatService sphereChatService,
+  required SphereSyncService sphereSyncService,
   required FeedOutboxService feedOutboxService,
   required RelayService relayService,
 }) async {
@@ -119,6 +123,20 @@ Future<void> wireIdentity({
       .map((c) => c.publicKey)
       .toSet();
   feedService.onSphereMessage = sphereChatService.handleIncoming;
+
+  // Filling in what was missed. The archive keeps sealed envelopes so a member
+  // can be handed content by a peer when the relay no longer has it.
+  await sphereSyncService.load();
+  sphereSyncService.sendToPeer = feedService.sendSealedToMember;
+  sphereSyncService.onRecovered = feedService.handleRecovered;
+  feedService.archiveEnvelope = sphereSyncService.remember;
+  feedService.onSyncDigest = sphereSyncService.handleDigest;
+  feedService.onSyncItems = sphereSyncService.handleItems;
+  await sphereSyncService.prune();
+  // One round at startup, then occasionally. Cheap when there is nothing to
+  // exchange: a peer with nothing to offer answers with nothing.
+  unawaited(sphereSyncService.syncAll());
+  Timer.periodic(const Duration(minutes: 15), (_) => sphereSyncService.syncAll());
   chatService.onSphereOp = sphereService.handleIncomingOp;
 
   // One-time conversion of legacy groups and rings. Runs after configure() so

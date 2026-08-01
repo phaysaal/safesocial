@@ -13,6 +13,7 @@ import '../../services/identity_service.dart';
 import '../../services/library_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/sphere_chat_service.dart';
+import '../../services/sphere_sync_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/relay_service.dart';
 import '../../services/debug_log_service.dart';
@@ -84,6 +85,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       sphereService: context.read<SphereService>(),
       libraryService: context.read<LibraryService>(),
       sphereChatService: context.read<SphereChatService>(),
+      sphereSyncService: context.read<SphereSyncService>(),
       feedOutboxService: context.read<FeedOutboxService>(),
       relayService: context.read<RelayService>(),
     );

@@ -6,6 +6,7 @@ import 'app_wiring.dart';
 import 'crypto/session_manager.dart';
 import 'services/identity_service.dart';
 import 'services/sphere_chat_service.dart';
+import 'services/sphere_sync_service.dart';
 import 'services/sphere_service.dart';
 import 'services/library_service.dart';
 import 'services/outbox_service.dart';
@@ -48,6 +49,7 @@ void main() async {
   final relayConfig = RelayConfig();
   final libraryService = LibraryService();
   final sphereChatService = SphereChatService(sphereService);
+  final sphereSyncService = SphereSyncService(sphereService);
   final callConfig = CallConfig();
 
   // Before anything touches storage: without the key loaded, early reads miss
@@ -85,6 +87,7 @@ void main() async {
     sphereService: sphereService,
     libraryService: libraryService,
     sphereChatService: sphereChatService,
+    sphereSyncService: sphereSyncService,
     feedOutboxService: feedOutboxService,
     relayService: relayService,
   );
@@ -117,6 +120,7 @@ void main() async {
         ChangeNotifierProvider.value(value: sphereService),
         ChangeNotifierProvider.value(value: libraryService),
         ChangeNotifierProvider.value(value: sphereChatService),
+        ChangeNotifierProvider.value(value: sphereSyncService),
         ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),
         ChangeNotifierProvider.value(value: callConfig),

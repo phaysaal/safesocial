@@ -318,10 +318,18 @@ class OpenedSphereContent {
   final String type;
   final String plaintext;
 
+  /// The envelope's own unique id.
+  ///
+  /// Used to name content without needing to understand it: a post, a like and
+  /// a group message all arrive in exactly one envelope, so this is what lets
+  /// two members compare what they hold without either having to interpret it.
+  final String envelopeId;
+
   const OpenedSphereContent({
     required this.from,
     required this.sphereId,
     required this.type,
+    required this.envelopeId,
     required this.plaintext,
   });
 }
@@ -1930,6 +1938,7 @@ class SphereService extends ChangeNotifier {
       from: envelope.from,
       sphereId: sphereId,
       type: envelope.type,
+      envelopeId: envelope.id,
       plaintext: utf8.decode(await envelope.openWithSphereKey(key)),
     );
   }

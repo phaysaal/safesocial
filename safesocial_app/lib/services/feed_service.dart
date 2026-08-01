@@ -5,6 +5,7 @@ import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
 
 import '../crypto/blob.dart';
+import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/contact.dart';
 import '../models/post.dart';
@@ -113,6 +114,20 @@ class FeedService extends ChangeNotifier {
   Future<void> Function(String from, String sphereId, Map<String, dynamic>)?
       onSphereMessage;
 
+  /// Keeps a sealed envelope so it can be offered to a member who missed it.
+  Future<void> Function({
+    required String sphereId,
+    required String envelopeId,
+    required String sealed,
+    DateTime? at,
+  })? archiveEnvelope;
+
+  /// Handles the two messages that make up a sync round.
+  Future<void> Function(String from, String sphereId, Map<String, dynamic>)?
+      onSyncDigest;
+  Future<void> Function(String from, String sphereId, Map<String, dynamic>)?
+      onSyncItems;
+
   /// Supply the crypto context so feed channels get pairwise addresses and
   /// content can be sealed to a sphere.
   void attachCrypto(
@@ -157,6 +172,16 @@ class FeedService extends ChangeNotifier {
       return;
     }
 
+    try {
+      await archiveEnvelope?.call(
+        sphereId: sphereId,
+        envelopeId: Envelope.decode(sealed).id,
+        sealed: sealed,
+      );
+    } catch (_) {
+      // Archiving is best effort; failing to keep a copy must not stop a post.
+    }
+
     final blocked =
         _contacts.where((c) => c.blocked).map((c) => c.publicKey).toSet();
     for (final member in sphere.members.map((m) => m.identityKey)) {
@@ -186,6 +211,15 @@ class FeedService extends ChangeNotifier {
       return;
     }
     await queue.enqueue(id: id, peer: member, payload: sealed);
+  }
+
+  /// Apply an envelope a peer sent back because we were missing it.
+  ///
+  /// Deliberately the same path as anything arriving directly: the signature
+  /// is checked, the author confirmed to be a member, and the content
+  /// decrypted. Being handed something by a peer earns it no shortcut.
+  Future<void> handleRecovered(String from, String sealed) async {
+    await _handleIncomingFeedItem(from, sealed);
   }
 
   /// Send already-sealed sphere content to one member.
@@ -332,7 +366,9 @@ class FeedService extends ChangeNotifier {
     );
   }
 
-  void _handleIncomingFeedItem(String contactKey, String data) async {
+  // Returns a future so a recovered item can be awaited; the live path still
+  // fires and forgets.
+  Future<void> _handleIncomingFeedItem(String contactKey, String data) async {
     final spheres = _spheres;
     if (spheres == null) return;
 
@@ -342,6 +378,26 @@ class FeedService extends ChangeNotifier {
       final opened = await spheres.openContent(data);
       final authorId = opened.from;
       final json = jsonDecode(opened.plaintext);
+
+      // A sync round is about content, and is not itself content.
+      if (json['type'] == 'sync_digest') {
+        await onSyncDigest?.call(
+            authorId, opened.sphereId, json as Map<String, dynamic>);
+        return;
+      }
+      if (json['type'] == 'sync_items') {
+        await onSyncItems?.call(
+            authorId, opened.sphereId, json as Map<String, dynamic>);
+        return;
+      }
+
+      // Kept exactly as it arrived: we could not re-sign it as its author, and
+      // relaying it later only works if the original signature travels with it.
+      await archiveEnvelope?.call(
+        sphereId: opened.sphereId,
+        envelopeId: opened.envelopeId,
+        sealed: data,
+      );
 
       if (json['type'] == 'sphere_msg') {
         await onSphereMessage?.call(
@@ -460,6 +516,10 @@ class FeedService extends ChangeNotifier {
 
   void _mergePost(Post post) {
     if (_posts.any((p) => p.id == post.id)) return;
+    // Deleting is permanent and personal. Now that a peer can offer content
+    // back, refusing it here is what stops a post someone removed reappearing
+    // every time they sync.
+    if (_hiddenPostIds.contains(post.id)) return;
     
     // Don't merge if it's already an expired story
     if (post.isStory && post.expiresAt != null && post.expiresAt!.isBefore(DateTime.now())) {

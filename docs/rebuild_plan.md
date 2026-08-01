@@ -893,5 +893,40 @@ would be a different matter — direct messages are protected by exactly this
 key — so `memberExchangeKey` prefers the address book when it has an entry and
 falls back to the member list only when it does not.
 
-Next: digest-based anti-entropy on top — exchange a summary of what each side
-holds with two or three peers per round and request the difference.
+## Asking a peer for what you missed
+
+The relay covers being offline for a few hours. It does not cover being away
+longer than its retention, a mailbox trimmed because it filled, joining a
+sphere and wanting what came before, or any future bug that drops something. In
+every one of those the content still exists — on the phones of everyone else in
+the sphere — and there was no way to ask for it.
+
+A member now keeps the sealed envelopes it receives, tells two peers per round
+which ones it holds, and gets back what it is missing.
+
+**Envelopes are archived exactly as they arrived.** A relaying member cannot
+sign as their author, so the original signature has to travel with the content.
+That is also what makes the whole thing safe without any new trust: the
+receiving side runs the same checks as always — author's signature over header
+and ciphertext, author confirmed to be a member, sphere key required — so a
+dishonest peer can withhold but cannot forge, alter or invent.
+
+Content is named by **envelope id** rather than by what is inside it, so posts,
+likes, comments, group messages and album items are all covered by one
+mechanism that never has to interpret any of them.
+
+Bounded in three places, because none of this is worth a flood: 300 ids in a
+digest, 20 items or 128 KB in a reply, two peers per round. Anything that does
+not fit converges on a later round. The relay refuses bodies over 256 KB.
+
+Deleting stays personal and permanent: `_mergePost` now refuses content whose
+id is in the local tombstone set, so a post someone removed does not reappear
+the next time a peer offers it back.
+
+Retention is a user setting, and has an honest consequence worth surfacing in
+the UI — **a sphere remembers for as long as its most patient member does.** If
+one person keeps everything they become the sphere's archive; if everyone keeps
+a week, the sphere genuinely forgets.
+
+Still to do: buffer likes and comments that arrive before the post they refer
+to, which are currently dropped, and which gossip makes far more common.
