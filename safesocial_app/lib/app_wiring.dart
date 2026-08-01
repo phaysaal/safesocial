@@ -162,6 +162,10 @@ Future<void> wireIdentity({
           if (libraryService.isMuted(s.id)) s.id
       };
   feedService.onAlbumItem = albumService.handleSealedItem;
+  // Album items leave the same way posts and group messages do: the feed's
+  // per-member channels, through the durable queue, archived on the way out so
+  // a peer who missed one can be given it later.
+  albumService.queueForMember = feedService.queueForMember;
 
   // One place that opens every channel for a contact, wherever the contact
   // came from: a QR scan, an inbound handshake, or a prekey arriving late.

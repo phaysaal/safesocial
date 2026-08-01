@@ -205,16 +205,6 @@ class FeedService extends ChangeNotifier {
       return;
     }
 
-    try {
-      await archiveEnvelope?.call(
-        sphereId: sphereId,
-        envelopeId: Envelope.decode(sealed).id,
-        sealed: sealed,
-      );
-    } catch (_) {
-      // Archiving is best effort; failing to keep a copy must not stop a post.
-    }
-
     final blocked = blockedForSending;
     for (final member in sphere.members.map((m) => m.identityKey)) {
       if (member == _myPublicKey || blocked.contains(member)) continue;
@@ -233,6 +223,25 @@ class FeedService extends ChangeNotifier {
     required String member,
     required String sealed,
   }) async {
+    // Archived here rather than at each caller, because this is the single
+    // point everything addressed to a sphere leaves by — posts, group
+    // messages and album items alike. Without it our *own* content was
+    // missing from the archive, so a peer asking us for what they had missed
+    // could never be given anything we wrote ourselves.
+    try {
+      final envelope = Envelope.decode(sealed);
+      final sphereId = envelope.sphereId;
+      if (sphereId != null) {
+        await archiveEnvelope?.call(
+          sphereId: sphereId,
+          envelopeId: envelope.id,
+          sealed: sealed,
+        );
+      }
+    } catch (_) {
+      // Keeping a copy is best effort and must never stop a send.
+    }
+
     final queue = outbox;
     if (queue == null) {
       final ok = await _feedRelay.sendViaRelay(member, sealed);

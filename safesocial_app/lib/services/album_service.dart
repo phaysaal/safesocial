@@ -3,11 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
 
-import '../crypto/mailbox.dart';
 import '../models/album.dart';
 import 'debug_log_service.dart';
 import 'media_service.dart';
-import 'relay_service.dart';
 import 'sphere_service.dart';
 
 /// Manages collaborative shared photo albums.
@@ -15,7 +13,22 @@ class AlbumService extends ChangeNotifier {
   static const _albumsKey = 'spheres_albums';
   
   final List<Album> _albums = [];
-  final RelayService _albumRelay = RelayService();
+  /// Hands one member's copy to the feed's durable queue. Supplied by the app.
+  ///
+  /// Album items used to go out on a relay client of their own, addressed by
+  /// member — but that client only ever held a connection keyed by album, so
+  /// the lookup found nothing and every send was quietly discarded. Sharing an
+  /// album item did nothing whatsoever.
+  ///
+  /// They travel the same per-member feed channels as everything else
+  /// addressed to a sphere, which is where the receiving side already opens
+  /// them, and through the same queue, so one is not lost because somebody was
+  /// briefly unreachable.
+  Future<void> Function({
+    required String id,
+    required String member,
+    required String sealed,
+  })? queueForMember;
   String? _myPublicKey;
   SphereService? _spheres;
 
@@ -33,23 +46,13 @@ class AlbumService extends ChangeNotifier {
 
   List<Album> get albums => List.unmodifiable(_albums);
 
-  /// Open an album channel. Same locality caveat as groups.
-  Future<void> _connectAlbumMailbox(String dhtKey) async {
-    final mailbox = await Mailbox.fromLocalSecret(
-      secret: dhtKey,
-      purpose: 'album',
-    );
-    await _albumRelay.connectMailbox('alb:$dhtKey', mailbox);
-  }
-
   void initSync(String myPublicKey, String mySecretKey) {
     _myPublicKey = myPublicKey;
-    _albumRelay.onMessageReceived = (channelKey, data) {
-      _handleIncomingContribution(channelKey, data);
-    };
-
-    // Album traffic rides the same per-member channels the feed uses; there is
-    // no separate album room any more.
+    // Album traffic rides the per-member feed channels, like everything else
+    // addressed to a sphere. The album's own relay client is gone: it derived
+    // a mailbox from a local secret nobody else could compute, and outbound
+    // sends addressed it by member when it was only ever keyed by album, so it
+    // delivered nothing in either direction.
   }
 
   Future<void> loadAlbums() async {
@@ -82,7 +85,6 @@ class AlbumService extends ChangeNotifier {
     await _persist();
     notifyListeners();
 
-    _connectAlbumMailbox(album.dhtKey);
     DebugLogService().success('Media', 'Shared album "$name" created');
   }
 
@@ -136,9 +138,15 @@ class AlbumService extends ChangeNotifier {
       return;
     }
 
+    final queue = queueForMember;
+    if (queue == null) {
+      DebugLogService()
+          .error('Media', 'No transport attached; the item stays here');
+      return;
+    }
     for (final member in sphere.members.map((m) => m.identityKey)) {
       if (member == _myPublicKey) continue;
-      _albumRelay.sendViaRelay(member, sealed);
+      await queue(id: '${item.id}:$member', member: member, sealed: sealed);
     }
   }
 

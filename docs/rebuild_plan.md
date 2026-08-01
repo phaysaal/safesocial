@@ -954,3 +954,26 @@ the phone slept or the network changed while nobody was watching.
 This pairs with the earlier retry fixes: the backoff now grows properly, so a
 connection that genuinely cannot be made backs off instead of hammering, while
 one that is merely stale is noticed within a couple of minutes.
+
+## One way out
+
+Everything addressed to a sphere now leaves by a single path: `queueForMember`
+on FeedService. Posts, group messages and album items all take it.
+
+That matters for more than tidiness. Each service that grew its own send path
+also grew its own version of the same bug. Album items were the worst: they
+went out on a relay client of their own, addressed by member, while that client
+only ever held a connection keyed by album — so the lookup found nothing and
+every send was discarded. Sharing an album item did nothing whatsoever, in
+either direction, and nothing said so. That client also derived its mailbox
+from a *local* secret no other device could compute, so it could not have
+worked even had the addressing matched. It is gone.
+
+Archiving moved into that same path. It used to happen only when publishing a
+post, which meant our own group messages and album items were never archived —
+so a peer asking us for what they had missed could be given other people's
+content but never our own.
+
+The rule to keep: if something is addressed to a sphere and does not go through
+`queueForMember`, it is neither durable nor recoverable, and it will fail
+quietly.
