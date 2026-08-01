@@ -36,6 +36,15 @@ class _Conn {
   final List<String> buffer = [];
   bool syncing = true;
 
+  /// When this connection last produced any evidence of being alive.
+  ///
+  /// A WebSocket can stop delivering without ever closing: a NAT that drops an
+  /// idle mapping, a network handover, a relay that let the socket go. Nothing
+  /// tells the client, `onDone` never fires, and the app sits there believing
+  /// it is connected while messages pile up in a mailbox it is no longer
+  /// reading.
+  DateTime lastActivity = DateTime.now();
+
   _Conn(this.mailbox);
 }
 
@@ -58,6 +67,60 @@ class RelayService extends ChangeNotifier {
   final Map<String, _Conn> _conns = {};
   final _log = DebugLogService();
   final Random _jitter = Random();
+
+  /// Every live client, so one check can cover them all. There is a relay
+  /// client per purpose — chat, feed, calls and so on — and a stale socket on
+  /// any of them is equally invisible.
+  static final Set<RelayService> _all = {};
+
+  /// How long a connection may go quiet before we check it is really there.
+  static const Duration idleBefore = Duration(minutes: 2);
+
+  Timer? _watchdog;
+
+  /// Ask every client to check its quiet connections.
+  static Future<void> verifyAll() async {
+    for (final service in _all.toList()) {
+      await service.verifyIdleConnections();
+    }
+  }
+
+  /// Prove a quiet connection is still delivering, and repair it if not.
+  ///
+  /// The check is evidence-based rather than a guess: fetch the mailbox over
+  /// HTTP, which does not depend on the socket at all. If anything was waiting
+  /// there, the socket demonstrably failed to deliver it, so it is replaced.
+  Future<void> verifyIdleConnections() async {
+    final now = DateTime.now();
+    for (final entry in _conns.entries.toList()) {
+      final conn = entry.value;
+      if (conn.state != RelayConnectionState.connected) continue;
+      if (conn.syncing) continue;
+      if (now.difference(conn.lastActivity) < idleBefore) continue;
+
+      final host = _host(false);
+      final path = '/mbx/${conn.mailbox.id}';
+      final recovered =
+          await _syncMailbox(host, path, conn.mailbox, entry.key);
+      conn.lastActivity = DateTime.now();
+
+      if (recovered > 0) {
+        _log.warn(
+          'Relay',
+          'A quiet connection had $recovered message(s) waiting; '
+          'replacing it',
+        );
+        final mailbox = conn.mailbox;
+        conn.closedIntentionally = true;
+        conn.retryTimer?.cancel();
+        try {
+          await conn.channel?.sink.close();
+        } catch (_) {}
+        _conns.remove(entry.key);
+        await connectMailbox(entry.key, mailbox);
+      }
+    }
+  }
 
   void Function(String channelKey, String payload)? onMessageReceived;
 
@@ -108,6 +171,8 @@ class RelayService extends ChangeNotifier {
 
     final conn = _Conn(mailbox);
     _conns[channelKey] = conn;
+    _all.add(this);
+    _watchdog ??= Timer.periodic(idleBefore, (_) => verifyIdleConnections());
     _setState(channelKey, RelayConnectionState.connecting);
 
     final host = _host(isFallback);
@@ -138,6 +203,7 @@ class RelayService extends ChangeNotifier {
 
       channel.stream.listen(
         (data) {
+          conn.lastActivity = DateTime.now();
           final payload = _unpad(data as String);
           if (payload == null) return;
           if (conn.syncing) {
@@ -216,7 +282,12 @@ class RelayService extends ChangeNotifier {
     });
   }
 
-  Future<void> _syncMailbox(
+  /// Fetch anything waiting in the mailbox, returning how many were taken.
+  ///
+  /// The count is what makes a liveness check meaningful: messages found here
+  /// on a supposedly connected socket are messages that socket failed to
+  /// deliver.
+  Future<int> _syncMailbox(
     String host,
     String path,
     Mailbox mailbox,
@@ -236,12 +307,12 @@ class RelayService extends ChangeNotifier {
 
       if (response.statusCode == 401) {
         _log.error('Relay', 'Mailbox sync rejected: unauthorized');
-        return;
+        return 0;
       }
-      if (response.statusCode != 200) return;
+      if (response.statusCode != 200) return 0;
 
       final pending = jsonDecode(response.body) as List<dynamic>;
-      if (pending.isEmpty) return;
+      if (pending.isEmpty) return 0;
 
       final processed = <String>[];
       for (final msg in pending) {
@@ -254,7 +325,7 @@ class RelayService extends ChangeNotifier {
         }
       }
 
-      if (processed.isEmpty) return;
+      if (processed.isEmpty) return 0;
 
       final body = jsonEncode({'ids': processed});
       final ackTs = DateTime.now().millisecondsSinceEpoch.toString();
@@ -267,8 +338,10 @@ class RelayService extends ChangeNotifier {
         },
         body: body,
       );
+      return processed.length;
     } catch (e) {
       _log.error('Relay', 'Failed to sync mailbox: $e');
+      return 0;
     }
   }
 
@@ -474,6 +547,8 @@ class RelayService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _watchdog?.cancel();
+    _all.remove(this);
     disconnectAll();
     super.dispose();
   }

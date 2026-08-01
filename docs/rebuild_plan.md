@@ -930,3 +930,27 @@ a week, the sphere genuinely forgets.
 
 Still to do: buffer likes and comments that arrive before the post they refer
 to, which are currently dropped, and which gossip makes far more common.
+
+## A socket that stops delivering
+
+A WebSocket can go quiet without ever closing — a NAT drops an idle mapping,
+the network hands over, the relay lets it go. `onDone` never fires, so the
+reconnect logic never runs, and the app sits there believing it is connected
+while its mailbox fills up. Seen on two devices: a peer's reply reached the
+relay, the recipient's app was running and idle, and nothing arrived until it
+was restarted.
+
+Connections now record when they last saw traffic, and a quiet one is checked
+rather than trusted. The check is deliberately **evidence-based**: fetch the
+mailbox over HTTP, which does not involve the socket at all. Anything found
+there is something the socket failed to deliver, which is proof rather than
+suspicion, and the connection is replaced. Nothing is lost either way, because
+the fetch delivers what it finds.
+
+Checked every two minutes per client, and on every app resume — returning to
+the foreground is when a socket is most likely to have died unnoticed, since
+the phone slept or the network changed while nobody was watching.
+
+This pairs with the earlier retry fixes: the backoff now grows properly, so a
+connection that genuinely cannot be made backs off instead of hammering, while
+one that is merely stale is noticed within a couple of minutes.

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:app_links/app_links.dart';
 
 import 'services/identity_service.dart';
+import 'services/relay_service.dart';
 import 'services/theme_service.dart';
 import 'services/call_service.dart';
 import 'widgets/responsive_layout.dart';
@@ -43,7 +44,7 @@ class SpheresApp extends StatefulWidget {
   State<SpheresApp> createState() => _SpheresAppState();
 }
 
-class _SpheresAppState extends State<SpheresApp> {
+class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
   late AppLinks _appLinks;
   StreamSubscription<Uri>? _linkSubscription;
   late final GoRouter _router;
@@ -51,14 +52,26 @@ class _SpheresAppState extends State<SpheresApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initDeepLinking();
     _initRouter();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _linkSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    // Coming back is the moment a socket is most likely to have died without
+    // saying so: the phone slept, the network changed, a NAT dropped an idle
+    // mapping. Nothing closes the socket in any of those, so the app would
+    // otherwise sit there looking connected and quietly receiving nothing.
+    unawaited(RelayService.verifyAll());
   }
 
   void _initDeepLinking() {
