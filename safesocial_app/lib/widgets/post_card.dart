@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/post.dart';
+import '../models/sphere.dart';
 import '../services/contact_service.dart';
 import '../services/feed_service.dart';
 import '../services/library_service.dart';
@@ -103,9 +104,21 @@ class _PostCardState extends State<PostCard> {
                 // Friends" while delivery ignored the audience entirely; this
                 // names the sphere that actually received it.
                 Builder(builder: (context) {
-                  final sphere =
-                      context.watch<SphereService>().sphere(post.sphereId);
-                  if (sphere == null) return const SizedBox.shrink();
+                  final spheres = context.watch<SphereService>();
+                  // Every sphere this reached us through. A post can be shared
+                  // with several, and someone in two of them should see both
+                  // rather than whichever copy happened to arrive first.
+                  //
+                  // Only spheres we are in appear here, because only their
+                  // copies reached us — so this cannot disclose an audience
+                  // the reader is not already part of.
+                  final names = post.sphereIds
+                      .map(spheres.sphere)
+                      .whereType<Sphere>()
+                      .map((s) => s.name)
+                      .toList()
+                    ..sort();
+                  if (names.isEmpty) return const SizedBox.shrink();
                   return Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -113,7 +126,7 @@ class _PostCardState extends State<PostCard> {
                       color: cs.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(sphere.name,
+                    child: Text(names.join(' · '),
                         style: TextStyle(fontSize: 10, color: cs.primary)),
                   );
                 }),
