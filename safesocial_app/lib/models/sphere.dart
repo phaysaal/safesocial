@@ -31,11 +31,29 @@ class SphereMember with EquatableMixin {
   /// Who added them, for auditability of membership changes.
   final String invitedBy;
 
+  /// Their X25519 key, so any member can reach any other.
+  ///
+  /// Without this a member can only talk to whoever invited them: everyone
+  /// else in the sphere is a name with no way to derive a shared secret, and
+  /// content can only ever flow from its author. Carrying it here is what lets
+  /// a member ask a *peer* for something they missed.
+  ///
+  /// Treated as transport addressing only, and never promoted into the address
+  /// book. The author of a membership operation asserts these keys, so a
+  /// dishonest one could name its own key in place of somebody else's. That
+  /// cannot expose content — sphere content is sealed with the sphere key, not
+  /// this one, so a misdirected envelope is unreadable to anyone outside the
+  /// sphere and reveals nothing to anyone inside it — but adopting it as a
+  /// contact's key would put the same lie underneath direct messages, which
+  /// are protected by exactly this key. So it stays here.
+  final String? keyExchangePublicKey;
+
   const SphereMember({
     required this.identityKey,
     required this.role,
     required this.joinedAt,
     required this.invitedBy,
+    this.keyExchangePublicKey,
   });
 
   /// True for owners too: an owner can do everything an admin can.
@@ -43,11 +61,14 @@ class SphereMember with EquatableMixin {
 
   bool get isOwner => role == SphereRole.owner;
 
-  SphereMember copyWith({SphereRole? role}) => SphereMember(
+  SphereMember copyWith({SphereRole? role, String? keyExchangePublicKey}) =>
+      SphereMember(
         identityKey: identityKey,
         role: role ?? this.role,
         joinedAt: joinedAt,
         invitedBy: invitedBy,
+        keyExchangePublicKey:
+            keyExchangePublicKey ?? this.keyExchangePublicKey,
       );
 
   Map<String, dynamic> toJson() => {
@@ -55,6 +76,7 @@ class SphereMember with EquatableMixin {
         'role': role.name,
         'joinedAt': joinedAt.toIso8601String(),
         'invitedBy': invitedBy,
+        if (keyExchangePublicKey != null) 'xk': keyExchangePublicKey,
       };
 
   static SphereMember fromJson(Map<String, dynamic> json) => SphereMember(
@@ -62,6 +84,7 @@ class SphereMember with EquatableMixin {
         role: roleFromName(json['role']),
         joinedAt: DateTime.parse(json['joinedAt'] as String),
         invitedBy: json['invitedBy'] as String? ?? '',
+        keyExchangePublicKey: json['xk'] as String?,
       );
 
   /// Unknown names fall back to [SphereRole.member], the least privileged
@@ -75,7 +98,8 @@ class SphereMember with EquatableMixin {
   }
 
   @override
-  List<Object?> get props => [identityKey, role, joinedAt, invitedBy];
+  List<Object?> get props =>
+      [identityKey, role, joinedAt, invitedBy, keyExchangePublicKey];
 }
 
 /// A named, member-scoped context. The only container in Spheres.

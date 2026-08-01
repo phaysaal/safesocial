@@ -870,3 +870,28 @@ Ordering by wall clock means a device with a slow clock tends to win. That
 decides which of two honest changes lands first and nothing else — authority is
 still checked separately, and winning a tie confers none — so it is not worth a
 distributed clock to fix.
+
+## Reaching a peer
+
+A member could only reach whoever invited them. Everyone else in a sphere was a
+name with no way to derive a shared secret, so content could only ever flow
+from its author: if the author was away and the relay had already dropped its
+copy, there was nobody else to ask. That is the prerequisite for any
+peer-assisted sync, and it was missing.
+
+Member lists now carry each member's X25519 key, signed along with the rest of
+the operation.
+
+**These keys address transport and nothing else, and are never promoted into
+the address book.** The author of a membership operation asserts them, so a
+dishonest author could name its own key in place of somebody else's. That
+cannot expose content: sphere content is sealed with the sphere key, so a
+misdirected envelope is unreadable to anyone outside the sphere and reveals
+nothing to anyone already in it. The damage is a member who cannot be reached,
+which is a nuisance rather than a breach. Adopting the same key as a contact's
+would be a different matter — direct messages are protected by exactly this
+key — so `memberExchangeKey` prefers the address book when it has an entry and
+falls back to the member list only when it does not.
+
+Next: digest-based anti-entropy on top — exchange a summary of what each side
+holds with two or three peers per round and request the difference.

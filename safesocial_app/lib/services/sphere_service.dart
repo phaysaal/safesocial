@@ -246,7 +246,13 @@ class MembershipOp {
         '$timestampMs',
         name,
         kind.name,
-        members.map((m) => '${m.identityKey}:${m.role.name}').join(','),
+        // The exchange keys are signed too. They only address transport, but
+        // an unsigned field an admin could rewrite in flight is not worth
+        // leaving lying around.
+        members
+            .map((m) =>
+                '${m.identityKey}:${m.role.name}:${m.keyExchangePublicKey ?? ''}')
+            .join(','),
       ].join('\n')));
 
   Map<String, dynamic> toJson() => {
@@ -475,11 +481,40 @@ class SphereService extends ChangeNotifier {
     required String identityKey,
     required String identitySecret,
     required String? Function(String identityKey) resolveExchangeKey,
+    String? myExchangeKey,
   }) {
     _sessions = sessions;
     _myIdentityKey = identityKey;
     _myIdentitySecret = identitySecret;
     _resolveExchangeKey = resolveExchangeKey;
+    _myExchangeKey = myExchangeKey;
+  }
+
+  String? _myExchangeKey;
+
+  /// The X25519 key to record for [identityKey] in a member list.
+  String? _exchangeKeyFor(String identityKey) => identityKey == _myIdentityKey
+      ? _myExchangeKey
+      : _resolveExchangeKey?.call(identityKey);
+
+  /// A fellow member's X25519 key, for reaching them directly.
+  ///
+  /// Falls back to the address book, which is the better source when we have
+  /// it: a contact's key came from them, and this one came from whoever wrote
+  /// the membership operation.
+  String? memberExchangeKey(String sphereId, String memberKey) =>
+      _resolveExchangeKey?.call(memberKey) ??
+      _spheres[sphereId]?.memberFor(memberKey)?.keyExchangePublicKey;
+
+  /// Members we could reach directly, for asking a peer rather than the author.
+  List<String> reachableMembers(String sphereId) {
+    final sphere = _spheres[sphereId];
+    if (sphere == null) return const [];
+    return sphere.members
+        .map((m) => m.identityKey)
+        .where((k) =>
+            k != _myIdentityKey && memberExchangeKey(sphereId, k) != null)
+        .toList(growable: false);
   }
 
   bool get isReady => _sessions != null && _myIdentityKey != null;
@@ -565,12 +600,14 @@ class SphereService extends ChangeNotifier {
           role: SphereRole.owner,
           joinedAt: now,
           invitedBy: me,
+          keyExchangePublicKey: _myExchangeKey,
         ),
         ...initialMembers.where((k) => k != me).map((k) => SphereMember(
               identityKey: k,
               role: k == coAdmin ? SphereRole.admin : SphereRole.member,
               joinedAt: now,
               invitedBy: me,
+              keyExchangePublicKey: _exchangeKeyFor(k),
             )),
       ],
     );
@@ -605,6 +642,7 @@ class SphereService extends ChangeNotifier {
           role: SphereRole.member,
           joinedAt: DateTime.now(),
           invitedBy: _myIdentityKey!,
+          keyExchangePublicKey: _exchangeKeyFor(identityKey),
         ),
       ],
     );
@@ -1557,7 +1595,8 @@ class SphereService extends ChangeNotifier {
   /// not significant; it is a set comparison in list form.
   static bool _membersMatch(List<SphereMember> a, List<SphereMember> b) {
     if (a.length != b.length) return false;
-    String describe(SphereMember m) => '${m.identityKey}:${m.role.name}';
+    String describe(SphereMember m) =>
+        '${m.identityKey}:${m.role.name}:${m.keyExchangePublicKey ?? ''}';
     final left = a.map(describe).toList()..sort();
     final right = b.map(describe).toList()..sort();
     for (var i = 0; i < left.length; i++) {

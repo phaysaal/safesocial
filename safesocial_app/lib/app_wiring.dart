@@ -91,6 +91,9 @@ Future<void> wireIdentity({
     identityKey: publicKey,
     identitySecret: secretKey,
     resolveExchangeKey: contactService.exchangeKeyFor,
+    // Recorded in member lists so that everyone in a sphere can reach everyone
+    // else, not only whoever invited them.
+    myExchangeKey: identityService.exchangePublicKey,
   );
   // Membership changes and sphere keys travel over the pairwise chat channels
   // that already exist, so there is no separate transport to keep alive.
