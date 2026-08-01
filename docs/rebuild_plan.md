@@ -827,3 +827,46 @@ client also passed the fallback flag into its own retry, so one failed
 connection pinned a channel to the dead host permanently. Retries now return to
 the primary, and the attempt counter survives the reconnection that replaces
 the connection object — without that the backoff reset to zero every time.
+
+## Converging membership
+
+Two admins can change a sphere at the same moment, neither having seen the
+other, and both operations then claim the same epoch. The rule used to be
+
+```dart
+if (op.epoch <= existing.epoch) return;   // "already applied, or a replay"
+```
+
+so the second to arrive was discarded. Devices that saw the two in different
+orders ended up with different member lists, permanently, with nothing to
+detect it. Every governance decision rests on that list, so it had to converge
+before anything else was built on top.
+
+Operations now have a deterministic name — the hash of the bytes their author
+signed, so it cannot be chosen or lied about — and a total order: earlier
+timestamp wins, ties broken by that hash. Both devices compare the same two
+operations and reach the same answer.
+
+Two details make it work:
+
+* A sibling is validated against **the state its author was looking at**, kept
+  alongside the operation that produced the current epoch. Judging it against
+  our own already-moved state would reject the winner for describing a
+  membership that no longer matches.
+* The winner's key replaces the one stored for that epoch, so everyone
+  encrypts to the same thing. Content sealed in the gap — usually seconds — is
+  unreadable to others. That is the unavoidable cost of two people having
+  changed the same epoch, and it is bounded by how long the second operation
+  takes to arrive.
+
+A superseded change of our own is re-issued once at the next epoch, guarded so
+it cannot loop and skipped when the winner already achieved the same thing.
+Transfers and leaves are not retried: both are decisions about a state that has
+since changed. Every supersession is written to the audit log, because an admin
+action that quietly evaporates is exactly what members cannot be asked to
+trust.
+
+Ordering by wall clock means a device with a slow clock tends to win. That
+decides which of two honest changes lands first and nothing else — authority is
+still checked separately, and winning a tie confers none — so it is not worth a
+distributed clock to fix.

@@ -209,6 +209,31 @@ class MembershipOp {
     this.proof = const [],
   });
 
+  /// A deterministic name for this operation, identical on every device.
+  ///
+  /// Derived rather than carried, so it cannot be chosen or lied about: it is
+  /// a hash of exactly the bytes the author signed.
+  String get id => hex.encode(sha256.convert(signedBytes()).bytes);
+
+  /// Whether this operation should win against a concurrent sibling.
+  ///
+  /// Two operations can legitimately claim the same epoch — two admins acting
+  /// at once, neither having seen the other. Somebody has to lose, and every
+  /// device has to agree on which, or they diverge for good. Earlier wins;
+  /// identical timestamps are broken by the hash, which is arbitrary but the
+  /// same everywhere.
+  ///
+  /// Ordering by wall clock means a device with a slow clock tends to win.
+  /// That decides which of two honest changes lands first and nothing else —
+  /// authority is still checked separately — so it is not worth a distributed
+  /// clock to fix.
+  bool beats(MembershipOp other) {
+    if (timestampMs != other.timestampMs) {
+      return timestampMs < other.timestampMs;
+    }
+    return id.compareTo(other.id) < 0;
+  }
+
   /// Bytes the signature covers. Newline-delimited for the same reason as
   /// [Envelope]: no field can contain a newline, so the encoding is injective.
   Uint8List signedBytes() => Uint8List.fromList(utf8.encode([
@@ -261,6 +286,22 @@ class MembershipOp {
           .toList(),
     );
   }
+}
+
+/// What produced a sphere's current epoch, and what it was applied to.
+class _AppliedOp {
+  final String id;
+  final MembershipOp op;
+
+  /// The sphere as it was immediately before. A concurrent sibling has to be
+  /// judged against this, because that is the state its author was looking at.
+  final Sphere previous;
+
+  const _AppliedOp({
+    required this.id,
+    required this.op,
+    required this.previous,
+  });
 }
 
 /// Verified, decrypted sphere content.
@@ -343,6 +384,19 @@ class SphereService extends ChangeNotifier {
 
   /// Audit entries, newest last, keyed by sphere id.
   final Map<String, List<SphereEvent>> _audit = {};
+
+  /// The operation that produced each sphere's current epoch, and the state it
+  /// was applied to.
+  ///
+  /// Kept so a concurrent sibling arriving afterwards can be judged against
+  /// the same starting point its author had, rather than against a state that
+  /// has already moved. Without it the winner of a tie would be rejected for
+  /// describing a membership that no longer matches.
+  final Map<String, _AppliedOp> _applied = {};
+
+  /// Superseded operations of our own that we have already re-issued, so a
+  /// losing change is retried once and does not loop.
+  final Set<String> _reissued = {};
 
   SessionManager? _sessions;
   String? _myIdentityKey;
@@ -1042,7 +1096,13 @@ class SphereService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// State a local change was applied to, waiting for the operation that
+  /// describes it to be built.
+  final Map<String, Sphere> _pendingPrevious = {};
+
   Future<void> _applyLocally(Sphere next) async {
+    final previous = _spheres[next.id];
+    if (previous != null) _pendingPrevious[next.id] = previous;
     _spheres[next.id] = next;
     keyring.rotate(next.id, next.epoch);
     await keyring.persist();
@@ -1135,10 +1195,6 @@ class SphereService extends ChangeNotifier {
     required bool includeKey,
     List<SignedStatement> proof = const [],
   }) async {
-    final send = sendToPeer;
-    final sessions = _sessions;
-    if (send == null || sessions == null) return;
-
     final me = _myIdentityKey!;
     final membershipOp = MembershipOp(
       sphereId: sphere.id,
@@ -1153,6 +1209,22 @@ class SphereService extends ChangeNotifier {
       kind: sphere.kind,
       proof: proof,
     );
+
+    // Record what we changed and what we changed it from, before anything is
+    // sent. A sibling from someone who had not seen this yet is judged against
+    // the same starting point we used.
+    final previous = _pendingPrevious.remove(sphere.id);
+    if (previous != null) {
+      _applied[sphere.id] = _AppliedOp(
+        id: membershipOp.id,
+        op: membershipOp,
+        previous: previous,
+      );
+    }
+
+    final send = sendToPeer;
+    final sessions = _sessions;
+    if (send == null || sessions == null) return;
 
     final signature = ed.sign(
       ed.PrivateKey(hex.decode(_myIdentitySecret!)),
@@ -1255,10 +1327,20 @@ class SphereService extends ChangeNotifier {
         notifyListeners();
         return;
       } else {
-        if (op.epoch <= existing.epoch) {
-          // Already applied, or an attempt to replay an older state.
+        if (op.epoch < existing.epoch) {
+          // Genuinely old, or a replay.
           return;
         }
+
+        if (op.epoch == existing.epoch) {
+          // A sibling: someone else changed the same epoch without having seen
+          // our change, or this is simply the one we already applied.
+          final resolved = await _resolveConcurrent(existing, op, payload);
+          if (!resolved) return;
+          // The incoming operation won and has been applied.
+          return;
+        }
+
         final refusal = _authorityRefusal(existing, op);
         if (refusal != null) {
           DebugLogService().warn('Sphere', 'Rejecting op: $refusal');
@@ -1310,6 +1392,11 @@ class SphereService extends ChangeNotifier {
       }
 
       _spheres[op.sphereId] = updated;
+      _applied[op.sphereId] = _AppliedOp(
+        id: op.id,
+        op: op,
+        previous: existing,
+      );
       await _record(updated, op.op, op.target, op.by,
           detail: op.op == MembershipOp.opRename ? op.name : '',
           at: DateTime.fromMillisecondsSinceEpoch(op.timestampMs));
@@ -1571,6 +1658,161 @@ class SphereService extends ChangeNotifier {
       _transferOffers[statement.sphereId] = statement;
       await _persistOffers();
     }
+    notifyListeners();
+  }
+
+  /// Decide between an operation we already applied and a sibling claiming the
+  /// same epoch.
+  ///
+  /// Returns true when [op] won and has been applied. Both devices run the
+  /// same comparison over the same two operations and reach the same answer,
+  /// which is the whole point: previously the second to arrive was discarded
+  /// as a replay, so two admins acting at once left the sphere with two
+  /// different member lists and nothing to notice it.
+  Future<bool> _resolveConcurrent(
+    Sphere existing,
+    MembershipOp op,
+    Map<String, dynamic> payload,
+  ) async {
+    final applied = _applied[existing.id];
+    if (applied == null) {
+      // We joined at this epoch rather than applying an operation to reach it,
+      // so we have no basis for comparison and nothing to roll back to.
+      return false;
+    }
+    if (applied.id == op.id) return false; // The very one we applied.
+
+    if (!op.beats(applied.op)) {
+      DebugLogService().info('Sphere',
+          'A concurrent change by ${op.by} was superseded by an earlier one');
+      await _record(existing, 'superseded', op.target, op.by);
+      return false;
+    }
+
+    // It wins. Judge it against the state its author saw, not ours.
+    final refusal = _authorityRefusal(applied.previous, op);
+    if (refusal != null) {
+      DebugLogService().warn('Sphere', 'Rejecting concurrent op: $refusal');
+      return false;
+    }
+
+    final updated = Sphere(
+      id: op.sphereId,
+      name: op.name,
+      description: op.description,
+      kind: op.kind,
+      createdBy: applied.previous.createdBy,
+      createdAt: applied.previous.createdAt,
+      epoch: op.epoch,
+      members: Sphere.normaliseOwnership(op.members, applied.previous.createdBy),
+    );
+
+    final displaced = applied.op;
+
+    if (!updated.contains(_myIdentityKey!)) {
+      // The change that won removes us. Leave exactly as we would have if it
+      // had arrived first.
+      await _dropSphere(op.sphereId);
+      DebugLogService().info('Sphere', 'Removed from "${updated.name}"');
+      return true;
+    }
+
+    // Its key replaces the one we stored for this epoch, so everyone ends up
+    // encrypting to the same thing. Content we sealed in the gap — usually
+    // seconds — is unreadable to others, which is the unavoidable cost of two
+    // people having changed the same epoch.
+    final keyB64 = payload['sphereKey'];
+    if (keyB64 is String) {
+      try {
+        keyring.store(
+            op.sphereId, op.epoch, Uint8List.fromList(base64Decode(keyB64)));
+        await keyring.persist();
+      } catch (e) {
+        DebugLogService().error('Sphere', 'Bad key on a concurrent op: $e');
+      }
+    }
+
+    _spheres[op.sphereId] = updated;
+    _applied[op.sphereId] =
+        _AppliedOp(id: op.id, op: op, previous: applied.previous);
+    await _record(updated, op.op, op.target, op.by,
+        detail: op.op == MembershipOp.opRename ? op.name : '',
+        at: DateTime.fromMillisecondsSinceEpoch(op.timestampMs));
+    await _record(updated, 'superseded', displaced.target, displaced.by);
+    await _persist();
+    notifyListeners();
+
+    DebugLogService().warn(
+      'Sphere',
+      'A change by ${displaced.by} was superseded by an earlier one from '
+      '${op.by}',
+    );
+
+    // Ours lost. Put it back, once, if it still needs doing.
+    if (displaced.by == _myIdentityKey) {
+      await _reapplyOurIntent(displaced, updated);
+    }
+    return true;
+  }
+
+  /// Re-issue a change of ours that lost a tie, if it is still wanted.
+  ///
+  /// Without this the losing change is simply forgotten — an admin's removal
+  /// or promotion quietly undone by someone else's unrelated edit landing at
+  /// the same moment. Guarded so it happens once and cannot loop, and skipped
+  /// when the winner already achieved the same thing.
+  Future<void> _reapplyOurIntent(MembershipOp displaced, Sphere now) async {
+    if (!_reissued.add(displaced.id)) return;
+    if (!now.isAdmin(_myIdentityKey!)) return;
+
+    try {
+      switch (displaced.op) {
+        case MembershipOp.opAdd:
+          if (!now.contains(displaced.target)) {
+            await addMember(now.id, displaced.target);
+          }
+        case MembershipOp.opRemove:
+          if (now.contains(displaced.target)) {
+            await removeMember(now.id, displaced.target);
+          }
+        case MembershipOp.opPromote:
+          if (now.memberFor(displaced.target)?.isAdmin == false) {
+            await promote(now.id, displaced.target);
+          }
+        case MembershipOp.opDemote:
+          if (now.memberFor(displaced.target)?.isAdmin == true) {
+            await demote(now.id, displaced.target);
+          }
+        case MembershipOp.opRename:
+          if (now.name != displaced.name) {
+            await rename(now.id,
+                name: displaced.name, description: displaced.description);
+          }
+        default:
+          // Transfers and leaves are not retried: both are decisions about a
+          // state that has since changed, and redoing them unasked would be
+          // presumptuous.
+          break;
+      }
+    } catch (e) {
+      DebugLogService()
+          .warn('Sphere', 'Could not re-apply a superseded change: $e');
+    }
+  }
+
+  /// Forget a sphere and everything hanging off it.
+  Future<void> _dropSphere(String sphereId) async {
+    _spheres.remove(sphereId);
+    _audit.remove(sphereId);
+    _transferOffers.remove(sphereId);
+    _applied.remove(sphereId);
+    _forgetProposals(sphereId);
+    keyring.forget(sphereId);
+    await keyring.persist();
+    await _persistAudit();
+    await _persistOffers();
+    await _persistProposals();
+    await _persist();
     notifyListeners();
   }
 
