@@ -13,7 +13,22 @@ class Post with EquatableMixin {
   final List<String> likes;
   final List<Comment> comments;
   /// The sphere this belongs to. Every post has one — there is no public feed.
+  /// The sphere this copy was addressed to.
   final String sphereId;
+
+  /// Every sphere we know this post was shared with.
+  ///
+  /// One post can go to several spheres. It cannot be *sent* once, because
+  /// each sphere has its own key — so one envelope is sealed per sphere, all
+  /// carrying the same post id, and the receiving side unions them back
+  /// together here.
+  ///
+  /// Each envelope names only its own sphere, which means this set contains
+  /// exactly the spheres the reader is in. Someone in Family learns nothing
+  /// about the post also going to Work; the audience is disclosed to nobody,
+  /// not even partially, and that falls out of the design rather than needing
+  /// to be enforced.
+  final Set<String> sphereIds;
   final bool isStory;
   final DateTime? expiresAt;
 
@@ -24,7 +39,8 @@ class Post with EquatableMixin {
   /// who else is watching.
   final List<String> viewedBy;
 
-  const Post({
+  // Not const: sphereIds defaults to a set built from sphereId.
+  Post({
     required this.id,
     required this.authorId,
     this.authorName = '',
@@ -36,10 +52,11 @@ class Post with EquatableMixin {
     this.likes = const [],
     this.comments = const [],
     required this.sphereId,
+    Set<String>? sphereIds,
     this.isStory = false,
     this.expiresAt,
     this.viewedBy = const [],
-  });
+  }) : sphereIds = sphereIds ?? {sphereId};
 
   factory Post.fromJson(Map<String, dynamic> json) {
     return Post(
@@ -68,6 +85,9 @@ class Post with EquatableMixin {
               .toList() ??
           [],
       sphereId: json['sphereId'] as String? ?? '',
+      sphereIds: (json['sphereIds'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toSet(),
       viewedBy: (json['viewedBy'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
@@ -92,6 +112,7 @@ class Post with EquatableMixin {
       'likes': likes,
       'comments': comments.map((c) => c.toJson()).toList(),
       'sphereId': sphereId,
+      if (sphereIds.length > 1) 'sphereIds': sphereIds.toList(),
       'viewedBy': viewedBy,
       'isStory': isStory,
       'expiresAt': expiresAt?.toIso8601String(),
@@ -122,6 +143,7 @@ class Post with EquatableMixin {
     List<String>? likes,
     List<Comment>? comments,
     String? sphereId,
+    Set<String>? sphereIds,
     List<String>? viewedBy,
     bool? isStory,
     DateTime? expiresAt,
@@ -138,6 +160,7 @@ class Post with EquatableMixin {
       likes: likes ?? this.likes,
       comments: comments ?? this.comments,
       sphereId: sphereId ?? this.sphereId,
+      sphereIds: sphereIds ?? this.sphereIds,
       viewedBy: viewedBy ?? this.viewedBy,
       isStory: isStory ?? this.isStory,
       expiresAt: expiresAt ?? this.expiresAt,
@@ -157,6 +180,7 @@ class Post with EquatableMixin {
         likes,
         comments,
         sphereId,
+        sphereIds,
         viewedBy,
         isStory,
         expiresAt,

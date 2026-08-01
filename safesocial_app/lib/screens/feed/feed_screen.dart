@@ -11,167 +11,17 @@ import '../../services/media_service.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_card.dart';
+import 'compose_screen.dart';
 import 'story_viewer_screen.dart';
 
+/// Open the composer.
+///
+/// A full screen rather than a bottom sheet: a sheet has to stay short, so
+/// what you are writing, what you attached and who will see it all competed
+/// for the space above the keyboard — and attachments were not shown at all.
 void _showCreatePostSheet(BuildContext context) {
-  final theme = Theme.of(context);
-  final cs = theme.colorScheme;
-  final controller = TextEditingController();
-  final mediaRefs = <String>[];
-  final identity = context.read<IdentityService>();
-  final sphereService = context.read<SphereService>();
-
-  // Every post belongs to a sphere. There is no "everyone" to fall back on.
-  Sphere? selectedSphere = sphereService.writable.isNotEmpty
-      ? sphereService.writable.first
-      : null;
-
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: cs.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
-    builder: (ctx) {
-      return StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    UserAvatar(
-                      displayName: identity.currentIdentity?.displayName ?? 'You',
-                      size: AvatarSize.medium,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Create Post',
-                            style: theme.textTheme.titleLarge?.copyWith(fontSize: 18),
-                          ),
-                          // Sphere selector — a post has to go somewhere.
-                          GestureDetector(
-                            onTap: () async {
-                              final result = await _showSphereSelectorDialog(
-                                  context, sphereService, selectedSphere);
-                              if (result != null) {
-                                setSheetState(() {
-                                  selectedSphere = result;
-                                });
-                              }
-                            },
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.blur_on,
-                                  size: 14,
-                                  color: selectedSphere == null ? cs.error : cs.primary,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  selectedSphere?.name ?? 'Choose a sphere',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: selectedSphere == null ? cs.error : cs.primary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                Icon(Icons.arrow_drop_down, size: 16, color: cs.onSurfaceVariant),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  decoration: InputDecoration(
-                    hintText: "What's on your mind?",
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    fillColor: Colors.transparent,
-                    hintStyle: TextStyle(color: cs.onSurfaceVariant),
-                  ),
-                  maxLines: 6,
-                  minLines: 3,
-                  textCapitalization: TextCapitalization.sentences,
-                  autofocus: true,
-                  style: theme.textTheme.bodyLarge,
-                ),
-                const Divider(),
-                Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(Icons.photo_library_outlined, color: Colors.green[600]),
-                      onPressed: () async {
-                        final path = await context.read<MediaService>().pickAndStoreImage();
-                        if (path != null) mediaRefs.add(path);
-                      },
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.videocam_outlined, color: Colors.red[400]),
-                      onPressed: () async {
-                        final path = await context.read<MediaService>().pickAndStoreVideo();
-                        if (path != null) mediaRefs.add(path);
-                      },
-                    ),
-                    const Spacer(),
-                    ElevatedButton(
-                      onPressed: () {
-                        final text = controller.text.trim();
-                        if (text.isEmpty && mediaRefs.isEmpty) return;
-
-                        final sphere = selectedSphere;
-                        if (sphere == null) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Choose a sphere to post into'),
-                            ),
-                          );
-                          return;
-                        }
-
-                        context.read<FeedService>().createPost(
-                          text,
-                          sphereId: sphere.id,
-                          audienceMembers:
-                              sphere.members.map((m) => m.identityKey).toList(),
-                          mediaRefs: mediaRefs.isNotEmpty ? mediaRefs : null,
-                          authorName: identity.currentIdentity?.displayName ?? 'You',
-                        );
-                        Navigator.pop(ctx);
-                      },
-                      child: const Text('Post'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    },
+  Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => const ComposeScreen()),
   );
 }
 

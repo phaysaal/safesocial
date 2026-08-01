@@ -9,6 +9,7 @@ import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/contact.dart';
 import '../models/post.dart';
+import '../models/sphere.dart';
 import 'debug_log_service.dart';
 import 'outbox_service.dart';
 import 'media_service.dart';
@@ -51,8 +52,8 @@ class FeedService extends ChangeNotifier {
   List<Post> get posts => _visible(_posts.where((p) => !p.isStory));
 
   /// Posts limited to one sphere.
-  List<Post> postsIn(String sphereId) =>
-      _visible(_posts.where((p) => !p.isStory && p.sphereId == sphereId));
+  List<Post> postsIn(String sphereId) => _visible(
+      _posts.where((p) => !p.isStory && p.sphereIds.contains(sphereId)));
 
   /// Sphere ids the user has muted. Supplied by the app so FeedService need
   /// not depend on LibraryService.
@@ -63,10 +64,14 @@ class FeedService extends ChangeNotifier {
     final muted = mutedSpheres?.call() ?? const <String>{};
     return source.where((p) {
       if (_hiddenPostIds.contains(p.id)) return false;
-      if (muted.contains(p.sphereId)) return false;
       if (spheres == null) return false;
-      final sphere = spheres.sphere(p.sphereId);
-      if (sphere == null) return false;
+      // Visible through any sphere we are still in and have not muted.
+      final through = p.sphereIds
+          .where((id) => !muted.contains(id))
+          .map(spheres.sphere)
+          .whereType<Sphere>();
+      if (through.isEmpty) return false;
+      final sphere = through.first;
       // Only show authors who are still members. A former member's old posts
       // stay readable to those who were there, but do not keep appearing as if
       // they were still in the sphere.
@@ -325,15 +330,29 @@ class FeedService extends ChangeNotifier {
   /// Delivery goes to exactly those people. Previously this fanned out to every
   /// non-blocked contact regardless of the chosen audience, so a "close
   /// friends" story reached everyone — the audience only ever drew a badge.
+  /// Write a post into one sphere, or several at once.
+  ///
+  /// Several is not one send to many audiences: each sphere has its own key,
+  /// so one envelope is sealed per sphere. They share a post id, which is what
+  /// lets a reader who is in two of them see one post rather than two.
+  ///
+  /// Each envelope names only the sphere it is addressed to, so nobody learns
+  /// where else it went. Someone in Family cannot tell it also went to Work.
   Future<void> createPost(
     String content, {
-    required String sphereId,
+    String? sphereId,
+    Set<String>? sphereIds,
     required List<String> audienceMembers,
     List<String>? mediaRefs,
     String authorName = 'You',
     bool isStory = false,
     DateTime? expiresAt,
   }) async {
+    final targets = {...?sphereIds, if (sphereId != null) sphereId};
+    if (targets.isEmpty) {
+      throw StateError('A post has to be addressed to at least one sphere');
+    }
+
     final post = Post(
       id: const Uuid().v4(),
       authorId: _myPublicKey ?? 'self',
@@ -341,7 +360,8 @@ class FeedService extends ChangeNotifier {
       content: content,
       mediaRefs: mediaRefs ?? [],
       createdAt: DateTime.now(),
-      sphereId: sphereId,
+      sphereId: targets.first,
+      sphereIds: targets,
       isStory: isStory,
       expiresAt: expiresAt,
     );
@@ -353,11 +373,15 @@ class FeedService extends ChangeNotifier {
     if (_myPublicKey == null) return;
 
     final relayPost = await _encodePostMedia(post);
-    await _publishToSphere(
-      sphereId: sphereId,
-      type: 'post',
-      payloadJson: jsonEncode({'type': 'post', 'post': relayPost.toJson()}),
-    );
+    for (final target in targets) {
+      // Rebuilt per sphere so the copy names only where it is going.
+      final copy = relayPost.copyWith(sphereId: target, sphereIds: {target});
+      await _publishToSphere(
+        sphereId: target,
+        type: 'post',
+        payloadJson: jsonEncode({'type': 'post', 'post': copy.toJson()}),
+      );
+    }
   }
 
   /// A 24-hour ephemeral post, scoped to a sphere like everything else.
@@ -528,7 +552,19 @@ class FeedService extends ChangeNotifier {
   }
 
   void _mergePost(Post post) {
-    if (_posts.any((p) => p.id == post.id)) return;
+    final existing = _posts.indexWhere((p) => p.id == post.id);
+    if (existing != -1) {
+      // The same post reaching us through a second sphere we are in. One post,
+      // now known to belong to both.
+      final merged = _posts[existing];
+      final union = {...merged.sphereIds, ...post.sphereIds};
+      if (union.length != merged.sphereIds.length) {
+        _posts[existing] = merged.copyWith(sphereIds: union);
+        _persistPosts();
+        notifyListeners();
+      }
+      return;
+    }
     // Deleting is permanent and personal. Now that a peer can offer content
     // back, refusing it here is what stops a post someone removed reappearing
     // every time they sync.
