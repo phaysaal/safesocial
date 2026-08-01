@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/post.dart';
+import 'author_name.dart';
 import '../models/sphere.dart';
 import '../services/contact_service.dart';
 import '../services/feed_service.dart';
@@ -289,7 +290,8 @@ class _PostCardState extends State<PostCard> {
                           style: theme.textTheme.bodyMedium,
                           children: [
                             TextSpan(
-                              text: '${c.authorName.isNotEmpty ? c.authorName : c.authorId} ',
+                              text:
+                                  '${authorNameFor(context, authorId: c.authorId, carried: c.authorName)} ',
                               style: const TextStyle(fontWeight: FontWeight.w600),
                             ),
                             TextSpan(text: c.text),
@@ -576,10 +578,9 @@ class _PostCardState extends State<PostCard> {
                                   onReply: (comment) {
                                     setSheetState(() {
                                       replyToId = comment.id;
-                                      replyToName = comment.authorName
-                                              .isNotEmpty
-                                          ? comment.authorName
-                                          : comment.authorId;
+                                      replyToName = authorNameFor(context,
+                                          authorId: comment.authorId,
+                                          carried: comment.authorName);
                                     });
                                   },
                                 );
@@ -690,8 +691,8 @@ class _CommentThread extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final name =
-        comment.authorName.isNotEmpty ? comment.authorName : comment.authorId;
+    final name = authorNameFor(context,
+        authorId: comment.authorId, carried: comment.authorName);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),

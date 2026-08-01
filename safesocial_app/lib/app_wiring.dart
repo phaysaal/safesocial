@@ -118,6 +118,8 @@ Future<void> wireIdentity({
   feedService.outbox = feedOutboxService;
   feedOutboxService.start();
   await feedOutboxService.pruneCompleted();
+  feedService.myDisplayName =
+      () => identityService.currentIdentity?.displayName ?? '';
   feedService.blockedKeys = () => contactService.contacts
       .where((c) => c.blocked)
       .map((c) => c.publicKey)

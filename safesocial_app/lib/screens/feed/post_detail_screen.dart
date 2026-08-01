@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/comment_thread.dart';
 import '../../models/post.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
+import '../../widgets/author_name.dart';
 import '../../widgets/avatar.dart';
 
 /// Full post detail screen with complete comment thread.
@@ -165,7 +167,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
                   )
                 else
-                  for (final c in post.comments) _CommentTile(comment: c),
+                  for (final threaded in threadComments(post.comments))
+                    _CommentTile(
+                      comment: threaded.comment,
+                      isReply: threaded.isReply,
+                    ),
               ],
             ),
           ),
@@ -278,19 +284,19 @@ class _ActionButton extends StatelessWidget {
 
 class _CommentTile extends StatelessWidget {
   final Comment comment;
+  final bool isReply;
 
-  const _CommentTile({required this.comment});
+  const _CommentTile({required this.comment, this.isReply = false});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final name = comment.authorName.isNotEmpty
-        ? comment.authorName
-        : comment.authorId;
+    final name = authorNameFor(context,
+        authorId: comment.authorId, carried: comment.authorName);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: 10, left: isReply ? 32 : 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

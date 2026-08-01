@@ -38,6 +38,20 @@ class FeedService extends ChangeNotifier {
   /// address book itself rather than a stale copy of it.
   Set<String> Function()? blockedKeys;
 
+  /// Our own display name, read fresh each time.
+  ///
+  /// Comments used to default to the literal string 'You', and neither caller
+  /// passed anything else — so that string was stored and sent, and every
+  /// reader saw their own word for themselves against somebody else's comment.
+  /// A name that travels has to be the author's actual name; deciding whether
+  /// to render it as "You" belongs to whoever is reading.
+  String Function()? myDisplayName;
+
+  String get _authorName {
+    final name = myDisplayName?.call().trim();
+    return (name == null || name.isEmpty) ? 'Someone' : name;
+  }
+
   /// Who is skipped when fanning content out.
   Set<String> get blockedForSending =>
       blockedKeys?.call() ??
@@ -344,7 +358,7 @@ class FeedService extends ChangeNotifier {
     Set<String>? sphereIds,
     required List<String> audienceMembers,
     List<String>? mediaRefs,
-    String authorName = 'You',
+    String? authorName,
     bool isStory = false,
     DateTime? expiresAt,
   }) async {
@@ -356,7 +370,7 @@ class FeedService extends ChangeNotifier {
     final post = Post(
       id: const Uuid().v4(),
       authorId: _myPublicKey ?? 'self',
-      authorName: authorName,
+      authorName: authorName ?? _authorName,
       content: content,
       mediaRefs: mediaRefs ?? [],
       createdAt: DateTime.now(),
@@ -697,7 +711,7 @@ class FeedService extends ChangeNotifier {
   /// memory and called notifyListeners, so comments vanished on restart and
   /// were never seen by anyone else, including the post's author.
   Future<void> commentOnPost(String postId, String text,
-      {String? replyToId, String authorName = 'You'}) async {
+      {String? replyToId, String? authorName}) async {
     final index = _posts.indexWhere((p) => p.id == postId);
     if (index == -1) return;
 
@@ -705,7 +719,7 @@ class FeedService extends ChangeNotifier {
     final comment = Comment(
       id: const Uuid().v4(),
       authorId: _myPublicKey ?? 'self',
-      authorName: authorName,
+      authorName: authorName ?? _authorName,
       text: text,
       createdAt: DateTime.now(),
       replyToId: replyToId,
