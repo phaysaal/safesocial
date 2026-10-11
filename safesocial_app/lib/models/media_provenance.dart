@@ -44,6 +44,22 @@ class MediaProvenance {
 
   bool has(String signal) => signals.contains(signal);
 
+  /// The same claim after the picture was changed inside the app: whatever it
+  /// was, it is no longer untouched. A camera capture drops to the edited
+  /// band; anything already lower keeps its score, and the app is named as
+  /// the editor.
+  MediaProvenance editedInApp() => MediaProvenance(
+        score: score > 7 ? 7 : score,
+        source: source,
+        signals: [
+          for (final s in signals)
+            if (s != ProvenanceSignal.unedited && s != ProvenanceSignal.cameraCapture) s,
+          if (!signals.contains(ProvenanceSignal.editedBySoftware))
+            ProvenanceSignal.editedBySoftware,
+        ],
+        tool: 'Spheres',
+      );
+
   /// A two-to-four word label for the score band.
   String get band {
     if (score >= 10) return 'Live camera';

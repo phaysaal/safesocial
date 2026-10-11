@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:convert/convert.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
@@ -31,6 +33,7 @@ class FeedService extends ChangeNotifier {
 
   final RelayService _feedRelay = RelayService();
   String? _myPublicKey;
+  String? _mySecretKey;
   List<Contact> _contacts = [];
 
   /// Who not to send to, asked fresh every time.
@@ -67,7 +70,8 @@ class FeedService extends ChangeNotifier {
   /// device — after leaving a sphere its content disappears from the feed
   /// rather than lingering because it happens to be in local storage. The
   /// feed used to display whatever arrived, with no scoping at all.
-  List<Post> get posts => _visible(_posts.where((p) => !p.isStory));
+  List<Post> get posts =>
+      _visible(_posts.where((p) => !p.isStory && !_archivedIds.contains(p.id)));
 
   /// Posts limited to one sphere.
   List<Post> postsIn(String sphereId) {
@@ -382,7 +386,8 @@ class FeedService extends ChangeNotifier {
     final trimmed = content.trim();
     if (trimmed == post.content) return;
     final editedAt = DateTime.now();
-    _posts[index] = post.copyWith(content: trimmed, editedAt: editedAt);
+    final edited = post.copyWith(content: trimmed, editedAt: editedAt);
+    _posts[index] = edited.copyWith(authorSig: _signCore(edited));
     await _persistPosts();
     notifyListeners();
 
@@ -391,6 +396,7 @@ class FeedService extends ChangeNotifier {
       'post_id': postId,
       'content': trimmed,
       'edited_at': editedAt.toIso8601String(),
+      'sig': _posts[index].authorSig,
     });
     for (final sphereId in post.sphereIds) {
       await _publishToSphere(sphereId: sphereId, type: 'post_edit', payloadJson: payload);
@@ -715,6 +721,7 @@ class FeedService extends ChangeNotifier {
 
   void initSync(String myPublicKey, String mySecretKey, List<Contact> contacts) {
     _myPublicKey = myPublicKey;
+    _mySecretKey = mySecretKey;
     // A copy, not the caller's list. ContactService hands out an unmodifiable
     // view, and connectContact appends to this — so keeping the reference made
     // every contact added after launch throw, silently leaving their feed
@@ -733,6 +740,7 @@ class FeedService extends ChangeNotifier {
   Future<void> loadPosts() async {
     await _loadPins();
     await _loadPostNotificationPrefs();
+    await _loadTrashAndArchive();
     try {
       final draftsRaw = await SecureStore.instance.getString(_draftsKey);
       if (draftsRaw != null) {
@@ -808,6 +816,7 @@ class FeedService extends ChangeNotifier {
     List<String> altTexts = const [],
     List<String> coAuthors = const [],
     List<MediaProvenance?>? provenance,
+    bool allowReshare = true,
   }) async {
     final targets = {...?sphereIds, if (sphereId != null) sphereId};
     if (targets.isEmpty) {
@@ -832,15 +841,17 @@ class FeedService extends ChangeNotifier {
       // when it was picked. Travels sealed with the post.
       provenance: provenance ?? MediaService.provenanceListFor(mediaRefs ?? []),
       coAuthors: coAuthors,
+      allowReshare: allowReshare,
     );
+    final signed = post.copyWith(authorSig: _signCore(post));
 
-    _posts.insert(0, post);
+    _posts.insert(0, signed);
     await _persistPosts();
     notifyListeners();
 
     if (_myPublicKey == null) return;
 
-    final relayPost = await _encodePostMedia(post);
+    final relayPost = await _encodePostMedia(signed);
     for (final target in targets) {
       // Rebuilt per sphere so the copy names only where it is going.
       final copy = relayPost.copyWith(sphereId: target, sphereIds: {target});
@@ -955,6 +966,10 @@ class FeedService extends ChangeNotifier {
             'Feed', 'Dropping post: payload disagrees with signed envelope');
         return;
       }
+      if (post.isReshare && !reshareAllowed(post)) {
+        DebugLogService().warn('Feed', 'Dropping reshare: the author forbade it');
+        return;
+      }
       _mergePost(post);
     } else if (json['type'] == 'event_rsvp') {
       final index = _posts.indexWhere((p) => p.id == json['post_id']);
@@ -1006,6 +1021,7 @@ class FeedService extends ChangeNotifier {
       _posts[index] = _posts[index].copyWith(
         content: json['content'] as String? ?? _posts[index].content,
         editedAt: editedAt ?? DateTime.now(),
+        authorSig: json['sig'] is String ? json['sig'] as String : null,
       );
       await _persistPosts();
       notifyListeners();
@@ -1084,6 +1100,30 @@ class FeedService extends ChangeNotifier {
       _posts[index] = post.copyWith(reactions: newReactions);
       _persistPosts();
       notifyListeners();
+    } else if (json['type'] == 'post_delete') {
+      final postId = json['post_id'];
+      if (postId is! String) return;
+      final index = _posts.indexWhere((p) => p.id == postId);
+      if (index == -1) return;
+      final post = _posts[index];
+      if (post.authorId != authorId &&
+          !(spheres.sphere(post.sphereId)?.isAdmin(authorId) ?? false)) {
+        DebugLogService().warn('Feed', 'Dropping post delete from a non-author');
+        return;
+      }
+      _posts.removeAt(index);
+      // So a peer offering it back during a sync does not resurrect it.
+      _hiddenPostIds.add(postId);
+      await _persistHidden();
+      await _persistPosts();
+      notifyListeners();
+    } else if (json['type'] == 'post_suggest') {
+      final postId = json['post_id'];
+      final text = json['text'];
+      if (postId is! String || text is! String) return;
+      final index = _posts.indexWhere((p) => p.id == postId);
+      if (index == -1 || !_posts[index].isRecommend) return;
+      _applySuggestion(index, authorId, text);
     } else if (json['type'] == 'comment_edit') {
       final postId = json['post_id'];
       final commentId = json['comment_id'];
@@ -1423,6 +1463,254 @@ class FeedService extends ChangeNotifier {
         route: '/post/$postId',
         thread: 'post:$postId',
       ));
+    }
+  }
+
+  // ── Author signature ───────────────────────────────────────────────────
+
+  /// Sign the post's core with our identity key, or null when we have none.
+  String? _signCore(Post post) {
+    final secret = _mySecretKey;
+    if (secret == null || secret.isEmpty) return null;
+    try {
+      final sig = ed.sign(ed.PrivateKey(hex.decode(secret)),
+          Uint8List.fromList(utf8.encode(post.signedCore())));
+      return hex.encode(sig);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether [post]'s words are proven to be its author's: the signature in
+  /// it verifies under the author's identity key. False for unsigned posts.
+  static bool authorSignatureHolds(Post post) {
+    final sig = post.authorSig;
+    if (sig == null) return false;
+    try {
+      return ed.verify(
+        ed.PublicKey(hex.decode(post.authorId)),
+        Uint8List.fromList(utf8.encode(post.signedCore())),
+        Uint8List.fromList(hex.decode(sig)),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The original inside a reshare, as a [Post], or null when malformed.
+  static Post? originalOf(Post reshare) {
+    final o = reshare.payload?['original'];
+    if (o is! Map) return null;
+    try {
+      return Post.fromJson(o.cast<String, dynamic>());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// A reshare is honoured only when the original is signed, the signature
+  /// holds, and the signed core allows resharing. An unsigned original is
+  /// the resharer's word; it is shown as such but not refused.
+  static bool reshareAllowed(Post reshare) {
+    final original = originalOf(reshare);
+    if (original == null) return false;
+    if (original.authorSig == null) return true;
+    return authorSignatureHolds(original) && original.allowReshare;
+  }
+
+  /// Carry a post we have into other spheres, with its author's signed words.
+  /// Media is re-uploaded, so attribution of pictures is our word, which the
+  /// card says.
+  Future<void> resharePost(
+    String postId, {
+    required Set<String> targets,
+    String note = '',
+  }) async {
+    final original = _posts.where((p) => p.id == postId).firstOrNull;
+    if (original == null) return;
+    if (original.authorSig != null && !original.allowReshare) {
+      throw StateError('The author does not allow this post to be reshared');
+    }
+    final core = original.copyWith(
+      // Only what the signature covers travels, plus the name to show.
+      reactions: const [],
+      likes: const [],
+      comments: const [],
+      mediaRefs: const [],
+      provenance: const [],
+      viewedBy: const [],
+    );
+    final members = <String>{};
+    for (final id in targets) {
+      members.addAll(membersOf?.call(id) ?? const []);
+    }
+    await createPost(
+      note,
+      sphereIds: targets,
+      audienceMembers: members.toList(),
+      mediaRefs: List.of(original.mediaRefs),
+      kind: 'reshare',
+      payload: {'original': core.toJson()},
+    );
+  }
+
+  // ── Recommendations ───────────────────────────────────────────────────
+
+  /// Offer, change, or withdraw (empty text) our suggestion on a
+  /// recommendation post. One per person.
+  Future<void> suggest(String postId, String text) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1 || !_posts[index].isRecommend) return;
+    _applySuggestion(index, me, text);
+    for (final sphereId in _posts[index].sphereIds) {
+      await _publishToSphere(
+        sphereId: sphereId,
+        type: 'post_suggest',
+        payloadJson:
+            jsonEncode({'type': 'post_suggest', 'post_id': postId, 'text': text}),
+      );
+    }
+  }
+
+  void _applySuggestion(int index, String who, String text) {
+    final post = _posts[index];
+    final payload = Map<String, dynamic>.from(post.payload ?? {});
+    final suggestions =
+        Map<String, dynamic>.from(payload['suggestions'] as Map? ?? {});
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      suggestions.remove(who);
+    } else {
+      suggestions[who] = trimmed.length > 200 ? trimmed.substring(0, 200) : trimmed;
+    }
+    payload['suggestions'] = suggestions;
+    _posts[index] = post.copyWith(payload: payload);
+    _persistPosts();
+    notifyListeners();
+  }
+
+  // ── Delete, trash, archive ─────────────────────────────────────────────
+
+  static const _trashKey = 'spheres_post_trash_v1';
+  static const _archivedKey = 'spheres_archived_posts_v1';
+  static const trashKeepsFor = Duration(days: 30);
+
+  /// Our deleted posts, kept here for [trashKeepsFor] in case the delete was
+  /// the mistake. Local; the sphere was told to drop them.
+  final List<Map<String, dynamic>> _trash = [];
+  final Set<String> _archivedIds = {};
+
+  List<Post> get trashedPosts =>
+      _trash.map((e) => Post.fromJson(e['post'] as Map<String, dynamic>)).toList();
+
+  DateTime? trashedAt(String postId) {
+    final e = _trash.where((t) => (t['post'] as Map)['id'] == postId).firstOrNull;
+    return e == null ? null : DateTime.tryParse(e['at'] as String? ?? '');
+  }
+
+  bool isArchived(String postId) => _archivedIds.contains(postId);
+
+  List<Post> get archivedPosts =>
+      _posts.where((p) => _archivedIds.contains(p.id) && !p.isStory).toList();
+
+  /// Remove a post of ours from every sphere it went to, keeping a copy in
+  /// the trash. An admin removing someone else's post sends the same thing
+  /// and keeps nothing.
+  Future<void> deletePost(String postId) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1) return;
+    final post = _posts[index];
+    final spheres = _spheres;
+    final mine = post.authorId == me;
+    final admin = spheres != null &&
+        post.sphereIds.any((id) => spheres.sphere(id)?.isAdmin(me) ?? false);
+    if (!mine && !admin) return;
+    _posts.removeAt(index);
+    _archivedIds.remove(postId);
+    if (mine) {
+      _trash.insert(0, {'post': post.toJson(), 'at': DateTime.now().toIso8601String()});
+      await _persistTrash();
+    }
+    _hiddenPostIds.add(postId);
+    await _persistHidden();
+    await _persistPosts();
+    notifyListeners();
+    for (final sphereId in post.sphereIds) {
+      await _publishToSphere(
+        sphereId: sphereId,
+        type: 'post_delete',
+        payloadJson: jsonEncode({'type': 'post_delete', 'post_id': postId}),
+      );
+    }
+  }
+
+  /// Put a deleted post back, for us and for the sphere.
+  Future<void> restoreFromTrash(String postId) async {
+    final i = _trash.indexWhere((t) => (t['post'] as Map)['id'] == postId);
+    if (i == -1) return;
+    final post = Post.fromJson(_trash[i]['post'] as Map<String, dynamic>);
+    _trash.removeAt(i);
+    await _persistTrash();
+    _hiddenPostIds.remove(postId);
+    await _persistHidden();
+    _mergePost(post);
+    final relayPost = await _encodePostMedia(post);
+    for (final target in post.sphereIds) {
+      final copy = relayPost.copyWith(sphereId: target, sphereIds: {target});
+      await _publishToSphere(
+        sphereId: target,
+        type: 'post',
+        payloadJson: jsonEncode({'type': 'post', 'post': copy.toJson()}),
+      );
+    }
+  }
+
+  Future<void> emptyTrash({String? onlyId}) async {
+    if (onlyId == null) {
+      _trash.clear();
+    } else {
+      _trash.removeWhere((t) => (t['post'] as Map)['id'] == onlyId);
+    }
+    await _persistTrash();
+    notifyListeners();
+  }
+
+  /// Take a post out of the feed on this device only. Nothing is sent.
+  Future<void> setArchived(String postId, bool archived) async {
+    if (archived) {
+      _archivedIds.add(postId);
+    } else {
+      _archivedIds.remove(postId);
+    }
+    await SecureStore.instance.setStringList(_archivedKey, _archivedIds.toList());
+    notifyListeners();
+  }
+
+  Future<void> _persistTrash() =>
+      SecureStore.instance.setString(_trashKey, jsonEncode(_trash));
+
+  Future<void> _loadTrashAndArchive() async {
+    final store = SecureStore.instance;
+    _archivedIds
+      ..clear()
+      ..addAll(await store.getStringList(_archivedKey) ?? const []);
+    _trash.clear();
+    final raw = await store.getString(_trashKey);
+    if (raw != null) {
+      var total = 0;
+      try {
+        final cutoff = DateTime.now().subtract(trashKeepsFor);
+        final all = (jsonDecode(raw) as List).whereType<Map>().toList();
+        total = all.length;
+        for (final e in all) {
+          final at = DateTime.tryParse(e['at'] as String? ?? '');
+          // Thirty days, then gone for good.
+          if (at != null && at.isAfter(cutoff)) _trash.add(e.cast<String, dynamic>());
+        }
+      } catch (_) {}
+      if (_trash.length != total) await _persistTrash();
     }
   }
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:equatable/equatable.dart';
 import 'media_provenance.dart';
 
@@ -64,6 +66,31 @@ class Post with EquatableMixin {
   /// on receipt and the composer says so.
   final bool commentsOff;
 
+  /// The author's Ed25519 signature over [signedCore], so a copy of this post
+  /// carried into another sphere by someone else still proves who wrote the
+  /// words. Null for posts made before signatures existed.
+  final String? authorSig;
+
+  /// Whether the author lets members carry this post into other spheres.
+  /// Part of what is signed, so a resharer cannot strip it.
+  final bool allowReshare;
+
+  bool get isLifeEvent => kind == 'life_event';
+  bool get isRecommend => kind == 'recommend';
+  bool get isReshare => kind == 'reshare';
+
+  /// What the author signs: the identity of the post and its words. Media and
+  /// the audience are not in it; media is re-uploaded by a resharer and the
+  /// audience is whoever receives the copy.
+  String signedCore() => jsonEncode({
+        'id': id,
+        'authorId': authorId,
+        'content': content,
+        'createdAt': createdAt.toIso8601String(),
+        'kind': kind,
+        'allowReshare': allowReshare,
+      });
+
   // Not const: sphereIds defaults to a set built from sphereId.
   Post({
     required this.id,
@@ -88,6 +115,8 @@ class Post with EquatableMixin {
     this.coAuthors = const [],
     this.acceptedCoAuthors = const [],
     this.commentsOff = false,
+    this.authorSig,
+    this.allowReshare = true,
   }) : sphereIds = sphereIds ?? {sphereId};
 
   /// Comments that are shown to [viewer]: a hidden one is still shown to the
@@ -146,6 +175,8 @@ class Post with EquatableMixin {
       acceptedCoAuthors:
           (json['acceptedCoAuthors'] as List<dynamic>?)?.cast<String>() ?? const [],
       commentsOff: json['commentsOff'] == true,
+      authorSig: json['authorSig'] is String ? json['authorSig'] as String : null,
+      allowReshare: json['allowReshare'] != false,
     );
   }
 
@@ -174,6 +205,8 @@ class Post with EquatableMixin {
       if (coAuthors.isNotEmpty) 'coAuthors': coAuthors,
       if (acceptedCoAuthors.isNotEmpty) 'acceptedCoAuthors': acceptedCoAuthors,
       if (commentsOff) 'commentsOff': true,
+      if (authorSig != null) 'authorSig': authorSig,
+      if (!allowReshare) 'allowReshare': false,
     };
   }
 
@@ -212,6 +245,8 @@ class Post with EquatableMixin {
     List<String>? coAuthors,
     List<String>? acceptedCoAuthors,
     bool? commentsOff,
+    String? authorSig,
+    bool? allowReshare,
   }) {
     return Post(
       id: id ?? this.id,
@@ -236,6 +271,8 @@ class Post with EquatableMixin {
       coAuthors: coAuthors ?? this.coAuthors,
       acceptedCoAuthors: acceptedCoAuthors ?? this.acceptedCoAuthors,
       commentsOff: commentsOff ?? this.commentsOff,
+      authorSig: authorSig ?? this.authorSig,
+      allowReshare: allowReshare ?? this.allowReshare,
     );
   }
 
@@ -263,6 +300,8 @@ class Post with EquatableMixin {
         coAuthors,
         acceptedCoAuthors,
         commentsOff,
+        authorSig,
+        allowReshare,
       ];
 }
 

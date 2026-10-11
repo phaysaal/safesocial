@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/media_provenance.dart';
 import '../models/post.dart';
+import 'post_kinds.dart';
 import 'reaction_picker.dart';
 import 'author_name.dart';
 import '../models/sphere.dart';
@@ -76,12 +77,33 @@ class _PostCardState extends State<PostCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        authorName,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Builder(builder: (context) {
+                        final feeling = Feelings.line(post.payload);
+                        final shared = post.isReshare;
+                        if (feeling.isEmpty && !shared) {
+                          return Text(authorName,
+                              style: theme.textTheme.bodyLarge
+                                  ?.copyWith(fontWeight: FontWeight.w600));
+                        }
+                        return RichText(
+                          text: TextSpan(
+                            style: theme.textTheme.bodyLarge,
+                            children: [
+                              TextSpan(
+                                  text: authorName,
+                                  style: const TextStyle(fontWeight: FontWeight.w600)),
+                              if (shared)
+                                TextSpan(
+                                    text: ' shared a post',
+                                    style: TextStyle(color: cs.onSurfaceVariant)),
+                              if (feeling.isNotEmpty)
+                                TextSpan(
+                                    text: ' is $feeling',
+                                    style: TextStyle(color: cs.onSurfaceVariant)),
+                            ],
+                          ),
+                        );
+                      }),
                       Row(
                         children: [
                           Text(
@@ -164,6 +186,30 @@ class _PostCardState extends State<PostCard> {
                       ),
                     ],
                     const PopupMenuItem(value: 'open', child: Text('Open post and comments')),
+                    if (!post.isReshare &&
+                        (post.authorSig == null || post.allowReshare) &&
+                        context.read<SphereService>().spheres.length > 1)
+                      const PopupMenuItem(value: 'reshare', child: Text('Share to another sphere')),
+                    if (post.authorId == myKey)
+                      PopupMenuItem(
+                        value: 'profile_pin',
+                        child: Text(
+                          (context.read<IdentityService>().currentIdentity?.pinnedPostIds.contains(post.id) ?? false)
+                              ? 'Unpin from my profile'
+                              : 'Pin to my profile',
+                        ),
+                      ),
+                    PopupMenuItem(
+                      value: 'archive',
+                      child: Text(context.read<FeedService>().isArchived(post.id)
+                          ? 'Unarchive'
+                          : 'Archive (hide from my feed)'),
+                    ),
+                    if (post.authorId == myKey ||
+                        (myKey != null &&
+                            (context.read<SphereService>().sphere(post.sphereId)?.isAdmin(myKey) ??
+                                false)))
+                      const PopupMenuItem(value: 'delete', child: Text('Delete')),
                     PopupMenuItem(
                       value: 'notify',
                       child: Text(context.read<FeedService>().postNotifies(post)
@@ -214,10 +260,42 @@ class _PostCardState extends State<PostCard> {
             ),
 
           // ── Content text ───────────────────────────────────
-          if (post.content.isNotEmpty && !post.isPoll)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Text(post.content, style: theme.textTheme.bodyMedium),
+          if (post.content.isNotEmpty &&
+              !post.isPoll &&
+              !post.isLifeEvent &&
+              !post.isRecommend)
+            Builder(builder: (context) {
+              final bg = post.payload?['bg'];
+              if (post.mediaRefs.isEmpty &&
+                  bg is String &&
+                  PostBackgrounds.colorsFor(bg) != null &&
+                  post.content.length <= PostBackgrounds.maxChars) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: BackgroundTextCard(text: post.content, background: bg),
+                );
+              }
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Text(post.content, style: theme.textTheme.bodyMedium),
+              );
+            }),
+          if (post.isLifeEvent) LifeEventCard(post: post),
+          if (post.isRecommend)
+            RecommendCard(
+              post: post,
+              myKey: myKey,
+              nameFor: (k) => k == myKey
+                  ? 'You'
+                  : (context.read<ContactService>().getContact(k)?.displayName ?? '${k.substring(0, 8)}…'),
+              onSuggest: (text) => context.read<FeedService>().suggest(post.id, text),
+            ),
+          if (post.isReshare)
+            ReshareCard(
+              post: post,
+              nameFor: (k) => k == myKey
+                  ? 'You'
+                  : (context.read<ContactService>().getContact(k)?.displayName ?? '${k.substring(0, 8)}…'),
             ),
           if (post.isPoll)
             Padding(
@@ -454,28 +532,61 @@ class _PostCardState extends State<PostCard> {
     final alt = index >= 0 && index < post.altTexts.length ? post.altTexts[index] : '';
     final provenance = MediaProvenance.at(post.provenance, index);
     final blurred = context.watch<LibraryService>().blursAnyOf(post.sphereIds);
+    final pano = (post.payload?['pano'] as List?)?.contains(index) ?? false;
     final image = Semantics(
       label: alt.isEmpty ? null : alt,
       image: true,
       child: GestureDetector(
-        onTap: () =>
-            context.push('/media/view?ref=${Uri.encodeComponent(ref)}'),
+        onTap: () => context.push(
+            '/media/view?ref=${Uri.encodeComponent(ref)}${pano ? '&pano=1' : ''}'),
         onLongPress: alt.isEmpty
             ? null
             : () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(alt))),
         child: MediaThumb(ref: ref, width: width, height: height),
       ),
     );
-    final withBadge = provenance == null
+    final withBadge = provenance == null && !pano
         ? image
         : Stack(children: [
             image,
-            Positioned(right: 6, bottom: 6, child: ProvenanceBadge(provenance: provenance)),
+            if (provenance != null)
+              Positioned(right: 6, bottom: 6, child: ProvenanceBadge(provenance: provenance)),
+            if (pano)
+              Positioned(
+                left: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                  child: const Text('360°',
+                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                ),
+              ),
           ]);
     return BlurGate(blurred: blurred, child: withBadge);
   }
 
   void _handlePostMenu(BuildContext context, String action, Post post) {
+    if (action == 'reshare') {
+      _reshare(context, post);
+      return;
+    }
+    if (action == 'profile_pin') {
+      final identity = context.read<IdentityService>();
+      final pinned = identity.currentIdentity?.pinnedPostIds.contains(post.id) ?? false;
+      identity.setPinnedToProfile(post.id, !pinned);
+      return;
+    }
+    if (action == 'archive') {
+      final feed = context.read<FeedService>();
+      feed.setArchived(post.id, !feed.isArchived(post.id));
+      return;
+    }
+    if (action == 'delete') {
+      _confirmDelete(context, post);
+      return;
+    }
     if (action == 'open') {
       context.push('/post/${post.id}');
       return;
@@ -608,6 +719,93 @@ class _PostCardState extends State<PostCard> {
       return ReactionKinds.labelFor(selfReaction.first.emoji);
     }
     return 'Like';
+  }
+
+  Future<void> _confirmDelete(BuildContext context, Post post) async {
+    final feed = context.read<FeedService>();
+    final mine = post.authorId == context.read<IdentityService>().publicKey;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this post?'),
+        content: Text(mine
+            ? 'Everyone in its spheres is told to drop it. You can restore it from the trash for thirty days.'
+            : 'As an admin you remove it for everyone in the sphere. Nothing is kept.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok == true) await feed.deletePost(post.id);
+  }
+
+  Future<void> _reshare(BuildContext context, Post post) async {
+    final spheres = context.read<SphereService>().spheres
+        .where((s) => !post.sphereIds.contains(s.id))
+        .toList();
+    final feed = context.read<FeedService>();
+    final messenger = ScaffoldMessenger.of(context);
+    if (spheres.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('It is already in every sphere you are in')));
+      return;
+    }
+    final chosen = <String>{};
+    final note = TextEditingController();
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Share to another sphere'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  post.authorSig != null
+                      ? 'The author\'s signed words travel with it; pictures are re-uploaded by you.'
+                      : 'This post is not signed, so readers are told the attribution is your word.',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                for (final s in spheres)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: chosen.contains(s.id),
+                    title: Text(s.name),
+                    onChanged: (v) => setDialogState(() {
+                      if (v == true) {
+                        chosen.add(s.id);
+                      } else {
+                        chosen.remove(s.id);
+                      }
+                    }),
+                  ),
+                TextField(
+                  controller: note,
+                  decoration: const InputDecoration(labelText: 'Say something (optional)'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(
+                onPressed: chosen.isEmpty ? null : () => Navigator.pop(ctx, true),
+                child: const Text('Share')),
+          ],
+        ),
+      ),
+    );
+    if (go != true) return;
+    try {
+      await feed.resharePost(post.id, targets: chosen, note: note.text.trim());
+      messenger.showSnackBar(const SnackBar(content: Text('Shared')));
+    } on StateError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   // ── Comment sheet with reply threading ──────────────────

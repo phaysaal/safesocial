@@ -17,6 +17,29 @@ import 'video_transcoder.dart';
 /// A piece of media the user chose that cannot be sent as-is: too long, too
 /// large, or not something this platform can prepare. The message is written
 /// for the user and the UI shows it; the send does not proceed.
+/// Which part of a clip to send, and the frame that stands for it.
+class VideoTrim {
+  final Duration start;
+  final Duration end;
+  final Duration? posterAt;
+
+  const VideoTrim({required this.start, required this.end, this.posterAt});
+
+  factory VideoTrim.fromJson(Map<String, dynamic> j) => VideoTrim(
+        start: Duration(milliseconds: (j['start'] as num?)?.toInt() ?? 0),
+        end: Duration(milliseconds: (j['end'] as num?)?.toInt() ?? 0),
+        posterAt: j['posterAt'] is num
+            ? Duration(milliseconds: (j['posterAt'] as num).toInt())
+            : null,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'start': start.inMilliseconds,
+        'end': end.inMilliseconds,
+        if (posterAt != null) 'posterAt': posterAt!.inMilliseconds,
+      };
+}
+
 class MediaRejectedException implements Exception {
   final String message;
   const MediaRejectedException(this.message);
@@ -71,6 +94,7 @@ class MediaService extends ChangeNotifier {
         fileName: image.name,
       );
       final path = await storePickedImage(bytes, provenance: provenance);
+      if (ProvenanceScanner.looksEquirectangular(bytes)) await setPanorama(path, true);
       // The picker's copy is no longer needed and may hold location data.
       try {
         await File(image.path).delete();
@@ -80,6 +104,18 @@ class MediaService extends ChangeNotifier {
       DebugLogService().error('Media', 'Error picking image: $e');
       return null;
     }
+  }
+
+  /// Replace a picked picture with an edited version of it. The origin score
+  /// keeps what the original said and adds that it was edited here, so a
+  /// camera shot cropped in Spheres is no longer presented as untouched.
+  static Future<String> replaceEdited(String path, Uint8List jpegBytes) async {
+    await File(path).writeAsBytes(jpegBytes);
+    final before = provenanceFor(path);
+    if (before != null) {
+      await writeProvenance(path, before.editedInApp());
+    }
+    return path;
   }
 
   /// Take a photo with the camera. Its provenance is the strongest the app
@@ -275,11 +311,61 @@ class MediaService extends ChangeNotifier {
     return File(path).existsSync() ? path : null;
   }
 
-  /// Extract and write a poster frame for a local video. Never throws.
-  static Future<void> writePosterFor(String videoPath) async {
-    if (File(posterPathFor(videoPath)).existsSync()) return;
+  // -- 360° pictures --------------------------------------------------------------
+
+  /// A marker beside a picture that is a full 360° view, set from the file's
+  /// own metadata on pick or by hand in the composer.
+  static String panoPathFor(String imagePath) => '$imagePath.pano';
+
+  static bool isPanorama(String imagePath) => File(panoPathFor(imagePath)).existsSync();
+
+  static Future<void> setPanorama(String imagePath, bool on) async {
+    final f = File(panoPathFor(imagePath));
     try {
-      final jpeg = await transcoder.poster(videoPath);
+      if (on) {
+        await f.writeAsString('1');
+      } else if (f.existsSync()) {
+        await f.delete();
+      }
+    } catch (_) {}
+  }
+
+  // -- Trimming -----------------------------------------------------------------
+
+  /// Where a clip's trim choice lives: next to it, with `.trim` appended.
+  static String trimPathFor(String videoPath) => '$videoPath.trim';
+
+  static VideoTrim? trimFor(String videoPath) {
+    try {
+      final f = File(trimPathFor(videoPath));
+      if (!f.existsSync()) return null;
+      return VideoTrim.fromJson(
+          (jsonDecode(f.readAsStringSync()) as Map).cast<String, dynamic>());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Remember which part of the clip to send and which frame to show. The
+  /// poster is redrawn from the chosen frame at once.
+  static Future<void> writeTrim(String videoPath, VideoTrim trim) async {
+    await File(trimPathFor(videoPath)).writeAsString(jsonEncode(trim.toJson()));
+    await writePosterFor(videoPath, at: trim.posterAt ?? trim.start, replace: true);
+  }
+
+  static Future<void> clearTrim(String videoPath) async {
+    try {
+      await File(trimPathFor(videoPath)).delete();
+    } catch (_) {}
+    await writePosterFor(videoPath, replace: true);
+  }
+
+  /// Extract and write a poster frame for a local video. Never throws.
+  static Future<void> writePosterFor(String videoPath,
+      {Duration? at, bool replace = false}) async {
+    if (!replace && File(posterPathFor(videoPath)).existsSync()) return;
+    try {
+      final jpeg = await transcoder.poster(videoPath, at: at);
       if (jpeg == null) return;
       final decoded = img.decodeImage(jpeg);
       if (decoded == null) return;
@@ -314,7 +400,9 @@ class MediaService extends ChangeNotifier {
     String? thumbnail;
 
     if (looksLikeVideo(filePath)) {
-      final out = await transcoder.transcode(filePath);
+      final trim = trimFor(filePath);
+      final out = await transcoder.transcode(filePath,
+          start: trim?.start, end: trim?.end);
       final duration = out.duration;
       if (videoLimit != null && duration != null && duration > videoLimit) {
         throw MediaRejectedException(

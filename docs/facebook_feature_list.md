@@ -53,20 +53,23 @@ friends by link ✓ · 5,000-friend cap, not applicable.
 
 ## 3. Composing a post
 
-Text ✓ · coloured backgrounds and large text ○ · photo, several photos ✓ · video ✓ ·
+Text ✓ · coloured backgrounds and large text ✓ · photo, several photos ✓ · video ✓ ·
 albums and shared albums ✓ · GIF ✗ as normally built (GIPHY is a central index) ·
-feeling or activity ○ · tag friends ✓ (mentions) · check in at a place ✗ (place index;
+feeling or activity ✓ · tag friends ✓ (mentions) · check in at a place ✗ (place index;
 sharing a location in chat ✓) · link with preview ○ (preview fetch leaks the URL; by
-decision off) · poll ✓ · ask for recommendations ○ · life event ○ · sell something ✗ ·
+decision off) · poll ✓ · ask for recommendations ✓ · life event ✓ · sell something ✗ ·
 fundraiser ✗ · audience selector per post ✓ (which sphere) · custom audiences ~ · schedule
-○ … ✓ (drafts and scheduled posts) · turn off commenting ○ · who can comment ○ · turn off
-notifications for a post ○ · edit with edit history ✓ · delete ✓ · move to archive or
-trash ~ · save ✓ · pin to profile ○ (pin in sphere ✓) · 360 photo and video ○ · photo
-editing: crop, filters, text, stickers, doodle ○ · automatic alt text ✗ (a model) ·
-custom alt text ✓ · video trim ○ · automatic captions ✗ · thumbnail choice ○ · music on
-posts ✗ (licensed catalogue) · co-author ✓ · cross-post to Instagram ✗ · embed on the web
-✗ · copy link ~ (invite links exist; post links do not) · share to feed, story, group,
-Messenger, external app ~ (forward in chat ✓; reshare to feed ○; external ✗).
+✓ (drafts and scheduled posts) · turn off commenting ✓ · who can comment ~ · turn off
+notifications for a post ✓ · edit with edit history ✓ · delete ✓ (told to every sphere,
+thirty-day trash) · move to archive ✓ · save ✓ · pin to profile ✓ (pin in sphere ✓) · 360
+photo ✓ (found from the file's GPano mark or set by hand; panned as a cylinder, not a
+sphere) · 360 video ○ · photo editing: crop ✓ (presets), rotate and flip ✓, filters ✓,
+text ✓, stickers ✓ (emoji and your own sticker images), doodle ✓ · automatic alt text ✗ (a model) · custom alt text ✓ · video trim ✓ ·
+automatic captions ✗ · thumbnail choice ✓ · music on posts ✗ (licensed catalogue) ·
+co-author ✓ · cross-post to Instagram ✗ · embed on the web ✗ · copy link ~ (invite links
+exist; post links do not) · share to feed, story, group, Messenger, external app ~
+(forward in chat ✓; reshare into another sphere ✓ with the author's signed words, and the
+author can forbid it; to a story ○; external ✗).
 
 ## 4. Stories
 
@@ -221,7 +224,7 @@ same commit.
 |---|---|---|---|---|
 | P1 ✓ 11 Oct 2026 | **Comments and reactions, the daily loop** | The seven reaction kinds on posts, reactions on comments, edit a comment with history, delete and hide comments, pin a comment, comments off or members-only per post, subscribe to a post, reaction and reply notifications, newest-first and threaded views polished | `post_react` carries a kind; `comment_edit`, `comment_hide`, `comment_pin`, `post_settings` sealed to the sphere and checked against roles on receipt | 5 |
 | P2 ✓ 11 Oct 2026 | **Profile** | Bio, pronouns, nickname, name pronunciation, cover photo, featured photos, the about fields (work, education, city, hometown, relationship with partner mention, family, languages, websites, hobbies, quotes, life events), temporary profile picture, "updated their picture" post into chosen spheres, per-field audience (all contacts or named spheres), view-as, legacy contact tied to social recovery | `profile` envelope grows typed fields and per-field audience; cover and featured photos ride as blobs | 6 |
-| P3 | **Composer and media** | Coloured text backgrounds, feeling and activity, crop, rotate, filters, text and stickers on photos, video trim and thumbnail choice, life events, "ask for recommendations" as a poll variant, reshare a post into another sphere with attribution (author's signature travels; the author can forbid resharing), pin to profile, trash with 30-day restore, bulk archive and trash | `post_reshare` with the original envelope embedded; `post.allowReshare` | 7 |
+| P3 ✓ 11 Oct 2026 | **Composer and media** | Coloured text backgrounds, feeling and activity, crop, rotate, filters, text and stickers on photos, video trim and thumbnail choice, life events, "ask for recommendations" as a poll variant, reshare a post into another sphere with attribution (author's signature travels; the author can forbid resharing), pin to profile, trash with 30-day restore, bulk archive and trash | `post_reshare` with the original envelope embedded; `post.allowReshare` | 7 |
 | P4 | **Stories** | Boomerang, layouts, selfie mode, quiz and slider stickers, feeling sticker, link sticker (no preview), hide from named contacts, archive, highlights on the profile | Story payload gains sticker kinds; highlights are a local list plus a `profile` field | 4 |
 | P5 | **Messaging comforts** | Files of any type, chat themes and nicknames (local), chat emoji, ignore, scheduled messages, original-quality media toggle, chat bubbles on Android, profile notes, a vanish-mode preset over disappearing messages, avatar stickers once avatars exist | Files are blobs with a name and type; the rest is local or reuses existing kinds | 5 |
 | P6 | **Sphere governance** | Membership questions answered in the join request, rules shown on join, units and guides, files, badges and expert marks, keyword alerts for admins (local), suspend for a period, welcome posts, post topics, admin automation for the rules already built (auto-mute on N reports, auto-expire invites) | `sphere_join` carries answers; rules, units and topics are signed sphere items | 6 |

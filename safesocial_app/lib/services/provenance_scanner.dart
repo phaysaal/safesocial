@@ -23,6 +23,18 @@ class ProvenanceScanner {
   /// bytes came straight from the camera intent and `gallery` otherwise.
   /// [relativePath], [dateTaken] and [dateModified] are optional extra
   /// evidence from a media store; the photo picker does not provide them.
+  /// Whether the file says it is a full 360° picture (Google's GPano XMP,
+  /// which every phone and 360 camera writes): the viewer then pans it
+  /// around rather than showing a very wide strip.
+  static bool looksEquirectangular(Uint8List bytes) {
+    try {
+      final text = _MetadataText.collect(bytes).lower;
+      return text.contains('equirectangular') || text.contains('usepanoramaviewer="true"');
+    } catch (_) {
+      return false;
+    }
+  }
+
   static MediaProvenance assessImage(
     Uint8List bytes, {
     required String source,

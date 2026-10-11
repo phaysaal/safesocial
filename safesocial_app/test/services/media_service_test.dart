@@ -41,13 +41,18 @@ class _FakeTranscoder implements VideoTranscoder {
   int outputBytes = 10 * 1024;
   Uint8List? posterJpeg;
   int transcodes = 0;
+  Duration? lastStart;
+  Duration? lastEnd;
+  Duration? lastPosterAt;
 
   @override
   Future<Duration?> durationOf(String path) async => probed;
 
   @override
-  Future<TranscodedVideo> transcode(String path) async {
+  Future<TranscodedVideo> transcode(String path, {Duration? start, Duration? end}) async {
     transcodes++;
+    lastStart = start;
+    lastEnd = end;
     final out = File('${Directory.systemTemp.path}/'
         'spheres_test_${DateTime.now().microsecondsSinceEpoch}.mp4');
     await out.writeAsBytes(Uint8List(outputBytes));
@@ -59,7 +64,10 @@ class _FakeTranscoder implements VideoTranscoder {
   }
 
   @override
-  Future<Uint8List?> poster(String path) async => posterJpeg;
+  Future<Uint8List?> poster(String path, {Duration? at}) async {
+    lastPosterAt = at;
+    return posterJpeg;
+  }
 }
 
 Uint8List smallJpeg() {
@@ -213,6 +221,32 @@ void main() {
       MediaService.prepareForRelay(f.path),
       throwsA(isA<MediaRejectedException>()),
     );
+  });
+
+  test('a trim choice travels into the transcoder and the cover frame', () async {
+    transcoder.outputDuration = const Duration(seconds: 5);
+    transcoder.posterJpeg = smallJpeg();
+    final path = await fakeVideo();
+    await MediaService.writeTrim(
+      path,
+      const VideoTrim(
+        start: Duration(seconds: 2),
+        end: Duration(seconds: 7),
+        posterAt: Duration(seconds: 4),
+      ),
+    );
+    expect(transcoder.lastPosterAt, const Duration(seconds: 4),
+        reason: 'the poster is redrawn from the chosen frame at once');
+    expect(MediaService.trimFor(path)!.end, const Duration(seconds: 7));
+
+    await MediaService.prepareForRelay(path, videoLimit: MediaService.feedVideoLimit);
+    expect(transcoder.lastStart, const Duration(seconds: 2));
+    expect(transcoder.lastEnd, const Duration(seconds: 7));
+
+    await MediaService.clearTrim(path);
+    expect(MediaService.trimFor(path), isNull);
+    await MediaService.prepareForRelay(path, videoLimit: MediaService.feedVideoLimit);
+    expect(transcoder.lastStart, isNull);
   });
 
   test('a poster is written beside a local video and found again', () async {

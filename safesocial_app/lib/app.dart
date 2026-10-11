@@ -29,6 +29,7 @@ import 'screens/media/album_list_screen.dart';
 import 'screens/media/album_detail_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/contacts/contact_profile_screen.dart';
+import 'screens/feed/manage_posts_screen.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
 import 'screens/spheres/sphere_list_screen.dart';
@@ -234,6 +235,10 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           builder: (context, state) => const EditProfileScreen(),
         ),
         GoRoute(
+          path: '/posts/manage',
+          builder: (context, state) => const ManagePostsScreen(),
+        ),
+        GoRoute(
           path: '/contact/:key',
           builder: (context, state) =>
               ContactProfileScreen(contactKey: state.pathParameters['key']!),
@@ -242,6 +247,7 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           path: '/media/view',
           builder: (context, state) => MediaViewerScreen(
             mediaRef: state.uri.queryParameters['ref'],
+            panorama: state.uri.queryParameters['pano'] == '1',
           ),
         ),
         GoRoute(

@@ -366,4 +366,33 @@ void main() {
       expect(again.isMediaBlurred('peer'), isFalse);
     });
   });
+
+  group('edited in the app', () {
+    test('a camera capture drops to the edited band and names the app', () {
+      final after = MediaProvenance.liveCamera.editedInApp();
+      expect(after.score, 7);
+      expect(after.has(ProvenanceSignal.cameraCapture), isFalse);
+      expect(after.has(ProvenanceSignal.editedBySoftware), isTrue);
+      expect(after.tool, 'Spheres');
+    });
+
+    test('a low score stays low; editing adds nothing it did not have', () {
+      const low = MediaProvenance(
+          score: 2, source: 'gallery', signals: [ProvenanceSignal.screenshot]);
+      final after = low.editedInApp();
+      expect(after.score, 2);
+      expect(after.has(ProvenanceSignal.screenshot), isTrue);
+      expect(after.has(ProvenanceSignal.editedBySoftware), isTrue);
+    });
+  });
+
+  group('360° pictures', () {
+    test('a GPano projection in the XMP marks the file as a panorama', () {
+      const xmp = '<x:xmpmeta><rdf:Description GPano:ProjectionType="equirectangular" '
+          'GPano:UsePanoramaViewer="True"/></x:xmpmeta>';
+      expect(ProvenanceScanner.looksEquirectangular(withXmp(cameraJpeg(), xmp)), isTrue);
+      expect(ProvenanceScanner.looksEquirectangular(cameraJpeg()), isFalse);
+      expect(ProvenanceScanner.looksEquirectangular(Uint8List(0)), isFalse);
+    });
+  });
 }

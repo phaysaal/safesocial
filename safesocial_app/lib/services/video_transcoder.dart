@@ -43,10 +43,13 @@ abstract class VideoTranscoder {
 
   /// Re-encode to 720p H.264 + AAC in MP4. The output is a new file; the input
   /// is left alone.
-  Future<TranscodedVideo> transcode(String path);
+  ///
+  /// With [start] and [end] only that part of the clip is encoded.
+  Future<TranscodedVideo> transcode(String path, {Duration? start, Duration? end});
 
-  /// A JPEG frame suitable for a poster, or null.
-  Future<Uint8List?> poster(String path);
+  /// A JPEG frame suitable for a poster, or null. [at] picks the frame;
+  /// without it the encoder chooses.
+  Future<Uint8List?> poster(String path, {Duration? at});
 }
 
 /// The platform encoder: MediaCodec on Android, AVFoundation on iOS.
@@ -96,7 +99,7 @@ class PlatformVideoTranscoder implements VideoTranscoder {
   }
 
   @override
-  Future<TranscodedVideo> transcode(String path) async {
+  Future<TranscodedVideo> transcode(String path, {Duration? start, Duration? end}) async {
     _requireSupport();
     return _serial(() async {
       final info = await VideoCompress.compressVideo(
@@ -104,6 +107,9 @@ class PlatformVideoTranscoder implements VideoTranscoder {
         quality: VideoQuality.Res1280x720Quality,
         includeAudio: true,
         deleteOrigin: false,
+        // The platform encoder takes whole seconds.
+        startTime: start?.inSeconds,
+        duration: start != null && end != null ? (end - start).inSeconds : null,
       );
       final out = info?.file?.path ?? info?.path;
       if (info == null || out == null || info.isCancel == true) {
@@ -120,10 +126,11 @@ class PlatformVideoTranscoder implements VideoTranscoder {
   }
 
   @override
-  Future<Uint8List?> poster(String path) async {
+  Future<Uint8List?> poster(String path, {Duration? at}) async {
     _requireSupport();
     try {
-      return await VideoCompress.getByteThumbnail(path, quality: 60);
+      return await VideoCompress.getByteThumbnail(path,
+          quality: 60, position: at?.inMilliseconds ?? -1);
     } catch (_) {
       return null;
     }

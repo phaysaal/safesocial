@@ -134,6 +134,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: () => context.push('/posts/manage'),
+                          icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                          label: const Text('Manage posts: archive, trash, delete in bulk'),
+                        ),
                         const SizedBox(height: 12),
                         Text(
                           'Identity key',

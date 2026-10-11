@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import '../../widgets/panorama_viewer.dart';
 import 'package:gal/gal.dart';
 import 'package:video_player/video_player.dart';
 
@@ -27,7 +29,10 @@ import '../feed/compose_screen.dart';
 class MediaViewerScreen extends StatefulWidget {
   final String? mediaRef;
 
-  const MediaViewerScreen({super.key, this.mediaRef});
+  /// A full 360° picture: panned around instead of shown flat.
+  final bool panorama;
+
+  const MediaViewerScreen({super.key, this.mediaRef, this.panorama = false});
 
   @override
   State<MediaViewerScreen> createState() => _MediaViewerScreenState();
@@ -265,6 +270,8 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
     }
 
     if (_isVideo) return _videoBody();
+
+    if (widget.panorama) return PanoramaViewer(path: _path!);
 
     return InteractiveViewer(
       minScale: 0.5,

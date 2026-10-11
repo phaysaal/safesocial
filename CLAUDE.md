@@ -35,10 +35,15 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
 - **Local storage is encrypted at rest** (`SecureStore`); new sensitive keys must be added
   to its list. Backups (`backup_service.dart`) cover every store except sessions and
   outboxes, and double as the device-link payload.
-- **Media:** images re-encoded on pick (engine codec, downscaled, no metadata); video
-  transcoded on-device (`video_transcoder.dart`, platform encoder, no ffmpeg) with posters;
-  everything chunked and encrypted (`blob_service.dart`). `MediaThumb` renders every
-  reference kind.
+- **Media:** images re-encoded on pick (engine codec, downscaled, no metadata), and
+  editable before sending (`edit_image_screen.dart`: rotate, flip, crop presets, filters,
+  text, stickers, drawing; an edit lowers a camera capture's origin score to the edited
+  band); a picture whose GPano XMP says it is equirectangular is marked as a 360° view
+  (`.pano` sidecar, `payload['pano']` indices on the post) and panned in the viewer; video
+  transcoded on-device (`video_transcoder.dart`, platform encoder, no ffmpeg) with
+  posters, trimmed and given a chosen cover frame through a `.trim` sidecar applied at
+  send time; everything chunked and encrypted (`blob_service.dart`). `MediaThumb`
+  renders every reference kind.
 - **Media origin score.** Before an image is re-encoded, `ProvenanceScanner` reads what the
   file says about itself (camera EXIF, editing software, date disagreement, XMP and Content
   Credentials marks, PNG generator chunks, file name, dimensions) and produces a
@@ -66,12 +71,21 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   locked chats, blurred media, hidden words, member notes, stickers. Everything in it stays
   on the device.
 - **Message kinds.** `Message.kind` is text, poll, location, contact, video_note, sticker,
-  call or system, with structured content in `payload`; `Post.kind` is post, event or poll.
+  call or system, with structured content in `payload`; `Post.kind` is post, event, poll,
+  life_event, recommend (one suggestion per member, via `post_suggest`) or reshare. Any
+  post's payload may carry `bg` (a named background for short text), `feeling` or
+  `activity`. Every post carries `authorSig`, the author's Ed25519 signature over
+  `Post.signedCore()` (id, author, words, time, kind, `allowReshare`); a reshare embeds
+  the original's signed core so readers see whose words they are, and a reshare whose
+  original forbids it, or whose signature does not hold, is dropped on receipt.
+  `post_delete` is honoured from the author or a sphere admin; the deleter's own copy
+  waits in a local trash for thirty days. Archiving a post is local.
   Control traffic between devices and contacts rides small sealed envelopes: `chat_edit`,
   `chat_delete`, `chat_pin`, `chat_settings`, `read`, `poll_vote`, `location_update`,
   `profile`, `devices`, `contacts`; sphere-side equivalents are `sphere_msg_*` items and the
-  feed carries `post_edit`, `post_pin`, `post_settings` (comments off), `event_rsvp`,
-  `post_vote`, `coauthor_accept`, `report`, `comment`, `reaction`, and on comments
+  feed carries `post_edit`, `post_pin`, `post_settings` (comments off), `post_delete`,
+  `post_suggest`, `event_rsvp`, `post_vote`, `coauthor_accept`, `report`, `comment`,
+  `reaction`, and on comments
   `comment_edit` (earlier text kept), `comment_delete`, `comment_hide`, `comment_pin`,
   `comment_react`. Who may do what is decided by who signed: edits by the comment's
   author, hide and pin by the post's author or a sphere admin, delete by either, a
@@ -82,13 +96,13 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
 - **Profiles.** `UserProfile` carries name, bio, picture, birthday, a structured
   `ProfileAbout` (pronouns, nickname, pronunciation, work, education, city, hometown,
   relationship and partner, family, languages, websites, hobbies, quotes, life events),
-  cover and featured photos, a temporary-picture timer, a legacy contact, pinned posts,
-  and an audience per field (`FieldAudience`: all contacts, named spheres, or only me).
-  The `profile` envelope is built per contact by `ProfileSharing.payloadFor`, which cuts
-  the profile to what that contact's shared spheres allow; the receiver treats the
-  message as the sender's whole view and drops any field it no longer carries, while a
-  malformed field is ignored. Only the legacy contact is told they are one. "View as" on
-  the profile screen renders exactly that cut. Photos travel as encrypted blobs.
+  cover and featured photos, a temporary-picture timer, a legacy contact, and an
+  audience per field (`FieldAudience`: all contacts, named spheres, or only me). The
+  `profile` envelope is built per contact by `ProfileSharing.payloadFor`, which cuts the
+  profile to what that contact's shared spheres allow; the receiver treats the message
+  as the sender's whole view and drops any field it no longer carries, while a malformed
+  field is ignored. Only the legacy contact is told they are one. "View as" on the
+  profile screen renders exactly that cut. Photos travel as encrypted blobs.
 - **Invite links** are `spheres://join?s=&t=&via=&n=`; the request goes to the admin's open
   inbox and approval makes the requester a contact and a member in one step.
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
@@ -129,7 +143,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 668 tests in 56 files under test/{crypto,models,screens,services}
+flutter test                       # 684 tests in 57 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

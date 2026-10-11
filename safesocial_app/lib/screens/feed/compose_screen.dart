@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,6 +10,9 @@ import '../../services/media_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/video_transcoder.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/post_kinds.dart';
+import '../../widgets/trim_video_sheet.dart';
+import '../media/edit_image_screen.dart';
 import '../../widgets/media_thumb.dart';
 import '../../widgets/provenance_badge.dart';
 import '../../widgets/message_cards.dart';
@@ -43,9 +48,16 @@ class _ComposeScreenState extends State<ComposeScreen> {
   final _coAuthors = <String>{};
   bool _posting = false;
 
-  /// 'post' | 'event' | 'poll'
+  /// 'post' | 'event' | 'poll' | 'life_event' | 'recommend'
   String _kind = 'post';
   Map<String, dynamic>? _payload;
+
+  /// Extras any kind can carry: a coloured background for short text, a
+  /// feeling or an activity. Merged into the payload at post time.
+  String? _background;
+  Map<String, dynamic>? _feeling;
+  String? _activity;
+  bool _allowReshare = true;
   String? _draftId;
 
   @override
@@ -123,6 +135,182 @@ class _ComposeScreenState extends State<ComposeScreen> {
     });
   }
 
+  Future<void> _makeLifeEvent() async {
+    final title = TextEditingController();
+    final date = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Life event'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: title, autofocus: true, decoration: const InputDecoration(labelText: 'What happened')),
+          TextField(controller: date, decoration: const InputDecoration(labelText: 'When', hintText: '2026-10')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (ok != true || title.text.trim().isEmpty) return;
+    setState(() {
+      _kind = 'life_event';
+      _payload = {'title': title.text.trim(), 'date': date.text.trim()};
+    });
+  }
+
+  Future<void> _makeRecommend() async {
+    final question = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ask for recommendations'),
+        content: TextField(
+          controller: question,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'What are you looking for?', hintText: 'A dentist near Montreuil'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Ask')),
+        ],
+      ),
+    );
+    if (ok != true || question.text.trim().isEmpty) return;
+    setState(() {
+      _kind = 'recommend';
+      _payload = {'question': question.text.trim(), 'suggestions': <String, dynamic>{}};
+      if (_controller.text.trim().isEmpty) _controller.text = question.text.trim();
+    });
+  }
+
+  Future<void> _pickFeeling() async {
+    final activity = TextEditingController(text: _activity ?? '');
+    final result = await showModalBottomSheet<Object>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('How are you feeling?', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final (emoji, label) in Feelings.all)
+                    ChoiceChip(
+                      label: Text('$emoji $label'),
+                      selected: _feeling?['label'] == label,
+                      onSelected: (_) => Navigator.pop(ctx, {'emoji': emoji, 'label': label}),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text('Or what you are doing', style: TextStyle(fontWeight: FontWeight.w600)),
+              TextField(
+                controller: activity,
+                decoration: const InputDecoration(hintText: 'watching the sea'),
+                onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (_feeling != null || _activity != null)
+                    TextButton(onPressed: () => Navigator.pop(ctx, ''), child: const Text('Remove')),
+                  TextButton(
+                      onPressed: () => Navigator.pop(ctx, activity.text.trim()),
+                      child: const Text('Done')),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      if (result is Map<String, dynamic>) {
+        _feeling = result;
+        _activity = null;
+      } else if (result is String) {
+        _feeling = null;
+        _activity = result.isEmpty ? null : result;
+      }
+    });
+  }
+
+  Future<void> _pickBackground() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Background for a short post', style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text('Text only, up to 160 characters', style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  InkWell(
+                    onTap: () => Navigator.pop(ctx, ''),
+                    child: Container(
+                      width: 56, height: 56,
+                      decoration: BoxDecoration(
+                          border: Border.all(color: Theme.of(ctx).colorScheme.outline),
+                          borderRadius: BorderRadius.circular(12)),
+                      child: const Icon(Icons.format_clear),
+                    ),
+                  ),
+                  for (final e in PostBackgrounds.all.entries)
+                    InkWell(
+                      onTap: () => Navigator.pop(ctx, e.key),
+                      child: Container(
+                        width: 56, height: 56,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: e.value),
+                          borderRadius: BorderRadius.circular(12),
+                          border: _background == e.key
+                              ? Border.all(color: Theme.of(ctx).colorScheme.primary, width: 3)
+                              : null,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    setState(() => _background = choice.isEmpty ? null : choice);
+  }
+
+  Map<String, dynamic>? get _fullPayload {
+    final pano = [
+      for (final (i, path) in _media.indexed)
+        if (MediaService.isPanorama(path)) i,
+    ];
+    final extras = <String, dynamic>{
+      if (pano.isNotEmpty) 'pano': pano,
+      if (_background != null && _media.isEmpty) 'bg': _background,
+      if (_feeling != null) 'feeling': _feeling,
+      if (_activity != null) 'activity': _activity,
+    };
+    if (_payload == null && extras.isEmpty) return null;
+    return {...?_payload, ...extras};
+  }
+
   Future<void> _makePoll() async {
     final poll = await showCreatePollDialog(context);
     if (poll == null) return;
@@ -139,24 +327,63 @@ class _ComposeScreenState extends State<ComposeScreen> {
     });
   }
 
+  /// Tap an attachment: a picture opens the editor, a clip the trim sheet.
+  Future<void> _editMedia(String path) async {
+    if (MediaService.looksLikeVideo(path)) {
+      await TrimVideoSheet.show(context, path);
+      if (mounted) setState(() {});
+      return;
+    }
+    final edited = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => EditImageScreen(path: path)),
+    );
+    if (edited != null && mounted) {
+      // Same path, new bytes: evict the cached image so the thumb redraws.
+      await FileImage(File(edited)).evict();
+      setState(() {});
+    }
+  }
+
   Future<void> _editAltText(String path) async {
     final controller = TextEditingController(text: _altTexts[path] ?? '');
+    var pano = MediaService.isPanorama(path);
+    final isVideo = MediaService.looksLikeVideo(path);
     final text = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
         title: const Text('Describe this image'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(hintText: 'For people who cannot see it'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(hintText: 'For people who cannot see it'),
+            ),
+            if (!isVideo)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: pano,
+                title: const Text('360° photo', style: TextStyle(fontSize: 14)),
+                subtitle: const Text('Readers pan around it. Set by itself when the file says so.',
+                    style: TextStyle(fontSize: 11)),
+                onChanged: (v) {
+                  setDialogState(() => pano = v);
+                  MediaService.setPanorama(path, v);
+                },
+              ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('Save')),
         ],
       ),
+      ),
     );
+    if (mounted) setState(() {});
     if (text == null) return;
     setState(() {
       if (text.isEmpty) {
@@ -271,8 +498,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
         mediaRefs: _media.isEmpty ? null : List.of(_media),
         authorName: identity.currentIdentity?.displayName ?? 'You',
         kind: _kind,
-        payload: _payload,
+        payload: _fullPayload,
         altTexts: _altList,
+        allowReshare: _allowReshare,
         coAuthors: _coAuthors.toList(),
       );
       if (_draftId != null) await feed.deleteDraft(_draftId!);
@@ -296,18 +524,31 @@ class _ComposeScreenState extends State<ComposeScreen> {
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(_kind == 'event' ? 'New event' : (_kind == 'poll' ? 'New poll' : 'New post')),
+        title: Text(switch (_kind) {
+          'event' => 'New event',
+          'poll' => 'New poll',
+          'life_event' => 'Life event',
+          'recommend' => 'Ask for recommendations',
+          _ => 'New post',
+        }),
         actions: [
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'draft') _saveDraft();
               if (v == 'schedule') _schedule();
               if (v == 'drafts') context.push('/drafts');
+              if (v == 'reshare') setState(() => _allowReshare = !_allowReshare);
             },
             itemBuilder: (_) => [
               PopupMenuItem(value: 'draft', enabled: _canPost, child: const Text('Save as draft')),
               PopupMenuItem(value: 'schedule', enabled: _canPost, child: const Text('Schedule…')),
               const PopupMenuItem(value: 'drafts', child: Text('Drafts and scheduled')),
+              const PopupMenuDivider(),
+              CheckedPopupMenuItem(
+                value: 'reshare',
+                checked: _allowReshare,
+                child: const Text('Others may share this to their spheres'),
+              ),
             ],
           ),
           Padding(
@@ -377,6 +618,52 @@ class _ComposeScreenState extends State<ComposeScreen> {
                                     _payload = null;
                                   })),
                         ),
+                      if (_kind == 'life_event' && _payload != null)
+                        ListTile(
+                          leading: Icon(Icons.flag_outlined, color: cs.primary),
+                          title: Text(_payload!['title'] as String? ?? 'Life event'),
+                          subtitle: Text('${_payload!['date'] ?? ''}'),
+                          trailing: IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => setState(() {
+                                    _kind = 'post';
+                                    _payload = null;
+                                  })),
+                        ),
+                      if (_kind == 'recommend' && _payload != null)
+                        ListTile(
+                          leading: Icon(Icons.lightbulb_outline, color: cs.primary),
+                          title: Text(_payload!['question'] as String? ?? 'Recommendations'),
+                          subtitle: const Text('Members answer with one suggestion each'),
+                          trailing: IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => setState(() {
+                                    _kind = 'post';
+                                    _payload = null;
+                                  })),
+                        ),
+                      if (_feeling != null || _activity != null || _background != null)
+                        Wrap(spacing: 8, children: [
+                          if (_feeling != null || _activity != null)
+                            InputChip(
+                              label: Text(Feelings.line(_fullPayload)),
+                              onDeleted: () => setState(() {
+                                _feeling = null;
+                                _activity = null;
+                              }),
+                            ),
+                          if (_background != null)
+                            InputChip(
+                              avatar: Container(
+                                width: 16, height: 16,
+                                decoration: BoxDecoration(
+                                    gradient: LinearGradient(colors: PostBackgrounds.all[_background]!),
+                                    shape: BoxShape.circle),
+                              ),
+                              label: Text(_media.isEmpty ? 'Background' : 'Background (text only)'),
+                              onDeleted: () => setState(() => _background = null),
+                            ),
+                        ]),
                       if (_kind == 'poll' && _payload != null)
                         ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -454,6 +741,26 @@ class _ComposeScreenState extends State<ComposeScreen> {
                         onPressed: _posting ? null : _makePoll,
                       ),
                       IconButton(
+                        tooltip: 'Feeling or activity',
+                        icon: Icon(Icons.emoji_emotions_outlined, color: Colors.amber[700]),
+                        onPressed: _posting ? null : _pickFeeling,
+                      ),
+                      IconButton(
+                        tooltip: 'Background',
+                        icon: Icon(Icons.format_color_fill, color: cs.tertiary),
+                        onPressed: _posting ? null : _pickBackground,
+                      ),
+                      IconButton(
+                        tooltip: 'Life event',
+                        icon: Icon(Icons.flag_outlined, color: cs.primary),
+                        onPressed: _posting ? null : _makeLifeEvent,
+                      ),
+                      IconButton(
+                        tooltip: 'Ask for recommendations',
+                        icon: Icon(Icons.lightbulb_outline, color: cs.primary),
+                        onPressed: _posting ? null : _makeRecommend,
+                      ),
+                      IconButton(
                         tooltip: 'Co-authors',
                         icon: Icon(Icons.group_add_outlined, color: cs.primary),
                         onPressed: _posting || _targets.isEmpty ? null : _pickCoAuthors,
@@ -502,6 +809,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
           return Stack(
             children: [
               GestureDetector(
+                onTap: () => _editMedia(path),
                 onLongPress: () => _editAltText(path),
                 child: Stack(children: [
                   MediaThumb(
@@ -509,6 +817,19 @@ class _ComposeScreenState extends State<ComposeScreen> {
                     width: 120,
                     height: 120,
                     borderRadius: BorderRadius.circular(12),
+                  ),
+                  Positioned(
+                    left: 4,
+                    top: 4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                      child: Icon(
+                        MediaService.looksLikeVideo(path) ? Icons.content_cut : Icons.tune,
+                        size: 14,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                   if (_altTexts[path]?.isNotEmpty == true)
                     const Positioned(
