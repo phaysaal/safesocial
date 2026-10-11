@@ -64,6 +64,8 @@ class SecureStore {
     'spheres_sphere_chats_v1',
     'spheres_feed_posts',
     'spheres_hidden_posts',
+    'spheres_post_watch_v1',
+    'spheres_post_mute_v1',
     'spheres_spheres_v1',
     'spheres_keyring_v1',
     'spheres_devices_v1',

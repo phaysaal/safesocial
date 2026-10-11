@@ -60,6 +60,10 @@ class Post with EquatableMixin {
   final List<String> coAuthors;
   final List<String> acceptedCoAuthors;
 
+  /// The author closed comments. Existing comments stay; new ones are refused
+  /// on receipt and the composer says so.
+  final bool commentsOff;
+
   // Not const: sphereIds defaults to a set built from sphereId.
   Post({
     required this.id,
@@ -83,7 +87,15 @@ class Post with EquatableMixin {
     this.provenance = const [],
     this.coAuthors = const [],
     this.acceptedCoAuthors = const [],
+    this.commentsOff = false,
   }) : sphereIds = sphereIds ?? {sphereId};
+
+  /// Comments that are shown to [viewer]: a hidden one is still shown to the
+  /// person who wrote it, as on most networks, and to whoever can unhide it.
+  List<Comment> visibleComments(String? viewer, {bool moderator = false}) =>
+      comments
+          .where((c) => !c.hidden || moderator || c.authorId == viewer)
+          .toList();
 
   bool get isEvent => kind == 'event';
   bool get isPoll => kind == 'poll';
@@ -133,6 +145,7 @@ class Post with EquatableMixin {
       coAuthors: (json['coAuthors'] as List<dynamic>?)?.cast<String>() ?? const [],
       acceptedCoAuthors:
           (json['acceptedCoAuthors'] as List<dynamic>?)?.cast<String>() ?? const [],
+      commentsOff: json['commentsOff'] == true,
     );
   }
 
@@ -160,6 +173,7 @@ class Post with EquatableMixin {
         'provenance': MediaProvenance.listToJson(provenance),
       if (coAuthors.isNotEmpty) 'coAuthors': coAuthors,
       if (acceptedCoAuthors.isNotEmpty) 'acceptedCoAuthors': acceptedCoAuthors,
+      if (commentsOff) 'commentsOff': true,
     };
   }
 
@@ -197,6 +211,7 @@ class Post with EquatableMixin {
     List<MediaProvenance?>? provenance,
     List<String>? coAuthors,
     List<String>? acceptedCoAuthors,
+    bool? commentsOff,
   }) {
     return Post(
       id: id ?? this.id,
@@ -220,6 +235,7 @@ class Post with EquatableMixin {
       provenance: provenance ?? this.provenance,
       coAuthors: coAuthors ?? this.coAuthors,
       acceptedCoAuthors: acceptedCoAuthors ?? this.acceptedCoAuthors,
+      commentsOff: commentsOff ?? this.commentsOff,
     );
   }
 
@@ -246,6 +262,7 @@ class Post with EquatableMixin {
         provenance,
         coAuthors,
         acceptedCoAuthors,
+        commentsOff,
       ];
 }
 
@@ -302,6 +319,22 @@ class Comment with EquatableMixin {
   final DateTime createdAt;
   final String? replyToId;
 
+  /// When the author last changed the text; null if never.
+  final DateTime? editedAt;
+
+  /// Every earlier text, oldest first, so an edit is not a way to rewrite
+  /// what people already answered.
+  final List<String> history;
+
+  final List<Reaction> reactions;
+
+  /// Hidden by the post's author or a sphere admin. Still shown to its own
+  /// author and to moderators; others see that something was hidden.
+  final bool hidden;
+
+  /// Pinned by the post's author or an admin: shown first.
+  final bool pinned;
+
   const Comment({
     required this.id,
     required this.authorId,
@@ -309,7 +342,17 @@ class Comment with EquatableMixin {
     required this.text,
     required this.createdAt,
     this.replyToId,
+    this.editedAt,
+    this.history = const [],
+    this.reactions = const [],
+    this.hidden = false,
+    this.pinned = false,
   });
+
+  bool get isEdited => editedAt != null;
+
+  bool hasReactionFrom(String? identityKey, String emoji) =>
+      reactions.any((r) => r.reactorId == identityKey && r.emoji == emoji);
 
   factory Comment.fromJson(Map<String, dynamic> json) {
     return Comment(
@@ -319,6 +362,20 @@ class Comment with EquatableMixin {
       text: json['text'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
       replyToId: json['replyToId'] as String?,
+      editedAt: json['editedAt'] is String
+          ? DateTime.tryParse(json['editedAt'] as String)
+          : null,
+      history: (json['history'] as List<dynamic>?)
+              ?.whereType<String>()
+              .toList() ??
+          const [],
+      reactions: (json['reactions'] as List<dynamic>?)
+              ?.whereType<Map>()
+              .map((e) => Reaction.fromJson(e.cast<String, dynamic>()))
+              .toList() ??
+          const [],
+      hidden: json['hidden'] == true,
+      pinned: json['pinned'] == true,
     );
   }
 
@@ -330,10 +387,86 @@ class Comment with EquatableMixin {
       'text': text,
       'createdAt': createdAt.toIso8601String(),
       'replyToId': replyToId,
+      if (editedAt != null) 'editedAt': editedAt!.toIso8601String(),
+      if (history.isNotEmpty) 'history': history,
+      if (reactions.isNotEmpty)
+        'reactions': reactions.map((r) => r.toJson()).toList(),
+      if (hidden) 'hidden': true,
+      if (pinned) 'pinned': true,
     };
   }
 
+  Comment copyWith({
+    String? text,
+    DateTime? editedAt,
+    List<String>? history,
+    List<Reaction>? reactions,
+    bool? hidden,
+    bool? pinned,
+  }) {
+    return Comment(
+      id: id,
+      authorId: authorId,
+      authorName: authorName,
+      text: text ?? this.text,
+      createdAt: createdAt,
+      replyToId: replyToId,
+      editedAt: editedAt ?? this.editedAt,
+      history: history ?? this.history,
+      reactions: reactions ?? this.reactions,
+      hidden: hidden ?? this.hidden,
+      pinned: pinned ?? this.pinned,
+    );
+  }
+
   @override
-  List<Object?> get props =>
-      [id, authorId, authorName, text, createdAt, replyToId];
+  List<Object?> get props => [
+        id,
+        authorId,
+        authorName,
+        text,
+        createdAt,
+        replyToId,
+        editedAt,
+        history,
+        reactions,
+        hidden,
+        pinned,
+      ];
+}
+
+/// The reactions a person can leave on a post or a comment. One list for
+/// both, so every picker and every count row reads the same set.
+class ReactionKinds {
+  ReactionKinds._();
+
+  static const List<(String, String)> all = [
+    ('👍', 'Like'),
+    ('❤️', 'Love'),
+    ('🤗', 'Care'),
+    ('✅', 'Agree'),
+    ('❌', 'Disagree'),
+    ('😢', 'Sad'),
+    ('😮', 'Wow'),
+  ];
+
+  static bool contains(String emoji) => all.any((k) => k.$1 == emoji);
+
+  static String labelFor(String emoji) {
+    for (final k in all) {
+      if (k.$1 == emoji) return k.$2;
+    }
+    return emoji;
+  }
+
+  /// Counts per emoji, most used first.
+  static Map<String, int> tally(Iterable<Reaction> reactions) {
+    final counts = <String, int>{};
+    for (final r in reactions) {
+      counts[r.emoji] = (counts[r.emoji] ?? 0) + 1;
+    }
+    return Map.fromEntries(
+      counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value)),
+    );
+  }
 }

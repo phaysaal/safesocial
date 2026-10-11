@@ -732,6 +732,7 @@ class FeedService extends ChangeNotifier {
 
   Future<void> loadPosts() async {
     await _loadPins();
+    await _loadPostNotificationPrefs();
     try {
       final draftsRaw = await SecureStore.instance.getString(_draftsKey);
       if (draftsRaw != null) {
@@ -905,149 +906,245 @@ class FeedService extends ChangeNotifier {
         sealed: data,
       );
 
-      if (json['type'] is String && (json['type'] as String).startsWith('sphere_msg')) {
-        // The group conversation and everything about it: messages, edits,
-        // unsends, pins, votes, read receipts, timer changes.
-        await onSphereMessage?.call(
-            authorId, opened.sphereId, json as Map<String, dynamic>);
-        return;
-      }
-
-      if (json['type'] == 'album_add') {
-        // Album items ride the same per-member channels as feed content.
-        await onAlbumItem?.call(data);
-        return;
-      }
-
-      if (json['type'] == 'post') {
-        final post = await _decodePostMedia(Post.fromJson(json['post']));
-
-        // Authorship and audience both come from the verified envelope, not
-        // from fields in the payload that the sender could set freely.
-        if (post.authorId != authorId || post.sphereId != opened.sphereId) {
-          DebugLogService().warn(
-              'Feed', 'Dropping post: payload disagrees with signed envelope');
-          return;
-        }
-        _mergePost(post);
-      } else if (json['type'] == 'event_rsvp') {
-        final index = _posts.indexWhere((p) => p.id == json['post_id']);
-        if (index != -1 && _posts[index].isEvent) {
-          _applyRsvp(index, authorId, json['status'] as String? ?? '');
-        }
-      } else if (json['type'] == 'post_vote') {
-        final index = _posts.indexWhere((p) => p.id == json['post_id']);
-        if (index != -1 && _posts[index].isPoll) {
-          _applyPostVote(index, authorId,
-              (json['choices'] as List?)?.whereType<int>().toList() ?? const []);
-        }
-      } else if (json['type'] == 'coauthor_accept') {
-        final index = _posts.indexWhere((p) => p.id == json['post_id']);
-        if (index != -1) _applyCoAuthor(index, authorId);
-      } else if (json['type'] == 'report') {
-        // Only admins of that sphere keep reports; everyone else drops them.
-        final sphere = spheres.sphere(opened.sphereId);
-        final me = _myPublicKey;
-        if (sphere != null && me != null && sphere.isAdmin(me)) {
-          final list = _reports.putIfAbsent(opened.sphereId, () => []);
-          list.add({
-            'post_id': json['post_id'],
-            'reason': json['reason'],
-            'by': authorId,
-            'at': DateTime.now().toIso8601String(),
-          });
-          await SecureStore.instance.setString(_reportsKey, jsonEncode(_reports));
-          notifyListeners();
-          InboundEvents.emit(InboundEvent(
-            kind: InboundKind.post,
-            id: 'report:${json['post_id']}:$authorId',
-            title: sphere.name,
-            body: 'A post was reported to the admins',
-            route: '/sphere/${opened.sphereId}',
-            thread: 'sphere:${opened.sphereId}',
-          ));
-        }
-      } else if (json['type'] == 'post_edit') {
-        final postId = json['post_id'] as String;
-        final index = _posts.indexWhere((p) => p.id == postId);
-        if (index == -1) return;
-        // Only the author, as proven by the signature, may change the text.
-        if (_posts[index].authorId != authorId) {
-          DebugLogService().warn('Feed', 'Dropping edit from a non-author');
-          return;
-        }
-        final editedAt = DateTime.tryParse(json['edited_at'] as String? ?? '');
-        _posts[index] = _posts[index].copyWith(
-          content: json['content'] as String? ?? _posts[index].content,
-          editedAt: editedAt ?? DateTime.now(),
-        );
-        await _persistPosts();
-        notifyListeners();
-      } else if (json['type'] == 'post_pin') {
-        final sphere = spheres.sphere(opened.sphereId);
-        if (sphere == null || !sphere.isAdmin(authorId)) {
-          DebugLogService().warn('Feed', 'Dropping pin from a non-admin');
-          return;
-        }
-        final postId = json['post_id'];
-        if (postId is String) {
-          _applyPin(opened.sphereId, postId, json['pinned'] == true);
-        }
-      } else if (json['type'] == 'like') {
-        final postId = json['post_id'] as String;
-        final liked = json['liked'] as bool;
-        final index = _posts.indexWhere((p) => p.id == postId);
-        if (index == -1) return;
-        final post = _posts[index];
-        final newLikes = List<String>.from(post.likes);
-        if (liked) {
-          if (!newLikes.contains(authorId)) newLikes.add(authorId);
-        } else {
-          newLikes.remove(authorId);
-        }
-        _posts[index] = post.copyWith(likes: newLikes);
-        _persistPosts();
-        notifyListeners();
-      } else if (json['type'] == 'story_view') {
-        final postId = json['post_id'] as String;
-        final index = _posts.indexWhere((p) => p.id == postId);
-        // Only meaningful on our own story, and each viewer counts once.
-        if (index != -1 &&
-            _posts[index].authorId == _myPublicKey &&
-            !_posts[index].viewedBy.contains(authorId)) {
-          _posts[index] = _posts[index]
-              .copyWith(viewedBy: [..._posts[index].viewedBy, authorId]);
-          await _persistPosts();
-          notifyListeners();
-        }
-      } else if (json['type'] == 'comment') {
-        final comment = Comment.fromJson(json['comment']);
-        if (comment.authorId != authorId) {
-          DebugLogService()
-              .warn('Feed', 'Dropping comment: author disagrees with signature');
-          return;
-        }
-        _applyComment(json['post_id'] as String, comment);
-      } else if (json['type'] == 'reaction') {
-        final postId = json['post_id'] as String;
-        final emoji = json['emoji'] as String;
-        final index = _posts.indexWhere((p) => p.id == postId);
-        if (index == -1) return;
-        final post = _posts[index];
-        final newReactions = List<Reaction>.from(post.reactions);
-        final existing = newReactions.indexWhere(
-            (r) => r.reactorId == authorId && r.emoji == emoji);
-        if (existing != -1) {
-          newReactions.removeAt(existing);
-        } else {
-          newReactions.add(Reaction(reactorId: authorId, emoji: emoji, timestamp: DateTime.now()));
-        }
-        _posts[index] = post.copyWith(reactions: newReactions);
-        _persistPosts();
-        notifyListeners();
-      }
+      await applyFeedJson(
+        authorId: authorId,
+        sphereId: opened.sphereId,
+        json: (json as Map).cast<String, dynamic>(),
+        sealed: data,
+      );
     } catch (e) {
       DebugLogService().warn('Feed', 'Rejected feed item from $contactKey: $e');
+    }
+  }
+
+  /// Apply one verified feed item. [authorId] and [sphereId] come from the
+  /// opened envelope, never from the payload, so every rule below ("only the
+  /// author", "only an admin") is a rule about who signed. Public so tests can
+  /// state who signed without sealing as a third party.
+  @visibleForTesting
+  Future<void> applyFeedJson({
+    required String authorId,
+    required String sphereId,
+    required Map<String, dynamic> json,
+    String sealed = '',
+  }) async {
+    final spheres = _spheres;
+    if (spheres == null) return;
+
+      if (json['type'] is String && (json['type'] as String).startsWith('sphere_msg')) {
+      // The group conversation and everything about it: messages, edits,
+      // unsends, pins, votes, read receipts, timer changes.
+      await onSphereMessage?.call(
+          authorId, sphereId, json);
+      return;
+    }
+
+    if (json['type'] == 'album_add') {
+      // Album items ride the same per-member channels as feed content.
+      await onAlbumItem?.call(sealed);
+      return;
+    }
+
+    if (json['type'] == 'post') {
+      final post = await _decodePostMedia(Post.fromJson(json['post']));
+
+      // Authorship and audience both come from the verified envelope, not
+      // from fields in the payload that the sender could set freely.
+      if (post.authorId != authorId || post.sphereId != sphereId) {
+        DebugLogService().warn(
+            'Feed', 'Dropping post: payload disagrees with signed envelope');
+        return;
+      }
+      _mergePost(post);
+    } else if (json['type'] == 'event_rsvp') {
+      final index = _posts.indexWhere((p) => p.id == json['post_id']);
+      if (index != -1 && _posts[index].isEvent) {
+        _applyRsvp(index, authorId, json['status'] as String? ?? '');
+      }
+    } else if (json['type'] == 'post_vote') {
+      final index = _posts.indexWhere((p) => p.id == json['post_id']);
+      if (index != -1 && _posts[index].isPoll) {
+        _applyPostVote(index, authorId,
+            (json['choices'] as List?)?.whereType<int>().toList() ?? const []);
+      }
+    } else if (json['type'] == 'coauthor_accept') {
+      final index = _posts.indexWhere((p) => p.id == json['post_id']);
+      if (index != -1) _applyCoAuthor(index, authorId);
+    } else if (json['type'] == 'report') {
+      // Only admins of that sphere keep reports; everyone else drops them.
+      final sphere = spheres.sphere(sphereId);
+      final me = _myPublicKey;
+      if (sphere != null && me != null && sphere.isAdmin(me)) {
+        final list = _reports.putIfAbsent(sphereId, () => []);
+        list.add({
+          'post_id': json['post_id'],
+          'reason': json['reason'],
+          'by': authorId,
+          'at': DateTime.now().toIso8601String(),
+        });
+        await SecureStore.instance.setString(_reportsKey, jsonEncode(_reports));
+        notifyListeners();
+        InboundEvents.emit(InboundEvent(
+          kind: InboundKind.post,
+          id: 'report:${json['post_id']}:$authorId',
+          title: sphere.name,
+          body: 'A post was reported to the admins',
+          route: '/sphere/${sphereId}',
+          thread: 'sphere:${sphereId}',
+        ));
+      }
+    } else if (json['type'] == 'post_edit') {
+      final postId = json['post_id'] as String;
+      final index = _posts.indexWhere((p) => p.id == postId);
+      if (index == -1) return;
+      // Only the author, as proven by the signature, may change the text.
+      if (_posts[index].authorId != authorId) {
+        DebugLogService().warn('Feed', 'Dropping edit from a non-author');
+        return;
+      }
+      final editedAt = DateTime.tryParse(json['edited_at'] as String? ?? '');
+      _posts[index] = _posts[index].copyWith(
+        content: json['content'] as String? ?? _posts[index].content,
+        editedAt: editedAt ?? DateTime.now(),
+      );
+      await _persistPosts();
+      notifyListeners();
+    } else if (json['type'] == 'post_pin') {
+      final sphere = spheres.sphere(sphereId);
+      if (sphere == null || !sphere.isAdmin(authorId)) {
+        DebugLogService().warn('Feed', 'Dropping pin from a non-admin');
+        return;
+      }
+      final postId = json['post_id'];
+      if (postId is String) {
+        _applyPin(sphereId, postId, json['pinned'] == true);
+      }
+    } else if (json['type'] == 'like') {
+      final postId = json['post_id'] as String;
+      final liked = json['liked'] as bool;
+      final index = _posts.indexWhere((p) => p.id == postId);
+      if (index == -1) return;
+      final post = _posts[index];
+      final newLikes = List<String>.from(post.likes);
+      if (liked) {
+        if (!newLikes.contains(authorId)) newLikes.add(authorId);
+      } else {
+        newLikes.remove(authorId);
+      }
+      _posts[index] = post.copyWith(likes: newLikes);
+      _persistPosts();
+      notifyListeners();
+    } else if (json['type'] == 'story_view') {
+      final postId = json['post_id'] as String;
+      final index = _posts.indexWhere((p) => p.id == postId);
+      // Only meaningful on our own story, and each viewer counts once.
+      if (index != -1 &&
+          _posts[index].authorId == _myPublicKey &&
+          !_posts[index].viewedBy.contains(authorId)) {
+        _posts[index] = _posts[index]
+            .copyWith(viewedBy: [..._posts[index].viewedBy, authorId]);
+        await _persistPosts();
+        notifyListeners();
+      }
+    } else if (json['type'] == 'comment') {
+      final comment = Comment.fromJson(json['comment']);
+      if (comment.authorId != authorId) {
+        DebugLogService()
+            .warn('Feed', 'Dropping comment: author disagrees with signature');
+        return;
+      }
+      final postId = json['post_id'] as String;
+      final target = _posts.where((p) => p.id == postId).firstOrNull;
+      // A closed post takes no new comments from anyone but its author; a
+      // peer that missed the setting still cannot get one in.
+      if (target != null && target.commentsOff && target.authorId != authorId) {
+        DebugLogService().info('Feed', 'Dropping comment: comments are off');
+        return;
+      }
+      // Hidden, pinned and reactions are decided by other envelopes, not
+      // claimed by the comment itself.
+      _applyComment(postId,
+          comment.copyWith(hidden: false, pinned: false, reactions: const []));
+    } else if (json['type'] == 'reaction') {
+      final postId = json['post_id'] as String;
+      final emoji = json['emoji'] as String;
+      final index = _posts.indexWhere((p) => p.id == postId);
+      if (index == -1) return;
+      final post = _posts[index];
+      final newReactions = List<Reaction>.from(post.reactions);
+      final existing = newReactions.indexWhere(
+          (r) => r.reactorId == authorId && r.emoji == emoji);
+      if (existing != -1) {
+        newReactions.removeAt(existing);
+      } else {
+        newReactions.add(Reaction(reactorId: authorId, emoji: emoji, timestamp: DateTime.now()));
+        _notifyReaction(postId, authorId, emoji, onComment: false,
+            target: post.authorId);
+      }
+      _posts[index] = post.copyWith(reactions: newReactions);
+      _persistPosts();
+      notifyListeners();
+    } else if (json['type'] == 'comment_edit') {
+      final postId = json['post_id'];
+      final commentId = json['comment_id'];
+      final text = json['text'];
+      if (postId is! String || commentId is! String || text is! String) return;
+      final at = DateTime.tryParse(json['edited_at'] as String? ?? '');
+      _updateComment(postId, commentId, (post, c) {
+        if (c.authorId != authorId) {
+          DebugLogService().warn('Feed', 'Dropping comment edit from a non-author');
+          return null;
+        }
+        return _editedComment(c, text, at ?? DateTime.now());
+      });
+    } else if (json['type'] == 'comment_delete') {
+      final postId = json['post_id'];
+      final commentId = json['comment_id'];
+      if (postId is! String || commentId is! String) return;
+      _removeComment(postId, commentId, (post, c) =>
+          c.authorId == authorId || _moderates(spheres, post, authorId));
+    } else if (json['type'] == 'comment_hide' || json['type'] == 'comment_pin') {
+      final postId = json['post_id'];
+      final commentId = json['comment_id'];
+      if (postId is! String || commentId is! String) return;
+      final hide = json['type'] == 'comment_hide';
+      final flag = json[hide ? 'hidden' : 'pinned'] == true;
+      _updateComment(postId, commentId, (post, c) {
+        if (!_moderates(spheres, post, authorId)) {
+          DebugLogService().warn('Feed', 'Dropping ${json['type']} from a non-moderator');
+          return null;
+        }
+        return hide ? c.copyWith(hidden: flag) : c.copyWith(pinned: flag);
+      });
+    } else if (json['type'] == 'comment_react') {
+      final postId = json['post_id'];
+      final commentId = json['comment_id'];
+      final emoji = json['emoji'];
+      if (postId is! String || commentId is! String || emoji is! String) return;
+      if (!ReactionKinds.contains(emoji)) return;
+      _updateComment(postId, commentId, (post, c) {
+        final toggled = _toggledReaction(c.reactions, authorId, emoji);
+        if (toggled.length > c.reactions.length) {
+          _notifyReaction(postId, authorId, emoji, onComment: true,
+              target: c.authorId);
+        }
+        return c.copyWith(reactions: toggled);
+      });
+    } else if (json['type'] == 'post_settings') {
+      final postId = json['post_id'];
+      if (postId is! String) return;
+      final index = _posts.indexWhere((p) => p.id == postId);
+      if (index == -1) return;
+      if (_posts[index].authorId != authorId) {
+        DebugLogService().warn('Feed', 'Dropping post settings from a non-author');
+        return;
+      }
+      if (json.containsKey('comments_off')) {
+        _posts[index] =
+            _posts[index].copyWith(commentsOff: json['comments_off'] == true);
+        await _persistPosts();
+        notifyListeners();
+      }
     }
   }
 
@@ -1305,24 +1402,248 @@ class FeedService extends ChangeNotifier {
     _persistPosts();
     notifyListeners();
 
-    // Notify the people in the conversation: the author of the post, and
-    // anyone who has commented on it — not the whole sphere.
+    // Notify the people in the conversation: the author of the post, anyone
+    // who has commented on it, and anyone who asked to follow it — not the
+    // whole sphere, and nobody who asked to stop hearing about it.
     final me = _myPublicKey;
-    final involved = post.authorId == me ||
-        post.comments.any((c) => c.authorId == me);
-    if (me != null && comment.authorId != me && involved) {
+    final wants = postNotifies(post);
+    if (me != null && comment.authorId != me && wants) {
       final name = comment.authorName.trim().isNotEmpty
           ? comment.authorName
           : (resolveName?.call(comment.authorId) ?? 'Someone');
+      final parent = comment.replyToId == null
+          ? null
+          : post.comments.where((c) => c.id == comment.replyToId).firstOrNull;
+      final toMe = parent != null && parent.authorId == me;
       InboundEvents.emit(InboundEvent(
         kind: InboundKind.comment,
         id: 'comment:${comment.id}',
-        title: name,
+        title: toMe ? '$name replied to your comment' : name,
         body: comment.text,
         route: '/post/$postId',
         thread: 'post:$postId',
       ));
     }
+  }
+
+  // ── Comments: edit, delete, hide, pin, react; comments off ─────────────
+
+  /// Whether [who] may hide, pin or delete comments on [post]: its author, or
+  /// an admin of the sphere it is in.
+  bool _moderates(SphereService spheres, Post post, String who) =>
+      post.authorId == who || (spheres.sphere(post.sphereId)?.isAdmin(who) ?? false);
+
+  /// For the UI: can we moderate the comments on this post?
+  bool canModerateComments(Post post) {
+    final me = _myPublicKey;
+    final spheres = _spheres;
+    if (me == null || spheres == null) return false;
+    return _moderates(spheres, post, me);
+  }
+
+  static Comment _editedComment(Comment c, String text, DateTime at) =>
+      c.copyWith(text: text, editedAt: at, history: [...c.history, c.text]);
+
+  static List<Reaction> _toggledReaction(
+      List<Reaction> reactions, String who, String emoji) {
+    final next = List<Reaction>.from(reactions);
+    final existing =
+        next.indexWhere((r) => r.reactorId == who && r.emoji == emoji);
+    if (existing != -1) {
+      next.removeAt(existing);
+    } else {
+      // One reaction per person, as on a post.
+      next.removeWhere((r) => r.reactorId == who);
+      next.add(Reaction(reactorId: who, emoji: emoji, timestamp: DateTime.now()));
+    }
+    return next;
+  }
+
+  /// Replace one comment. [change] returns the new comment, or null to leave
+  /// it alone (the usual reason: the signer may not do this).
+  bool _updateComment(String postId, String commentId,
+      Comment? Function(Post post, Comment c) change) {
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return false;
+    final post = _posts[index];
+    final ci = post.comments.indexWhere((c) => c.id == commentId);
+    if (ci == -1) return false;
+    final changed = change(post, post.comments[ci]);
+    if (changed == null) return false;
+    final comments = List<Comment>.from(post.comments);
+    comments[ci] = changed;
+    _posts[index] = post.copyWith(comments: comments);
+    _persistPosts();
+    notifyListeners();
+    return true;
+  }
+
+  bool _removeComment(String postId, String commentId,
+      bool Function(Post post, Comment c) allowed) {
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return false;
+    final post = _posts[index];
+    final ci = post.comments.indexWhere((c) => c.id == commentId);
+    if (ci == -1) return false;
+    if (!allowed(post, post.comments[ci])) {
+      DebugLogService().warn('Feed', 'Dropping comment delete: not allowed');
+      return false;
+    }
+    // Replies to it stay; the thread helper shows them at the top level.
+    _posts[index] = post.copyWith(
+        comments: post.comments.where((c) => c.id != commentId).toList());
+    _persistPosts();
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> _sendCommentOp(String postId, String type,
+      Map<String, Object?> fields) async {
+    final post = _posts.where((p) => p.id == postId).firstOrNull;
+    if (post == null) return;
+    await _publishToSphere(
+      sphereId: post.sphereId,
+      type: type,
+      payloadJson: jsonEncode({'type': type, 'post_id': postId, ...fields}),
+    );
+  }
+
+  /// Change the text of our own comment. Everyone keeps the earlier text.
+  Future<void> editComment(String postId, String commentId, String text) async {
+    final me = _myPublicKey;
+    if (me == null || text.trim().isEmpty) return;
+    final at = DateTime.now();
+    final ok = _updateComment(postId, commentId,
+        (post, c) => c.authorId == me ? _editedComment(c, text, at) : null);
+    if (!ok) return;
+    await _sendCommentOp(postId, 'comment_edit', {
+      'comment_id': commentId,
+      'text': text,
+      'edited_at': at.toIso8601String(),
+    });
+  }
+
+  /// Remove a comment: our own, or any comment on a post we moderate.
+  Future<void> deleteComment(String postId, String commentId) async {
+    final me = _myPublicKey;
+    final spheres = _spheres;
+    if (me == null || spheres == null) return;
+    final ok = _removeComment(postId, commentId,
+        (post, c) => c.authorId == me || _moderates(spheres, post, me));
+    if (!ok) return;
+    await _sendCommentOp(postId, 'comment_delete', {'comment_id': commentId});
+  }
+
+  Future<void> setCommentHidden(
+      String postId, String commentId, bool hidden) async {
+    final me = _myPublicKey;
+    final spheres = _spheres;
+    if (me == null || spheres == null) return;
+    final ok = _updateComment(postId, commentId, (post, c) =>
+        _moderates(spheres, post, me) ? c.copyWith(hidden: hidden) : null);
+    if (!ok) return;
+    await _sendCommentOp(postId, 'comment_hide',
+        {'comment_id': commentId, 'hidden': hidden});
+  }
+
+  Future<void> setCommentPinned(
+      String postId, String commentId, bool pinned) async {
+    final me = _myPublicKey;
+    final spheres = _spheres;
+    if (me == null || spheres == null) return;
+    final ok = _updateComment(postId, commentId, (post, c) =>
+        _moderates(spheres, post, me) ? c.copyWith(pinned: pinned) : null);
+    if (!ok) return;
+    await _sendCommentOp(postId, 'comment_pin',
+        {'comment_id': commentId, 'pinned': pinned});
+  }
+
+  Future<void> reactToComment(
+      String postId, String commentId, String emoji) async {
+    final me = _myPublicKey;
+    if (me == null || !ReactionKinds.contains(emoji)) return;
+    final ok = _updateComment(postId, commentId,
+        (post, c) => c.copyWith(reactions: _toggledReaction(c.reactions, me, emoji)));
+    if (!ok) return;
+    await _sendCommentOp(postId, 'comment_react',
+        {'comment_id': commentId, 'emoji': emoji});
+  }
+
+  /// Close or reopen comments on our own post.
+  Future<void> setCommentsOff(String postId, bool off) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1 || _posts[index].authorId != me) return;
+    _posts[index] = _posts[index].copyWith(commentsOff: off);
+    await _persistPosts();
+    notifyListeners();
+    await _sendCommentOp(postId, 'post_settings', {'comments_off': off});
+  }
+
+  // ── Which posts notify us ──────────────────────────────────────────────
+
+  static const _watchedPostsKey = 'spheres_post_watch_v1';
+  static const _mutedPostsKey = 'spheres_post_mute_v1';
+
+  /// Posts we asked to hear about although we are not in the conversation,
+  /// and posts we asked to stop hearing about although we are. Local only.
+  final Set<String> _watchedPosts = {};
+  final Set<String> _mutedPosts = {};
+
+  bool isWatching(String postId) => _watchedPosts.contains(postId);
+  bool isPostMuted(String postId) => _mutedPosts.contains(postId);
+
+  /// Whether a comment or reaction on [post] would notify us by default,
+  /// before any explicit choice: we wrote it or commented on it.
+  bool _involvedIn(Post post) {
+    final me = _myPublicKey;
+    return me != null &&
+        (post.authorId == me || post.comments.any((c) => c.authorId == me));
+  }
+
+  /// What the menu shows: on when involved or watching, unless muted.
+  bool postNotifies(Post post) =>
+      !_mutedPosts.contains(post.id) &&
+      (_involvedIn(post) || _watchedPosts.contains(post.id));
+
+  Future<void> setPostNotifications(String postId, bool on) async {
+    if (on) {
+      _mutedPosts.remove(postId);
+      _watchedPosts.add(postId);
+    } else {
+      _watchedPosts.remove(postId);
+      _mutedPosts.add(postId);
+    }
+    final prefs = SecureStore.instance;
+    await prefs.setStringList(_watchedPostsKey, _watchedPosts.toList());
+    await prefs.setStringList(_mutedPostsKey, _mutedPosts.toList());
+    notifyListeners();
+  }
+
+  Future<void> _loadPostNotificationPrefs() async {
+    final prefs = SecureStore.instance;
+    _watchedPosts
+      ..clear()
+      ..addAll(await prefs.getStringList(_watchedPostsKey) ?? const []);
+    _mutedPosts
+      ..clear()
+      ..addAll(await prefs.getStringList(_mutedPostsKey) ?? const []);
+  }
+
+  void _notifyReaction(String postId, String reactor, String emoji,
+      {required bool onComment, required String target}) {
+    final me = _myPublicKey;
+    if (me == null || reactor == me || target != me) return;
+    if (_mutedPosts.contains(postId)) return;
+    final name = resolveName?.call(reactor) ?? 'Someone';
+    InboundEvents.emit(InboundEvent(
+      kind: InboundKind.reaction,
+      id: 'react:$postId:$reactor',
+      title: name,
+      body: '$emoji ${onComment ? 'on your comment' : 'on your post'}',
+      route: '/post/$postId',
+      thread: 'post:$postId',
+    ));
   }
 
   void reactToPost(String postId, String emoji) {

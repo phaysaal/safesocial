@@ -289,8 +289,23 @@ class LibraryService extends ChangeNotifier {
 
   // ── Persistence ───────────────────────────────────────────────────────────
 
+  // ── Comment order ─────────────────────────────────────────────────────
+
+  static const _commentOrderKey = 'spheres_comments_newest_v1';
+  bool _commentsNewestFirst = false;
+
+  /// Whether comment threads run newest-first. A reading preference, local.
+  bool get commentsNewestFirst => _commentsNewestFirst;
+
+  Future<void> setCommentsNewestFirst(bool newest) async {
+    _commentsNewestFirst = newest;
+    await SecureStore.instance.setString(_commentOrderKey, newest ? '1' : '0');
+    notifyListeners();
+  }
+
   Future<void> load() async {
     final store = SecureStore.instance;
+    _commentsNewestFirst = (await store.getString(_commentOrderKey)) == '1';
 
     final savedRaw = await store.getString(_savedKey);
     if (savedRaw != null) {

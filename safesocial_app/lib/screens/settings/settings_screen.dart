@@ -883,6 +883,8 @@ class SettingsScreen extends StatelessWidget {
         return 'New posts and stories';
       case InboundKind.comment:
         return 'Comments on your posts';
+      case InboundKind.reaction:
+        return 'Reactions to your posts and comments';
       case InboundKind.contactRequest:
         return 'Contact requests';
       case InboundKind.call:

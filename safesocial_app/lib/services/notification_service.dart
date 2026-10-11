@@ -168,6 +168,8 @@ class NotificationService extends ChangeNotifier {
         return 'New post';
       case InboundKind.comment:
         return 'New comment';
+      case InboundKind.reaction:
+        return 'New reaction';
       case InboundKind.contactRequest:
         return 'Wants to connect';
       case InboundKind.call:

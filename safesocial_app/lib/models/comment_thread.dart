@@ -22,7 +22,12 @@ class ThreadedComment {
 /// Only one level of indentation. A reply to a reply stays at the same depth,
 /// as in most apps: nesting further turns a conversation into a staircase and
 /// eventually runs out of screen.
-List<ThreadedComment> threadComments(List<Comment> comments) {
+///
+/// Pinned comments come first whatever the order. With [newestFirst] the
+/// top-level comments run newest to oldest; replies under each stay oldest to
+/// newest, because a conversation reads forwards.
+List<ThreadedComment> threadComments(List<Comment> comments,
+    {bool newestFirst = false}) {
   final byTime = [...comments]
     ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
@@ -53,7 +58,15 @@ List<ThreadedComment> threadComments(List<Comment> comments) {
     }
   }
 
-  for (final root in roots) {
+  if (newestFirst) {
+    final reversed = roots.reversed.toList();
+    roots
+      ..clear()
+      ..addAll(reversed);
+  }
+  final pinned = roots.where((c) => c.pinned).toList();
+  final rest = roots.where((c) => !c.pinned).toList();
+  for (final root in [...pinned, ...rest]) {
     emit(root, false);
   }
 

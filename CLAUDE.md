@@ -70,8 +70,13 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   Control traffic between devices and contacts rides small sealed envelopes: `chat_edit`,
   `chat_delete`, `chat_pin`, `chat_settings`, `read`, `poll_vote`, `location_update`,
   `profile`, `devices`, `contacts`; sphere-side equivalents are `sphere_msg_*` items and the
-  feed carries `post_edit`, `post_pin`, `event_rsvp`, `post_vote`, `coauthor_accept`,
-  `report`. Every one is attributed to the signed sender and, where it matters, checked
+  feed carries `post_edit`, `post_pin`, `post_settings` (comments off), `event_rsvp`,
+  `post_vote`, `coauthor_accept`, `report`, `comment`, `reaction`, and on comments
+  `comment_edit` (earlier text kept), `comment_delete`, `comment_hide`, `comment_pin`,
+  `comment_react`. Who may do what is decided by who signed: edits by the comment's
+  author, hide and pin by the post's author or a sphere admin, delete by either, a
+  closed post takes no comment but its author's. Which posts notify us (follow, mute)
+  is local to the device. Every one is attributed to the signed sender and, where it matters, checked
   against sphere roles on receipt. Add a new kind by extending the model, the sender, the
   switch in the receiver, and `describeMessage` for notifications.
 - **Invite links** are `spheres://join?s=&t=&via=&n=`; the request goes to the admin's open
@@ -114,7 +119,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 626 tests in 51 files under test/{crypto,models,screens,services}
+flutter test                       # 644 tests in 53 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

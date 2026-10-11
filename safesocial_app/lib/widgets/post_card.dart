@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/media_provenance.dart';
 import '../models/post.dart';
+import 'reaction_picker.dart';
 import 'author_name.dart';
 import '../models/sphere.dart';
 import '../services/contact_service.dart';
@@ -153,8 +154,21 @@ class _PostCardState extends State<PostCard> {
                       ),
                     ),
                     const PopupMenuItem(value: 'hide', child: Text('Hide post')),
-                    if (post.authorId == myKey)
+                    if (post.authorId == myKey) ...[
                       const PopupMenuItem(value: 'edit', child: Text('Edit post')),
+                      PopupMenuItem(
+                        value: 'comments',
+                        child: Text(post.commentsOff
+                            ? 'Turn comments on'
+                            : 'Turn comments off'),
+                      ),
+                    ],
+                    PopupMenuItem(
+                      value: 'notify',
+                      child: Text(context.read<FeedService>().postNotifies(post)
+                          ? 'Stop notifications for this post'
+                          : 'Notify me about this post'),
+                    ),
                     if (myKey != null &&
                         (context.read<SphereService>().sphere(post.sphereId)?.isAdmin(myKey) ??
                             false))
@@ -257,23 +271,13 @@ class _PostCardState extends State<PostCard> {
           ],
 
           // ── Like / reaction counts ─────────────────────────
-          if (post.likes.isNotEmpty || post.reactions.isNotEmpty || post.comments.isNotEmpty)
+          if (post.likes.isNotEmpty || post.reactions.isNotEmpty || post.visibleComments(myKey).isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Row(
                 children: [
                   if (post.reactions.isNotEmpty) ...[
-                    Expanded(
-                      child: Wrap(
-                        spacing: 8,
-                        children: _aggregatedReactions(post).entries.map((e) {
-                          return Text(
-                            '${e.key} ${e.value}',
-                            style: theme.textTheme.bodySmall,
-                          );
-                        }).toList(),
-                      ),
-                    ),
+                    Expanded(child: ReactionTally(reactions: post.reactions)),
                   ] else if (post.likes.isNotEmpty) ...[
                     Icon(Icons.thumb_up, size: 16, color: cs.primary),
                     const SizedBox(width: 4),
@@ -282,9 +286,9 @@ class _PostCardState extends State<PostCard> {
                   ] else ...[
                     const Spacer(),
                   ],
-                  if (post.comments.isNotEmpty)
+                  if (post.visibleComments(myKey).isNotEmpty)
                     Text(
-                      '${post.comments.length} comment${post.comments.length == 1 ? '' : 's'}',
+                      '${post.visibleComments(myKey).length} comment${post.visibleComments(myKey).length == 1 ? '' : 's'}',
                       style: theme.textTheme.bodySmall,
                     ),
                 ],
@@ -305,7 +309,12 @@ class _PostCardState extends State<PostCard> {
                 // Like button — tap to react 👍, long-press for full picker
                 Expanded(
                   child: GestureDetector(
-                    onLongPress: () => _showReactionPicker(context, post),
+                    onLongPress: () => showReactionPicker(context,
+                        current: post.reactions
+                            .where((r) => r.reactorId == myKey)
+                            .firstOrNull
+                            ?.emoji,
+                        onPick: (e) => context.read<FeedService>().reactToPost(post.id, e)),
                     child: _ActionButton(
                       icon: _selfReactionIcon(post, myKey),
                       label: _selfReactionLabel(post, myKey),
@@ -344,13 +353,13 @@ class _PostCardState extends State<PostCard> {
           ),
 
           // ── Comments preview ───────────────────────────────
-          if (post.comments.isNotEmpty)
+          if (post.visibleComments(myKey).isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final c in post.comments.reversed.take(2))
+                  for (final c in post.visibleComments(myKey).reversed.take(2))
                     Padding(
                       padding: const EdgeInsets.only(bottom: 4),
                       child: RichText(
@@ -367,13 +376,13 @@ class _PostCardState extends State<PostCard> {
                         ),
                       ),
                     ),
-                  if (post.comments.length > 2)
+                  if (post.visibleComments(myKey).length > 2)
                     GestureDetector(
                       onTap: () => _showCommentSheet(context, post),
                       child: Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
-                          'View all ${post.comments.length} comments',
+                          'View all ${post.visibleComments(myKey).length} comments',
                           style: theme.textTheme.bodySmall,
                         ),
                       ),
@@ -463,6 +472,26 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _handlePostMenu(BuildContext context, String action, Post post) {
+    if (action == 'comments') {
+      final feed = context.read<FeedService>();
+      final off = !post.commentsOff;
+      feed.setCommentsOff(post.id, off);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(off
+              ? 'Comments are off; existing ones stay'
+              : 'Comments are on again')));
+      return;
+    }
+    if (action == 'notify') {
+      final feed = context.read<FeedService>();
+      final on = !feed.postNotifies(post);
+      feed.setPostNotifications(post.id, on);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(on
+              ? 'You will be told about comments and reactions here'
+              : 'No more notifications for this post')));
+      return;
+    }
     if (action == 'save') {
       final library = context.read<LibraryService>();
       final wasSaved = library.isSaved(post.id);
@@ -556,28 +585,6 @@ class _PostCardState extends State<PostCard> {
 
   // ── Emoji / reaction helpers ──────────────────────────────
 
-  static const _reactions = [
-    ('👍', 'Like'),
-    ('❤️', 'Love'),
-    ('🤗', 'Care'),
-    ('✅', 'Agree'),
-    ('❌', 'Disagree'),
-    ('😢', 'Sad'),
-    ('😮', 'Wow'),
-  ];
-
-  Map<String, int> _aggregatedReactions(Post post) {
-    final counts = <String, int>{};
-    for (final r in post.reactions) {
-      counts[r.emoji] = (counts[r.emoji] ?? 0) + 1;
-    }
-    // Sort by count descending
-    final sorted = Map.fromEntries(
-      counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value)),
-    );
-    return sorted;
-  }
-
   bool _hasSelfReaction(Post post, String? myKey) =>
       myKey != null && post.reactions.any((r) => r.reactorId == myKey);
 
@@ -590,56 +597,9 @@ class _PostCardState extends State<PostCard> {
     final selfReaction =
         post.reactions.where((r) => r.reactorId == myKey).toList();
     if (selfReaction.isNotEmpty) {
-      final emoji = selfReaction.first.emoji;
-      final match = _reactions.where((r) => r.$1 == emoji).toList();
-      return match.isNotEmpty ? match.first.$2 : emoji;
+      return ReactionKinds.labelFor(selfReaction.first.emoji);
     }
     return 'Like';
-  }
-
-  void _showReactionPicker(BuildContext context, Post post) {
-    final cs = Theme.of(context).colorScheme;
-    final theme = Theme.of(context);
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: cs.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: _reactions
-                .map(
-                  ((String, String) reaction) => InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () {
-                      context.read<FeedService>().reactToPost(post.id, reaction.$1);
-                      Navigator.pop(ctx);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(reaction.$1, style: const TextStyle(fontSize: 26)),
-                          const SizedBox(height: 4),
-                          Text(
-                            reaction.$2,
-                            style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-      ),
-    );
   }
 
   // ── Comment sheet with reply threading ──────────────────

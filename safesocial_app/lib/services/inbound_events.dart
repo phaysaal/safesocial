@@ -1,7 +1,7 @@
 import 'dart:async';
 
 /// What kind of thing arrived.
-enum InboundKind { chat, sphereChat, post, comment, contactRequest, call, security }
+enum InboundKind { chat, sphereChat, post, comment, reaction, contactRequest, call, security }
 
 /// Something that arrived from someone else and might deserve the user's
 /// attention.
