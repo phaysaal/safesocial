@@ -100,14 +100,15 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(indent: 56),
           ListTile(
-            leading: Icon(Icons.warning_amber_outlined, color: cs.error),
+            leading: Icon(Icons.devices, color: cs.primary),
             title: const Text('Multiple Devices'),
             subtitle: const Text(
-              'Linking copies your identity to another device. Using both at '
-              'once is not supported yet — messages can arrive out of order.',
+              'Each linked device has its own key, certified by your identity. '
+              'Contacts send to every device; posts and chats reach them all. '
+              'Linked once between two phones; not yet audited.',
             ),
             isThreeLine: true,
-            trailing: Icon(Icons.error_outline, color: cs.error, size: 20),
+            trailing: Icon(Icons.check_circle, color: cs.tertiary, size: 20),
           ),
           const Divider(indent: 56),
 
@@ -644,6 +645,11 @@ class SettingsScreen extends StatelessWidget {
               controller: controller,
               maxLines: 3,
               autocorrect: false,
+              enableSuggestions: false,
+              // A base64 code is case-sensitive; the default keyboard
+              // capitalised its first letter and "corrected" the rest.
+              textCapitalization: TextCapitalization.none,
+              keyboardType: TextInputType.visiblePassword,
               decoration: const InputDecoration(labelText: 'Pairing code'),
             ),
           ],
@@ -660,10 +666,11 @@ class SettingsScreen extends StatelessWidget {
     );
 
     if (code == null || code.isEmpty) return;
-    await sync.startSecondaryLinking(code,
+    final problem = await sync.startSecondaryLinking(code,
         deviceName: 'New ${Theme.of(context).platform.name} device');
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Waiting for the other device… keep both apps open.'),
+    messenger.showSnackBar(SnackBar(
+      content: Text(problem ??
+          'Waiting for the other device… keep both apps open.'),
     ));
   }
 
@@ -1310,8 +1317,8 @@ class _PreAlphaBanner extends StatelessWidget {
             child: Text(
               'Pre-alpha build. Messages, posts, albums and calls are '
               'encrypted, local data is encrypted at rest, and backups and '
-              'recovery work — but none of this has been independently audited '
-              'and none of it has been tested between real devices. Do not rely '
+              'recovery work — but none of this has been independently audited, '
+              'and it has run between real phones only once. Do not rely '
               'on it if being read would put you at risk.',
               style: TextStyle(color: cs.onErrorContainer, fontSize: 12, height: 1.4),
             ),

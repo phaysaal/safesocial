@@ -72,9 +72,9 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
   classifier (nudity or AI-image detection; the origin score reads metadata only),
   communities as spheres of spheres, pending-post approval queues, story drawing.
-- **Still open:** the rest of the two-physical-device test (video, voice notes, view-once,
-  disappearing messages, device linking), an operator-run coturn/ntfy/APNs,
-  reproducible-build proof, external audit. See the plan's §13.
+- **Still open:** a call between phones on different networks that cannot reach each
+  other directly (needs the operator TURN), background wakes (needs ntfy), an operator-run
+  coturn/ntfy/APNs, reproducible-build proof, external audit. See the plan's §13.
 - Directory names: the app is `safesocial_app/`, the Dart package `spheres_app`, the
   product Spheres.
 
@@ -100,7 +100,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 615 tests in 49 files under test/{crypto,models,screens,services}
+flutter test                       # 618 tests in 50 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

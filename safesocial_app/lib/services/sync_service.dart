@@ -75,7 +75,11 @@ class SyncService extends ChangeNotifier {
     // deriveRelayRoomId('secondary', roomId) — two different rooms — and then
     // sent to channel keys that were never registered, so linking could never
     // complete.
-    _connectPairing(secretB64);
+    _connectPairing(secretB64).catchError((Object e) {
+      lastResult = '$e';
+      DebugLogService().error('Sync', 'Pairing mailbox not reachable: $e');
+      notifyListeners();
+    });
 
     DebugLogService().info('Sync', 'Primary linking started');
     return secretB64;
@@ -84,19 +88,42 @@ class SyncService extends ChangeNotifier {
   /// Channel key for the pairing session. Local handle only.
   static const _pairingChannel = 'device-pairing';
 
+  /// How long to wait for the relay to confirm the pairing mailbox before
+  /// giving up. Long enough for a phone whose Wi-Fi has just dropped name
+  /// resolution, short enough that a dead relay is reported, not waited on.
+  static Duration pairingConnectTimeout = const Duration(seconds: 20);
+
+  /// Subscribe to the pairing mailbox and wait until the relay has confirmed
+  /// it. Publishing before that point is refused by the hub, which is how the
+  /// first linking attempt between two phones sent its request into nothing
+  /// and then waited forever.
   Future<void> _connectPairing(String secretB64) async {
     final mailbox = await Mailbox.fromLocalSecret(
       secret: secretB64,
       purpose: 'device-pairing',
     );
+    final confirmed = Completer<void>();
+    _syncRelay.onConnected = (key) {
+      if (key == _pairingChannel && !confirmed.isCompleted) confirmed.complete();
+    };
     await _syncRelay.connectMailbox(_pairingChannel, mailbox);
+    if (_syncRelay.isConnected(_pairingChannel)) return;
+    try {
+      await confirmed.future.timeout(pairingConnectTimeout);
+    } on TimeoutException {
+      throw StateError(
+          'Could not reach the relay to start linking. Check the connection and try again.');
+    }
   }
 
   /// Start the linking process as the SECONDARY device.
   ///
   /// Generates this device's own key pair and id first, so the request can
   /// carry them and the primary can certify them.
-  Future<void> startSecondaryLinking(String secretB64,
+  /// Returns null once the request has been taken by the relay, or a message
+  /// saying why it was not, so the screen never claims to be waiting for a
+  /// device that was never asked.
+  Future<String?> startSecondaryLinking(String secretB64,
       {String deviceName = 'New device'}) async {
     _isLinking = true;
     lastResult = null;
@@ -121,7 +148,14 @@ class SyncService extends ChangeNotifier {
       _handleSecondaryHandshake(data, secretB64);
     };
 
-    await _connectPairing(secretB64);
+    try {
+      await _connectPairing(secretB64);
+    } on StateError catch (e) {
+      lastResult = e.message;
+      _isLinking = false;
+      notifyListeners();
+      return e.message;
+    }
 
     // Send join request
     final request = jsonEncode({
@@ -131,8 +165,17 @@ class SyncService extends ChangeNotifier {
       'exchange_key': exchangeKey,
     });
 
-    await _syncRelay.sendViaRelay(_pairingChannel, request);
+    final taken = await _syncRelay.sendViaRelay(_pairingChannel, request);
+    if (!taken) {
+      const why = 'The relay did not take the linking request. Try again.';
+      lastResult = why;
+      _isLinking = false;
+      notifyListeners();
+      DebugLogService().error('Sync', why);
+      return why;
+    }
     DebugLogService().info('Sync', 'Secondary linking started');
+    return null;
   }
 
   void _handlePrimaryHandshake(String data, String secretB64) async {
