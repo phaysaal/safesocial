@@ -7,7 +7,7 @@ audience: everything lives inside a *sphere*, a named group with an explicit
 membership list and its own encryption key. Your identity is a cryptographic keypair,
 not an email address or phone number.
 
-> ## ⚠️ Pre-alpha — unaudited, not yet run on real devices
+> ## ⚠️ Pre-alpha — unaudited, run on two real phones once
 >
 > Everything that crosses the network is end-to-end encrypted (X25519 key agreement,
 > HKDF, XChaCha20-Poly1305, Ed25519 signatures), local storage is encrypted at rest,
@@ -126,7 +126,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 590 tests in 46 files
+flutter test                       # 600 tests in 47 files
 flutter run
 ```
 

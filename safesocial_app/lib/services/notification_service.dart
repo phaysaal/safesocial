@@ -39,6 +39,7 @@ class NotificationService extends ChangeNotifier {
   static const _enabledKey = 'spheres_notifications_enabled';
   static const _previewKey = 'spheres_notifications_preview';
   static const _kindsKey = 'spheres_notifications_kinds';
+  static const _askedKey = 'spheres_notifications_asked';
 
   final NotificationSink _sink;
   StreamSubscription<InboundEvent>? _subscription;
@@ -64,6 +65,7 @@ class NotificationService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _enabled = prefs.getBool(_enabledKey) ?? true;
     _preview = prefs.getBool(_previewKey) ?? true;
+    _asked = prefs.getBool(_askedKey) ?? false;
     final kinds = prefs.getStringList(_kindsKey);
     if (kinds != null) {
       _kinds = kinds
@@ -81,6 +83,29 @@ class NotificationService extends ChangeNotifier {
   }
 
   Future<bool> requestPermission() => _sink.requestPermission();
+
+  bool _asked = false;
+
+  /// Whether the system has been asked for permission on this install.
+  bool get permissionAsked => _asked;
+
+  /// Ask the system once, the first time an identity exists. Android 13 and
+  /// later show nothing without this, and until it was added the only place
+  /// that asked was a toggle in Settings that nobody had reason to open.
+  /// Returns what the system answered, or null when the question had already
+  /// been put.
+  Future<bool?> ensurePermissionAsked() async {
+    if (_asked) return null;
+    _asked = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_askedKey, true);
+    try {
+      return await _sink.requestPermission();
+    } catch (e) {
+      DebugLogService().warn('Notify', 'Could not ask for permission: $e');
+      return false;
+    }
+  }
 
   Future<void> setEnabled(bool value) async {
     _enabled = value;

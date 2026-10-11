@@ -11,6 +11,7 @@ import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/library_service.dart';
+import '../../services/notification_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/sphere_chat_service.dart';
 import '../../services/sphere_sync_service.dart';
@@ -54,6 +55,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         final relay = context.read<RelayService>();
         await idService.publishProfileToRelay(relay);
       }
+      // Asked here, with an identity in hand, so the first message can show.
+      if (mounted) await context.read<NotificationService>().ensurePermissionAsked();
       if (mounted) context.go('/');
     } catch (e) {
       DebugLogService().error('Onboarding', 'Failed to create identity: $e');
@@ -148,6 +151,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   if (!mounted) return;
                   final relay = context.read<RelayService>();
                   await idService.publishProfileToRelay(relay);
+                  if (mounted) await context.read<NotificationService>().ensurePermissionAsked();
                   if (mounted) context.go('/');
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(

@@ -61,6 +61,17 @@ class SocketFactory {
 
 Future<void> settle() => Future<void>.delayed(Duration.zero);
 
+/// Publish and answer it the way the relay does: with a `sent` frame carrying
+/// the publish's id. The hub only reports success once that arrives.
+Future<bool> publishAcked(SocketFactory sockets, RelayService service,
+    String key, String payload) async {
+  final result = service.sendViaRelay(key, payload);
+  await settle();
+  final pub = sockets.current.ofType('pub').last;
+  sockets.current.receive({'t': 'sent', 'a': pub['a'], 'id': pub['id']});
+  return result;
+}
+
 void main() {
   late SocketFactory sockets;
 
@@ -181,7 +192,7 @@ void main() {
     sockets.current.receive({'t': 'ok', 'a': a.id});
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
-    expect(await chat.sendViaRelay('alice', 'x'), isTrue);
+    expect(await publishAcked(sockets, chat, 'alice', 'x'), isTrue);
     final pub = sockets.current.ofType('pub').single;
     expect(pub['a'], a.id);
     expect((pub['d'] as String).startsWith('1:x'), isTrue);
@@ -346,8 +357,62 @@ void main() {
     sockets.current.receive({'t': 'ok', 'a': a.id});
     await Future<void>.delayed(const Duration(milliseconds: 20));
 
-    expect(await chat.sendViaRelay('alice', 'hi'), isTrue);
+    expect(await publishAcked(sockets, chat, 'alice', 'hi'), isTrue);
     expect(posts, 0);
     expect(sockets.current.ofType('pub'), hasLength(1));
+  });
+
+  group('a publish is only sent once the relay says so', () {
+    late RelayService chat;
+    late Mailbox a;
+
+    setUp(() async {
+      chat = RelayService();
+      a = await mailbox('a');
+      await chat.connectMailbox('alice', a);
+      await settle();
+      sockets.current.receive({'t': 'ok', 'a': a.id});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+
+    test('a write the relay never acknowledges is reported as not sent',
+        () async {
+      final before = RelayHub.sendAckTimeout;
+      RelayHub.sendAckTimeout = const Duration(milliseconds: 60);
+      addTearDown(() => RelayHub.sendAckTimeout = before);
+
+      // The frame goes out, so a half-dead socket looks exactly like this.
+      final result = chat.sendViaRelay('alice', 'hi');
+      await settle();
+      expect(sockets.current.ofType('pub'), hasLength(1));
+      expect(await result, isFalse,
+          reason: 'the outbox must keep it and try again');
+    });
+
+    test('an error frame for the address fails the publish at once', () async {
+      final result = chat.sendViaRelay('alice', 'hi');
+      await settle();
+      sockets.current.receive({'t': 'err', 'a': a.id, 'e': 'full'});
+      expect(await result, isFalse);
+    });
+
+    test('a socket that drops mid-flight fails what was waiting', () async {
+      final result = chat.sendViaRelay('alice', 'hi');
+      await settle();
+      sockets.current.dropConnection();
+      expect(await result, isFalse);
+    });
+
+    test('acknowledgements are matched by id, not by order', () async {
+      final first = chat.sendViaRelay('alice', 'one');
+      final second = chat.sendViaRelay('alice', 'two');
+      await settle();
+      final pubs = sockets.current.ofType('pub').toList();
+      expect(pubs, hasLength(2));
+      sockets.current.receive({'t': 'sent', 'a': a.id, 'id': pubs[1]['id']});
+      expect(await second, isTrue);
+      sockets.current.receive({'t': 'sent', 'a': a.id, 'id': pubs[0]['id']});
+      expect(await first, isTrue);
+    });
   });
 }

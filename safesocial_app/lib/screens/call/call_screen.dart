@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../services/call_service.dart';
 import '../../widgets/avatar.dart';
+import 'renderer_gate.dart';
 
 /// Full-screen call UI — supports 1:1 and Group calls via a Mesh grid.
 class CallScreen extends StatefulWidget {
@@ -14,23 +15,36 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> {
+  /// Renderers are created asynchronously by the platform; every stream goes
+  /// through a gate so nothing is assigned before its renderer exists.
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
+  late final RendererGate<MediaStream> _local =
+      RendererGate(RtcVideoSink(_localRenderer));
   final Map<String, RTCVideoRenderer> _remoteRenderers = {};
+  final Map<String, RendererGate<MediaStream>> _remote = {};
 
   bool _listenerAdded = false;
 
   @override
   void initState() {
     super.initState();
-    _localRenderer.initialize();
+    _local.onReady = () {
+      if (mounted) setState(() {});
+    };
+    _local.start();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_listenerAdded) {
-      context.read<CallService>().addListener(_onCallServiceChanged);
+      final cs = context.read<CallService>();
+      cs.addListener(_onCallServiceChanged);
       _listenerAdded = true;
+      // The call may already be ringing with streams in place (the receiving
+      // side), so take the current state now rather than waiting for a change.
+      _local.attach(cs.localStream);
+      _syncRemoteRenderers(cs.remoteStreams);
     }
   }
 
@@ -39,9 +53,9 @@ class _CallScreenState extends State<CallScreen> {
     if (_listenerAdded) {
       context.read<CallService>().removeListener(_onCallServiceChanged);
     }
-    _localRenderer.dispose();
-    for (var r in _remoteRenderers.values) {
-      r.dispose();
+    _local.dispose();
+    for (final gate in _remote.values) {
+      gate.dispose();
     }
     super.dispose();
   }
@@ -56,34 +70,47 @@ class _CallScreenState extends State<CallScreen> {
       return;
     }
 
-    // Sync remote renderers whenever streams change
+    _local.attach(cs.localStream);
     _syncRemoteRenderers(cs.remoteStreams);
   }
 
-  Future<void> _syncRemoteRenderers(Map<String, MediaStream> streams) async {
-    // Add renderers for new streams
+  /// One renderer per remote stream, created once and only shown when ready.
+  void _syncRemoteRenderers(Map<String, MediaStream> streams) {
     for (final entry in streams.entries) {
-      if (!_remoteRenderers.containsKey(entry.key)) {
-        final renderer = RTCVideoRenderer();
-        await renderer.initialize();
-        renderer.srcObject = entry.value;
-        if (mounted) setState(() => _remoteRenderers[entry.key] = renderer);
+      final existing = _remote[entry.key];
+      if (existing != null) {
+        existing.attach(entry.value);
+        continue;
       }
+      final renderer = RTCVideoRenderer();
+      final gate = RendererGate<MediaStream>(RtcVideoSink(renderer))
+        ..onReady = () {
+          if (mounted) setState(() {});
+        };
+      _remoteRenderers[entry.key] = renderer;
+      _remote[entry.key] = gate;
+      gate.attach(entry.value);
+      gate.start();
     }
-    // Remove renderers for ended streams
-    final toRemove = _remoteRenderers.keys.where((k) => !streams.containsKey(k)).toList();
+    final toRemove = _remote.keys.where((k) => !streams.containsKey(k)).toList();
     for (final key in toRemove) {
-      _remoteRenderers[key]?.dispose();
-      if (mounted) setState(() => _remoteRenderers.remove(key));
+      _remote.remove(key)?.dispose();
+      _remoteRenderers.remove(key);
     }
+    if (mounted) setState(() {});
   }
+
+  /// Remote renderers that can draw right now.
+  List<RTCVideoRenderer> get _readyRemoteRenderers => [
+        for (final entry in _remote.entries)
+          if (entry.value.isReady) _remoteRenderers[entry.key]!,
+      ];
 
   @override
   Widget build(BuildContext context) {
     final callService = context.watch<CallService>();
     final isVideo = callService.callType == CallType.video;
-
-    _localRenderer.srcObject = callService.localStream;
+    final remoteReady = _readyRemoteRenderers;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -91,14 +118,14 @@ class _CallScreenState extends State<CallScreen> {
         child: Stack(
           children: [
             // ── Video Grid (Remotes) ──────────────────────────
-            if (isVideo && _remoteRenderers.isNotEmpty)
-              _buildVideoGrid()
+            if (isVideo && remoteReady.isNotEmpty)
+              _buildVideoGrid(remoteReady)
             else
               // Audio call or connecting — show avatars
               _buildAudioBackground(callService),
 
             // ── Local video (small, floating) ────────────────
-            if (isVideo && callService.localStream != null)
+            if (isVideo && _local.isReady && callService.localStream != null)
               Positioned(
                 top: 20,
                 right: 20,
@@ -124,8 +151,7 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  Widget _buildVideoGrid() {
-    final renderers = _remoteRenderers.values.toList();
+  Widget _buildVideoGrid(List<RTCVideoRenderer> renderers) {
     return GridView.builder(
       padding: const EdgeInsets.all(4),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -151,10 +177,11 @@ class _CallScreenState extends State<CallScreen> {
         runSpacing: 20,
         alignment: WrapAlignment.center,
         children: [
-          if (callService.remoteStreams.isEmpty)
+          if (callService.remoteStreams.length <= 1)
             UserAvatar(displayName: callService.remoteContactName ?? '?', size: AvatarSize.large)
           else
-            ..._remoteRenderers.keys.map((k) => UserAvatar(displayName: k, size: AvatarSize.large)),
+            ...callService.remoteStreams.keys.map((k) => UserAvatar(
+                displayName: callService.nameFor(k), size: AvatarSize.large)),
         ],
       ),
     );

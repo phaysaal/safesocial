@@ -180,6 +180,7 @@ Future<void> wireIdentity({
     unawaited(feedService.connectOwnDevices());
   };
   callService.setMyInfo(publicKey, secretKey);
+  callService.resolveName = (key) => contactService.getContact(key)?.displayName;
   callService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
   await sphereService.load();
   // After spheres, so threads for spheres we have left can be pruned.

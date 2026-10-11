@@ -126,6 +126,14 @@ class RelayHub {
   DateTime _lastFrame = DateTime.now();
   int _nextSendId = 1;
 
+  /// Publishes waiting for the relay's `sent` frame, by send id.
+  final Map<int, _PendingSend> _pendingSends = {};
+
+  /// How long a publish may wait for the relay to confirm it took the
+  /// message. A socket that is half dead accepts writes and answers nothing;
+  /// without this, the outbox marked such messages sent and they were lost.
+  static Duration sendAckTimeout = const Duration(seconds: 10);
+
   String _mintHubId() {
     final bytes = Uint8List(32);
     for (var i = 0; i < 32; i++) {
@@ -234,12 +242,44 @@ class RelayHub {
       _log.warn('Relay', 'No active connection for ${listener.channelKey}');
       return false;
     }
-    return _send({
+    final id = _nextSendId++;
+    final pending = _PendingSend(sub.mailbox.id);
+    _pendingSends[id] = pending;
+    final written = _send({
       't': 'pub',
       'a': sub.mailbox.id,
       'd': _pad(payload),
-      'id': _nextSendId++,
+      'id': id,
     });
+    if (!written) {
+      _pendingSends.remove(id);
+      return false;
+    }
+    // Only the relay's own word counts as sent. A write that is never
+    // answered is treated as not sent, so the outbox keeps it and retries.
+    return pending.completer.future.timeout(sendAckTimeout, onTimeout: () {
+      if (_pendingSends.remove(id) != null) {
+        _log.warn('Relay',
+            'No acknowledgement for a publish to ${listener.channelKey} within '
+            '${sendAckTimeout.inSeconds}s; keeping it to retry');
+      }
+      return false;
+    });
+  }
+
+  /// Answer every publish still waiting on [address] (or all of them) with
+  /// [ok]. Called on error frames and whenever the socket goes away.
+  void _settlePendingSends({String? address, required bool ok}) {
+    final ids = _pendingSends.entries
+        .where((e) => address == null || e.value.address == address)
+        .map((e) => e.key)
+        .toList();
+    for (final id in ids) {
+      final pending = _pendingSends.remove(id);
+      if (pending != null && !pending.completer.isCompleted) {
+        pending.completer.complete(ok);
+      }
+    }
   }
 
   /// Drop a payload into the mailbox on another relay, signed by the mailbox
@@ -352,6 +392,7 @@ class RelayHub {
     final wasConnected = _connected;
     _connected = false;
     _socket = null;
+    _settlePendingSends(ok: false);
     _pingTimer?.cancel();
     _pingTimer = null;
 
@@ -411,6 +452,7 @@ class RelayHub {
     final socket = _socket;
     _socket = null;
     _connected = false;
+    _settlePendingSends(ok: false);
     _pingTimer?.cancel();
     _pingTimer = null;
     for (final sub in _subs.values) {
@@ -500,6 +542,9 @@ class RelayHub {
         }
       case 'err':
         final why = frame['e'];
+        // Whatever the reason, nothing published to this address just now
+        // was taken.
+        _settlePendingSends(address: address, ok: false);
         if (why == 'unsubscribed') {
           // The mailbox forgot us; prove the key again.
           sub.subscribed = false;
@@ -512,7 +557,11 @@ class RelayHub {
           _log.warn('Relay', 'Hub error $why for ${_label(sub)}');
         }
       case 'sent':
-        break;
+        final id = frame['id'];
+        final pending = id is int ? _pendingSends.remove(id) : null;
+        if (pending != null && !pending.completer.isCompleted) {
+          pending.completer.complete(true);
+        }
       default:
         _log.warn('Relay', 'Unknown hub frame type $type');
     }
@@ -698,6 +747,7 @@ class RelayHub {
   /// Tear everything down. Tests only.
   @visibleForTesting
   void debugReset() {
+    _settlePendingSends(ok: false);
     _closeIdle();
     _subs.clear();
     _attempt = 0;
@@ -990,4 +1040,11 @@ class RelayService extends ChangeNotifier {
     disconnectAll();
     super.dispose();
   }
+}
+
+/// A publish the relay has not yet confirmed.
+class _PendingSend {
+  final String address;
+  final Completer<bool> completer = Completer<bool>();
+  _PendingSend(this.address);
 }

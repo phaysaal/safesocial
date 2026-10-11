@@ -67,7 +67,8 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
   classifier (nudity or AI-image detection; the origin score reads metadata only),
   communities as spheres of spheres, pending-post approval queues, story drawing.
-- **Still open:** the first two-physical-device test, an operator-run coturn/ntfy/APNs,
+- **Still open:** the rest of the two-physical-device test (video, voice notes, view-once,
+  disappearing messages, device linking), an operator-run coturn/ntfy/APNs,
   reproducible-build proof, external audit. See the plan's §13.
 - Directory names: the app is `safesocial_app/`, the Dart package `spheres_app`, the
   product Spheres.
@@ -80,8 +81,12 @@ invisible incomplete work. If a feature is not finished, the UI says so.
 
 ### Second rule
 
-**Nothing here has been run on two real devices.** When a change touches the message
-path, say so in the commit and prefer changes that a test can cover. Emulator pairs cannot
+**The message path has run on two real phones exactly once** (11 October 2026, a Samsung
+S23+ on Android 16 and a Motorola Edge 20 Fusion on Android 13, driven over adb). Direct
+chat, media, offline delivery, spheres, posts and sphere chat worked; the first call
+crashed the receiver and a half-dead socket lost sphere messages, both fixed the same
+day. When a change touches the message path, say so in the commit and prefer changes
+that a test can cover. Emulator pairs cannot
 scan QR codes; debug builds print the invite link instead (see `identity_service.dart`).
 
 ## Build & run
@@ -90,7 +95,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 590 tests in 46 files under test/{crypto,models,services}
+flutter test                       # 600 tests in 47 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug
@@ -173,6 +178,7 @@ in plaintext.
 ## Current status
 
 Pre-alpha. Phases 0–5 of the plan are implemented; §13's M2–M8 landed in October 2026
-(hub transport, media, backups, push, TURN issuance, federation, multi-device). Nothing
-has run on two physical devices yet — that is M1 and the next thing to do. Release numbers
+(hub transport, media, backups, push, TURN issuance, federation, multi-device). The first
+two-phone session (M1) ran on 11 October 2026 and its findings are being fixed; the rest
+of M1 is listed under "Still open" above. Release numbers
 and the toolchain pin are in `app_info.dart` and `FLUTTER_TOOLCHAIN`.

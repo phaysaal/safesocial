@@ -69,6 +69,14 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     context.read<NotificationService>().onOpen = (route) {
       if (mounted) _router.push(route);
     };
+    // An identity that was created before the permission question existed
+    // is asked once, after the first frame, so the dialog has a window.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (context.read<IdentityService>().isOnboarded) {
+        context.read<NotificationService>().ensurePermissionAsked();
+      }
+    });
   }
 
   @override

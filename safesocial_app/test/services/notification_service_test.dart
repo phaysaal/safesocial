@@ -19,8 +19,13 @@ class _FakeSink implements NotificationSink {
     initialized = true;
   }
 
+  int permissionRequests = 0;
+
   @override
-  Future<bool> requestPermission() async => true;
+  Future<bool> requestPermission() async {
+    permissionRequests++;
+    return true;
+  }
 
   @override
   Future<void> show({
@@ -134,5 +139,25 @@ void main() {
   test('opening a thread clears its notifications', () async {
     await service.clearThread('chat:alicekey');
     expect(sink.cancelled, ['chat:alicekey']);
+  });
+
+  group('permission is asked once per install', () {
+    test('the first call asks, later calls and later launches do not', () async {
+      SharedPreferences.setMockInitialValues({});
+      final sink = _FakeSink();
+      final service = NotificationService(sink: sink);
+      await service.load();
+      expect(service.permissionAsked, isFalse);
+
+      expect(await service.ensurePermissionAsked(), isTrue);
+      expect(await service.ensurePermissionAsked(), isNull);
+      expect(sink.permissionRequests, 1);
+
+      // A fresh service on the same install remembers the question was put.
+      final again = NotificationService(sink: _FakeSink());
+      await again.load();
+      expect(again.permissionAsked, isTrue);
+      expect(await again.ensurePermissionAsked(), isNull);
+    });
   });
 }

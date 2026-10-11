@@ -84,6 +84,15 @@ class CallService extends ChangeNotifier {
   CallState get state => _state;
   CallType get callType => _callType;
   String? get remoteContactName => _remoteContactName;
+
+  /// Looks a contact's name up locally. A caller's own claim about its name
+  /// is never shown; the contact list is the only source.
+  String? Function(String identityKey)? resolveName;
+
+  /// The name to show for [identityKey], or a short form of the key.
+  String nameFor(String identityKey) =>
+      resolveName?.call(identityKey) ??
+      (identityKey.length > 8 ? '${identityKey.substring(0, 8)}…' : identityKey);
   bool get isMuted => _isMuted;
   bool get isCameraOff => _isCameraOff;
   bool get isSpeakerOn => _isSpeakerOn;
@@ -165,7 +174,7 @@ class CallService extends ChangeNotifier {
       InboundEvents.emit(InboundEvent(
         kind: InboundKind.call,
         id: 'missed:$peer:${DateTime.now().millisecondsSinceEpoch}',
-        title: _remoteContactName ?? 'Someone',
+        title: nameFor(peer),
         body: 'Missed ${video ? 'video' : 'voice'} call',
         route: '/chat/$peer',
         thread: 'call:$peer',
@@ -563,7 +572,7 @@ class CallService extends ChangeNotifier {
           if (_state == CallState.idle) {
             _remoteContactKey = senderKey;
             _remoteDeviceKey = opened.fromDevice;
-            _remoteContactName = data['caller_name'];
+            _remoteContactName = nameFor(senderKey);
             _callType = data['call_type'] == 'video' ? CallType.video : CallType.audio;
             _pendingOffer = RTCSessionDescription(data['sdp'], data['sdp_type']);
             _isIncomingCall = true;
@@ -635,7 +644,7 @@ class CallService extends ChangeNotifier {
           if (_state == CallState.idle) {
             _groupId = data['group_id'];
             _remoteContactKey = senderKey;
-            _remoteContactName = data['caller_name'];
+            _remoteContactName = nameFor(senderKey);
             // The invite says whether it is audio or video. This was ignored,
             // so a video call was joined as audio.
             _callType =
