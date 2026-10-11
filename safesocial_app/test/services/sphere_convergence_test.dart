@@ -326,7 +326,7 @@ void main() {
       // not have to notice and redo it by hand.
       final bobsDevice = await deviceFor(bob, bobSecret);
       final sent = <String>[];
-      bobsDevice.sendToPeer = (peer, payload) async {
+      bobsDevice.sendToPeer = (peer, payload, {deviceKey}) async {
         sent.add(payload);
         return true;
       };
@@ -347,7 +347,7 @@ void main() {
     test('does not retry a change the winner already made', () async {
       // Both admins remove Dave at once. There is nothing left to redo.
       final bobsDevice = await deviceFor(bob, bobSecret);
-      bobsDevice.sendToPeer = (peer, payload) async => true;
+      bobsDevice.sendToPeer = (peer, payload, {deviceKey}) async => true;
 
       await bobsDevice.removeMember(sphereId, dave);
       await bobsDevice.handleIncomingOp(alice, aliceRemovesDave());

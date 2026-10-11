@@ -17,6 +17,9 @@ class UserProfile with EquatableMixin {
   final String? avatarRef;
   final DateTime updatedAt;
 
+  /// MM-DD. Shared with contacts, never published.
+  final String? birthday;
+
   UserProfile({
     required this.publicKey,
     this.keyExchangePublicKey,
@@ -24,6 +27,7 @@ class UserProfile with EquatableMixin {
     required this.bio,
     this.avatarRef,
     required this.updatedAt,
+    this.birthday,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -34,6 +38,7 @@ class UserProfile with EquatableMixin {
       bio: json['bio'] as String,
       avatarRef: json['avatarRef'] as String?,
       updatedAt: DateTime.parse(json['updatedAt'] as String),
+      birthday: json['birthday'] as String?,
     );
   }
 
@@ -45,6 +50,7 @@ class UserProfile with EquatableMixin {
       'bio': bio,
       'avatarRef': avatarRef,
       'updatedAt': updatedAt.toIso8601String(),
+      if (birthday != null) 'birthday': birthday,
     };
   }
 
@@ -55,6 +61,7 @@ class UserProfile with EquatableMixin {
     String? bio,
     String? avatarRef,
     DateTime? updatedAt,
+    String? birthday,
   }) {
     return UserProfile(
       publicKey: publicKey ?? this.publicKey,
@@ -63,6 +70,7 @@ class UserProfile with EquatableMixin {
       bio: bio ?? this.bio,
       avatarRef: avatarRef ?? this.avatarRef,
       updatedAt: updatedAt ?? this.updatedAt,
+      birthday: birthday ?? this.birthday,
     );
   }
 

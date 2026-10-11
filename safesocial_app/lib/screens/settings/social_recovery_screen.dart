@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 
 import '../../crypto/social_recovery.dart';
 import '../../services/contact_service.dart';
-import '../../services/rust_core_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/debug_log_service.dart';
 
@@ -71,7 +70,6 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
     final theme = Theme.of(context);
     final contactService = context.watch<ContactService>();
     final identityService = context.read<IdentityService>();
-    final rustCore = context.read<RustCoreService>();
     final trustedContacts = contactService.contacts.where((c) => !c.blocked).toList();
 
     return ListView(
@@ -109,7 +107,7 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
           ),
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: _isProcessing ? null : () => _setupRecovery(identityService, rustCore),
+            onPressed: _isProcessing ? null : () => _setupRecovery(identityService),
             child: const Text('Generate & Send Shards'),
           ),
         ],
@@ -120,7 +118,6 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
   Widget _buildReconstructTab(BuildContext context) {
     final theme = Theme.of(context);
     final identityService = context.read<IdentityService>();
-    final rustCore = context.read<RustCoreService>();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -147,7 +144,7 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
         ),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: _isProcessing ? null : () => _reconstructIdentity(identityService, rustCore),
+          onPressed: _isProcessing ? null : () => _reconstructIdentity(identityService),
           child: const Text('Reconstruct Identity'),
         ),
       ],
@@ -170,8 +167,7 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
   /// The shards are shown rather than sent: delivering them over the same
   /// channels this identity secures would defeat the point, since anyone who
   /// compromised the account could collect them. Hand them over out of band.
-  Future<void> _setupRecovery(
-      IdentityService identity, RustCoreService rustCore) async {
+  Future<void> _setupRecovery(IdentityService identity) async {
     final secret = identity.secretKey;
     final publicKey = identity.publicKey;
     if (secret == null || publicKey == null) return;
@@ -247,8 +243,7 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
   /// shards name. Shamir has no integrity of its own, so too few shards or one
   /// bad one produces plausible nonsense — the previous implementation
   /// reported exactly that as success.
-  Future<void> _reconstructIdentity(
-      IdentityService identity, RustCoreService rustCore) async {
+  Future<void> _reconstructIdentity(IdentityService identity) async {
     final messenger = ScaffoldMessenger.of(context);
 
     final shards = _shardControllers

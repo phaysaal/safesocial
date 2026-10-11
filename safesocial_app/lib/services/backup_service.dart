@@ -22,26 +22,78 @@ class BackupService extends ChangeNotifier {
 
   /// Current backup payload format version.
   ///
-  /// 3 added spheres, sphere keys, conversations and messages. Version 2 files
-  /// still restore — they simply carry less.
-  static const int formatVersion = 3;
+  /// 3 added spheres, sphere keys, conversations and messages. 4 added sphere
+  /// chats, the archive, governance state (audit log, votes, transfers), saved
+  /// and muted and pinned items, contact requests and story receipts — so a
+  /// restore reproduces every screen, not just the identity and the feed.
+  /// Older files still restore; they simply carry less.
+  static const int formatVersion = 4;
 
   /// Preference keys copied verbatim into a backup.
   ///
-  /// Sphere keys are the critical addition: unlike sessions, they cannot be
+  /// Sphere keys are the critical entry: unlike sessions, they cannot be
   /// re-derived. Losing them makes every post in that sphere permanently
   /// unreadable, so a backup without them was not really a backup.
   static const List<String> _backedUpKeys = [
     'spheres_identity_profile',
+    'spheres_devices_v1',
     'spheres_contacts',
+    'spheres_contact_requests_v1',
+    'spheres_contact_declined_v1',
     'spheres_feed_posts',
     'spheres_hidden_posts',
+    'spheres_saved_v1',
+    'spheres_story_view_receipts',
     'spheres_spheres_v1',
     'spheres_keyring_v1',
     'spheres_invites_v1',
+    'spheres_sphere_audit_v1',
+    'spheres_removal_proposals_v1',
+    'spheres_transfer_offers_v1',
+    'spheres_muted_spheres_v1',
+    'spheres_muted_members_v1',
+    'spheres_chat_settings_v1',
+    'spheres_hidden_words_v1',
+    'spheres_member_notes_v1',
+    'spheres_drafts_v1',
+    'spheres_reports_v1',
+    'spheres_invite_tokens_v1',
+    'spheres_call_log_v1',
+    'spheres_chat_pins_v1',
+    'spheres_starred_v1',
+    'spheres_sphere_chat_settings_v1',
+    'spheres_sphere_chat_pins_v1',
+    'spheres_pinned_posts_v1',
+    'spheres_archived_spheres_v1',
+    'spheres_sphere_chats_v1',
     'spheres_albums',
     'spheres_conversations',
+    'spheres_pinned_chats_v1',
+    'spheres_blur_media_v1',
+    'spheres_archive_index_v1',
   ];
+
+  /// Per-conversation, per-sphere and per-archive entries, matched by prefix.
+  static const List<String> _backedUpPrefixes = [
+    'spheres_msgs_',
+    'spheres_sphere_msgs_',
+    'spheres_archive_',
+  ];
+
+  /// Whether a store key belongs in a backup, and may be written by a restore.
+  static bool isBackedUpKey(String key) {
+    if (key == _excludedSessionKey) return false;
+    if (_backedUpKeys.contains(key)) return true;
+    return _backedUpPrefixes.any(key.startsWith);
+  }
+
+  /// Everything a backup carries, for the UI to say so.
+  static const String coverageSummary =
+      'Identity and encryption keys, contacts and requests, spheres and their '
+      'keys, governance history, chats and sphere chats, posts, comments, '
+      'stories, albums, saved items and settings for pins and mutes. '
+      'Pending outgoing messages and device-specific session state are not '
+      'included; sessions re-establish themselves.';
 
   /// Ratchet state is deliberately NOT backed up. Restoring it onto a device
   /// that is also still running would let two devices advance the same chain,
@@ -55,6 +107,25 @@ class BackupService extends ChangeNotifier {
   /// Ed25519 secret key in cleartext (base64 of JSON — base64 is an encoding,
   /// not encryption), and should be treated as the identity itself.
   Future<String> createBackup({String? passphrase}) async {
+    final finalData = await buildBackupData(passphrase: passphrase);
+    final encrypted = passphrase != null && passphrase.isNotEmpty;
+
+    final dir = await getApplicationDocumentsDirectory();
+    final backupDir = Directory('${dir.path}/backups');
+    if (!backupDir.existsSync()) await backupDir.create();
+
+    final fileName = 'spheres_backup_${DateTime.now().millisecondsSinceEpoch}.spheres';
+    final file = File('${backupDir.path}/$fileName');
+    await file.writeAsString(finalData);
+
+    DebugLogService().success('Backup',
+        '${encrypted ? 'Encrypted' : 'Unencrypted'} backup created: $fileName');
+    return file.path;
+  }
+
+  /// The backup as a string, encrypted when a passphrase is given. Also what
+  /// travels to a device being linked, keyed by the pairing code.
+  Future<String> buildBackupData({String? passphrase}) async {
     final prefs = SecureStore.instance;
 
     final pubKey = await prefs.getString('spheres_identity_pubkey');
@@ -68,15 +139,10 @@ class BackupService extends ChangeNotifier {
 
     // Everything under the backed-up keys, plus every conversation's messages.
     final store = <String, String>{};
-    for (final key in _backedUpKeys) {
+    for (final key in await prefs.getKeys()) {
+      if (!isBackedUpKey(key)) continue;
       final value = await prefs.getString(key);
       if (value != null) store[key] = value;
-    }
-    for (final key in await prefs.getKeys()) {
-      if (key.startsWith('spheres_msgs_')) {
-        final value = await prefs.getString(key);
-        if (value != null) store[key] = value;
-      }
     }
 
     final profile = await prefs.getString('spheres_identity_profile');
@@ -103,23 +169,10 @@ class BackupService extends ChangeNotifier {
     final encrypted = passphrase != null && passphrase.isNotEmpty;
     if (encrypted) payload['encrypted'] = true;
 
-    final finalData = encrypted
+    return encrypted
         ? await Vault.seal(
             plaintext: jsonEncode(payload), passphrase: passphrase)
         : base64Encode(utf8.encode(payloadJson));
-
-    // 2. Save to file
-    final dir = await getApplicationDocumentsDirectory();
-    final backupDir = Directory('${dir.path}/backups');
-    if (!backupDir.existsSync()) await backupDir.create();
-
-    final fileName = 'spheres_backup_${DateTime.now().millisecondsSinceEpoch}.spheres';
-    final file = File('${backupDir.path}/$fileName');
-    await file.writeAsString(finalData);
-
-    DebugLogService().success('Backup',
-        '${encrypted ? 'Encrypted' : 'Unencrypted'} backup created: $fileName');
-    return file.path;
   }
 
   /// List all available backups.
@@ -154,8 +207,21 @@ class BackupService extends ChangeNotifier {
   Future<void> restoreBackup(String filePath, {String? passphrase}) async {
     final file = File(filePath);
     if (!file.existsSync()) throw Exception('Backup file not found');
+    await restoreBackupData(await file.readAsString(), passphrase: passphrase);
+  }
 
-    final rawData = await file.readAsString();
+  /// Restore from backup contents.
+  ///
+  /// With [asNewDevice] the X25519 key is *not* restored: this device is being
+  /// added alongside the one the backup came from, and two devices sharing one
+  /// session key is what corrupts conversations. It generates its own on load
+  /// and adds itself to the device list. Without the flag the key is kept, so
+  /// a replacement device picks up exactly where the old one left off.
+  Future<void> restoreBackupData(
+    String rawData, {
+    String? passphrase,
+    bool asNewDevice = false,
+  }) async {
 
     // Backups written by 0.4.7 and earlier with a passphrase contain the
     // string `placeholder_vault_blob` and no key material. Reject them loudly
@@ -210,7 +276,9 @@ class BackupService extends ChangeNotifier {
     // generated on load, which is safe but silently invalidates every existing
     // pairwise session until contacts pick up the new prekey.
     final exchangeSecret = keypair['exchangeSecret'];
-    if (exchangeSecret is String && exchangeSecret.isNotEmpty) {
+    if (asNewDevice) {
+      await _secureStorage.delete(key: 'spheres_identity_x25519_secret');
+    } else if (exchangeSecret is String && exchangeSecret.isNotEmpty) {
       await _secureStorage.write(
         key: 'spheres_identity_x25519_secret',
         value: exchangeSecret,
@@ -220,14 +288,14 @@ class BackupService extends ChangeNotifier {
     final store = data['store'];
     if (store is Map) {
       // Version 3 and later: restore everything verbatim.
-      store.forEach((key, value) {
-        if (key is! String || value is! String) return;
-        if (key == _excludedSessionKey) return;
-        if (!_backedUpKeys.contains(key) && !key.startsWith('spheres_msgs_')) {
-          return; // Never write keys a backup should not be able to set.
-        }
-        prefs.setString(key, value);
-      });
+      for (final entry in store.entries) {
+        final key = entry.key;
+        final value = entry.value;
+        if (key is! String || value is! String) continue;
+        // Never write keys a backup should not be able to set.
+        if (!isBackedUpKey(key)) continue;
+        await prefs.setString(key, value);
+      }
     } else {
       // Version 2: only the flat fields existed.
       if (data['contacts'] != null) {

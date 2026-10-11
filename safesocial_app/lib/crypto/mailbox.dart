@@ -78,6 +78,14 @@ class Mailbox {
   /// endpoint or a different body.
   String sign(String method, String path, String body, String timestamp) {
     final message = '$method$path$body$timestamp';
-    return hex.encode(ed.sign(_privateKey, utf8.encode(message)));
+    return signRaw(message);
   }
+
+  /// Sign an arbitrary string with the mailbox key.
+  ///
+  /// Used for hub subscriptions, where the signed string is `SUB<address><ts>`
+  /// rather than an HTTP request — the same proof of possession, carried in a
+  /// frame instead of a header.
+  String signRaw(String message) =>
+      hex.encode(ed.sign(_privateKey, utf8.encode(message)));
 }

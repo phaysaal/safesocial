@@ -11,7 +11,7 @@ void main() {
   });
 
   test('a message sent while offline stays pending, not lost', () async {
-    final outbox = OutboxService()..send = (_, __) async => false;
+    final outbox = OutboxService()..send = (_, __, {deviceKey}) async => false;
 
     await outbox.enqueue(id: 'm1', peer: 'bob', payload: 'sealed');
 
@@ -20,7 +20,7 @@ void main() {
   });
 
   test('a message is marked sent once the relay accepts it', () async {
-    final outbox = OutboxService()..send = (_, __) async => true;
+    final outbox = OutboxService()..send = (_, __, {deviceKey}) async => true;
 
     await outbox.enqueue(id: 'm1', peer: 'bob', payload: 'sealed');
 
@@ -32,7 +32,7 @@ void main() {
     var online = false;
     final sent = <String>[];
     final outbox = OutboxService()
-      ..send = (peer, payload) async {
+      ..send = (peer, payload, {deviceKey}) async {
         if (!online) return false;
         sent.add(payload);
         return true;
@@ -52,7 +52,7 @@ void main() {
   test('flush only touches the requested peer', () async {
     final attempted = <String>[];
     final outbox = OutboxService()
-      ..send = (peer, payload) async {
+      ..send = (peer, payload, {deviceKey}) async {
         attempted.add(peer);
         return false;
       };
@@ -67,11 +67,11 @@ void main() {
   });
 
   test('unsent messages survive a restart', () async {
-    final first = OutboxService()..send = (_, __) async => false;
+    final first = OutboxService()..send = (_, __, {deviceKey}) async => false;
     await first.enqueue(id: 'm1', peer: 'bob', payload: 'sealed');
 
     // A new instance, as after the process is killed and relaunched.
-    final restored = OutboxService()..send = (_, __) async => true;
+    final restored = OutboxService()..send = (_, __, {deviceKey}) async => true;
     await restored.load();
 
     expect(restored.pendingCount, 1);
@@ -82,7 +82,7 @@ void main() {
   });
 
   test('a delivery receipt advances the state', () async {
-    final outbox = OutboxService()..send = (_, __) async => true;
+    final outbox = OutboxService()..send = (_, __, {deviceKey}) async => true;
     await outbox.enqueue(id: 'm1', peer: 'bob', payload: 'sealed');
     expect(outbox.stateOf('m1'), OutboxState.sent);
 
@@ -91,7 +91,7 @@ void main() {
   });
 
   test('the same message is never queued twice', () async {
-    final outbox = OutboxService()..send = (_, __) async => false;
+    final outbox = OutboxService()..send = (_, __, {deviceKey}) async => false;
 
     await outbox.enqueue(id: 'm1', peer: 'bob', payload: 'sealed');
     await outbox.enqueue(id: 'm1', peer: 'bob', payload: 'sealed again');
@@ -101,7 +101,7 @@ void main() {
   });
 
   test('gives up after maxAttempts, and can be retried by hand', () async {
-    final outbox = OutboxService()..send = (_, __) async => false;
+    final outbox = OutboxService()..send = (_, __, {deviceKey}) async => false;
     await outbox.enqueue(id: 'm1', peer: 'bob', payload: 'sealed');
 
     for (var i = 1; i < OutboxService.maxAttempts; i++) {
@@ -109,7 +109,7 @@ void main() {
     }
     expect(outbox.stateOf('m1'), OutboxState.failed);
 
-    outbox.send = (_, __) async => true;
+    outbox.send = (_, __, {deviceKey}) async => true;
     await outbox.retry('m1');
     expect(outbox.stateOf('m1'), OutboxState.sent);
   });
@@ -117,7 +117,7 @@ void main() {
   test('a concurrent flush does not send the same entry twice', () async {
     var deliveries = 0;
     final outbox = OutboxService()
-      ..send = (_, __) async {
+      ..send = (_, __, {deviceKey}) async {
         deliveries++;
         // Yield, so the second flush overlaps the first.
         await Future<void>.delayed(Duration.zero);
@@ -133,7 +133,7 @@ void main() {
   });
 
   test('deleting a conversation clears its queued messages', () async {
-    final outbox = OutboxService()..send = (_, __) async => false;
+    final outbox = OutboxService()..send = (_, __, {deviceKey}) async => false;
     await outbox.enqueue(id: 'm1', peer: 'bob', payload: 'a');
     await outbox.enqueue(id: 'm2', peer: 'carol', payload: 'b');
 
@@ -145,7 +145,7 @@ void main() {
   test('pruning keeps unsent messages and drops old finished ones', () async {
     // Only Carol is reachable, so Bob's message stays pending throughout.
     final outbox = OutboxService()
-      ..send = (peer, _) async => peer == 'carol';
+      ..send = (peer, _, {deviceKey}) async => peer == 'carol';
 
     await outbox.enqueue(id: 'pending', peer: 'bob', payload: 'a');
     await outbox.enqueue(id: 'sent', peer: 'carol', payload: 'b');

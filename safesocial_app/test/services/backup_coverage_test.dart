@@ -102,5 +102,49 @@ void main() {
     // The regression this guards: a backup that looks complete but silently
     // drops the one thing that cannot be regenerated.
     expect(BackupService.formatVersion, greaterThanOrEqualTo(3));
+    expect(BackupService.isBackedUpKey('spheres_keyring_v1'), isTrue);
+  });
+
+  test('a backup carries every screen, not just identity and feed', () {
+    for (final key in [
+      'spheres_contacts',
+      'spheres_contact_requests_v1',
+      'spheres_spheres_v1',
+      'spheres_sphere_chats_v1',
+      'spheres_sphere_msgs_abc',
+      'spheres_sphere_audit_v1',
+      'spheres_removal_proposals_v1',
+      'spheres_transfer_offers_v1',
+      'spheres_conversations',
+      'spheres_msgs_deadbeef',
+      'spheres_archive_index_v1',
+      'spheres_archive_sphere1',
+      'spheres_feed_posts',
+      'spheres_saved_v1',
+      'spheres_pinned_chats_v1',
+      'spheres_muted_spheres_v1',
+      'spheres_albums',
+      'spheres_story_view_receipts',
+    ]) {
+      expect(BackupService.isBackedUpKey(key), isTrue, reason: key);
+    }
+  });
+
+  test('ratchet state, outboxes and device settings stay out of a backup', () {
+    // Sessions: restoring them onto a second running device would reuse
+    // message keys. Outboxes: pending sends belong to the device that queued
+    // them. Everything else here is plaintext device configuration.
+    for (final key in [
+      'spheres_sessions_v1',
+      'spheres_outbox_v1',
+      'spheres_feed_outbox_v1',
+      'spheres_relay_host',
+      'spheres_ice_servers',
+      'spheres_store_key',
+      'spheres_typing_signals',
+      'theme_mode',
+    ]) {
+      expect(BackupService.isBackedUpKey(key), isFalse, reason: key);
+    }
   });
 }

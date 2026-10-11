@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:convert/convert.dart';
 import 'package:cryptography/cryptography.dart';
 
 import 'spheres_crypto.dart';
@@ -147,6 +148,13 @@ class PairwiseSession {
   /// The peer's identity (Ed25519) public key, hex.
   final String peerIdentityKey;
 
+  /// X25519 public keys of the two devices this session is between, hex.
+  ///
+  /// Empty for sessions written before devices existed; those were always
+  /// between the only device each side had.
+  final String myDeviceKey;
+  final String peerDeviceKey;
+
   final Uint8List _root;
 
   /// Chain we encrypt with. The peer derives the same chain to decrypt.
@@ -172,7 +180,17 @@ class PairwiseSession {
     required this.sending,
     required this.receiving,
     this.resetEpoch = 0,
+    this.myDeviceKey = '',
+    this.peerDeviceKey = '',
   }) : _root = root;
+
+  /// Chains are labelled by the sender's identity key, so our sending chain
+  /// and the peer's receiving chain are the same chain. Between two devices of
+  /// the *same* identity that label would collide, so there — and only there —
+  /// the device key labels the chain instead. Sessions between two people are
+  /// derived exactly as before devices existed.
+  static String _label(String identityKey, String deviceKey, bool selfPair) =>
+      selfPair ? deviceKey : identityKey;
 
   /// Establish a session from our X25519 key pair and the peer's X25519 public
   /// key.
@@ -191,6 +209,10 @@ class PairwiseSession {
       myKeyPair: myKeyExchangeKeyPair,
       peerPublicKeyBytes: peerKeyExchangePublicKey,
     );
+    final myDeviceKey =
+        hex.encode((await myKeyExchangeKeyPair.extractPublicKey()).bytes);
+    final peerDeviceKey = hex.encode(peerKeyExchangePublicKey);
+    final selfPair = myIdentityKey == peerIdentityKey;
 
     // Salt is order-independent so both sides agree without negotiating roles.
     final salt = ([myIdentityKey, peerIdentityKey]..sort()).join(':');
@@ -203,11 +225,17 @@ class PairwiseSession {
     return PairwiseSession._(
       myIdentityKey: myIdentityKey,
       peerIdentityKey: peerIdentityKey,
+      myDeviceKey: myDeviceKey,
+      peerDeviceKey: peerDeviceKey,
       root: root,
-      sending: KdfChain(await _chainSeed(root, myIdentityKey, 0)),
-      receiving: KdfChain(await _chainSeed(root, peerIdentityKey, 0)),
+      sending: KdfChain(await _chainSeed(
+          root, _label(myIdentityKey, myDeviceKey, selfPair), 0)),
+      receiving: KdfChain(await _chainSeed(
+          root, _label(peerIdentityKey, peerDeviceKey, selfPair), 0)),
     );
   }
+
+  bool get isSelfPair => myIdentityKey == peerIdentityKey;
 
   /// Restart both chains at [epoch].
   ///
@@ -221,8 +249,10 @@ class PairwiseSession {
   Future<bool> resetTo(int epoch) async {
     if (epoch <= resetEpoch) return false;
     resetEpoch = epoch;
-    sending = KdfChain(await _chainSeed(_root, myIdentityKey, epoch));
-    receiving = KdfChain(await _chainSeed(_root, peerIdentityKey, epoch));
+    sending = KdfChain(await _chainSeed(
+        _root, _label(myIdentityKey, myDeviceKey, isSelfPair), epoch));
+    receiving = KdfChain(await _chainSeed(
+        _root, _label(peerIdentityKey, peerDeviceKey, isSelfPair), epoch));
     return true;
   }
 
@@ -266,6 +296,8 @@ class PairwiseSession {
         'sending': sending.toJson(),
         'receiving': receiving.toJson(),
         if (resetEpoch != 0) 'resetEpoch': resetEpoch,
+        if (myDeviceKey.isNotEmpty) 'myDevice': myDeviceKey,
+        if (peerDeviceKey.isNotEmpty) 'peerDevice': peerDeviceKey,
       };
 
   static PairwiseSession fromJson(Map<String, dynamic> json) {
@@ -276,6 +308,8 @@ class PairwiseSession {
       sending: KdfChain.fromJson(json['sending'] as Map<String, dynamic>),
       receiving: KdfChain.fromJson(json['receiving'] as Map<String, dynamic>),
       resetEpoch: json['resetEpoch'] as int? ?? 0,
+      myDeviceKey: json['myDevice'] as String? ?? '',
+      peerDeviceKey: json['peerDevice'] as String? ?? '',
     );
   }
 }

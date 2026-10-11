@@ -8,8 +8,11 @@ import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
 
 import '../models/contact.dart';
+import '../crypto/device.dart';
 import '../models/contact_request.dart';
 import 'debug_log_service.dart';
+import 'inbound_events.dart';
+import 'relay_config.dart';
 import 'relay_service.dart';
 
 /// Manages the user's address book and contact handshakes.
@@ -35,6 +38,143 @@ class ContactService extends ChangeNotifier {
     return null;
   }
 
+  /// Every device key of a contact, from their signed device list, or the one
+  /// key we hold if they have published none.
+  List<String> devicesOf(String identityKey) =>
+      getContact(identityKey)?.allDeviceKeys ?? const [];
+
+  /// A signed device list for a contact. Adopted when it is newer and
+  /// verifies, so an operator cannot add a device of their own to someone's
+  /// list, and a stale list cannot roll back a revocation.
+  Future<bool> applyDeviceList(String identityKey, Object? json) async {
+    final index = _contacts.indexWhere((c) => c.publicKey == identityKey);
+    if (index == -1) return false;
+    final list = DeviceList.fromJson(json);
+    if (list == null || list.identityKey != identityKey || !list.verify()) {
+      return false;
+    }
+    final contact = _contacts[index];
+    if (list.version <= contact.devicesVersion) return false;
+    if (list.devices.isEmpty) return false;
+
+    final keys = list.exchangeKeys;
+    final primary = contact.keyExchangePublicKey;
+    // A verified contact's keys changing is worth a notice: it is usually a
+    // new phone, and it is also what an attack would look like.
+    final before = contact.allDeviceKeys.toSet();
+    if (contact.verifiedFingerprint != null && before.isNotEmpty && !before.containsAll(keys)) {
+      InboundEvents.emit(InboundEvent(
+        kind: InboundKind.security,
+        id: 'keys:${contact.publicKey}:${list.version}',
+        title: contact.displayName,
+        body: 'Their encryption keys changed. Verify them again before trusting the chat.',
+        route: '/contact/${contact.publicKey}/verify',
+        thread: 'security',
+      ));
+    }
+    _contacts[index] = contact.copyWith(
+      deviceKeys: keys,
+      devicesVersion: list.version,
+      keyExchangePublicKey:
+          primary != null && keys.contains(primary) ? primary : keys.first,
+    );
+    await _persistContacts();
+    notifyListeners();
+    DebugLogService().info('Contacts',
+        '${contact.displayName} now has ${keys.length} device(s)');
+    // New devices need channels of their own.
+    if (!contact.blocked) onContactReady?.call(identityKey);
+    return true;
+  }
+
+  /// Fetch a contact's bundle and take whatever is newer in it: a key we were
+  /// missing, their relay, their device list. Returns true if anything
+  /// changed.
+  Future<bool> refreshBundle(String identityKey) async {
+    final contact = getContact(identityKey);
+    if (contact == null) return false;
+    final prekeyStr = await _handshakeRelay.fetchPrekey(identityKey);
+    if (prekeyStr == null) return false;
+    try {
+      final envelope = jsonDecode(prekeyStr) as Map<String, dynamic>;
+      final bundle = envelope['bundle'];
+      if (bundle is! Map<String, dynamic> ||
+          !_prekeyIsAuthentic(identityKey, bundle, envelope['signature'])) {
+        return false;
+      }
+      var changed = false;
+      final xk = bundle['keyExchangePublicKey'];
+      if (contact.keyExchangePublicKey == null && xk is String) {
+        await setExchangeKey(identityKey, xk);
+        changed = true;
+      }
+      final beforeHost = getContact(identityKey)?.relayHost;
+      await setRelayHost(identityKey, bundle['relay']);
+      if (getContact(identityKey)?.relayHost != beforeHost) changed = true;
+      if (await applyDeviceList(identityKey, bundle['devices'])) changed = true;
+      return changed;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Refresh every contact's bundle. Cheap — one unauthenticated GET each —
+  /// and the only way a contact's new device becomes reachable before they
+  /// message us from it.
+  Future<void> refreshAllBundles() async {
+    for (final contact in _contacts.toList()) {
+      if (contact.blocked) continue;
+      await refreshBundle(contact.publicKey);
+    }
+  }
+
+  // ── Keeping our own devices in step ───────────────────────────────────────
+
+  /// Fired with a contact-list change for our other devices to apply. Set by
+  /// the app; null when we have no other devices or no transport.
+  Future<void> Function(Map<String, dynamic> op)? onContactsChanged;
+  bool _applyingSync = false;
+
+  void _emitSync(Map<String, dynamic> op) {
+    if (_applyingSync) return;
+    final hook = onContactsChanged;
+    if (hook != null) unawaited(hook(op));
+  }
+
+  /// Apply a change another of our devices made.
+  Future<void> applyContactSync(Map<String, dynamic> op) async {
+    _applyingSync = true;
+    try {
+      final type = op['op'];
+      if (type == 'upsert') {
+        final contact = Contact.fromJson(op['contact'] as Map<String, dynamic>);
+        if (contact.publicKey == _myPublicKey) return;
+        final index = _contacts.indexWhere((c) => c.publicKey == contact.publicKey);
+        if (index == -1) {
+          _contacts.add(contact);
+        } else {
+          _contacts[index] = contact;
+        }
+        await _persistContacts();
+        notifyListeners();
+        if (!contact.blocked && contact.keyExchangePublicKey != null) {
+          onContactReady?.call(contact.publicKey);
+        }
+      } else if (type == 'remove') {
+        final key = op['publicKey'];
+        if (key is String) {
+          _contacts.removeWhere((c) => c.publicKey == key);
+          await _persistContacts();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      DebugLogService().error('Contacts', 'Could not apply a device sync: $e');
+    } finally {
+      _applyingSync = false;
+    }
+  }
+
   void setMyInfo(String publicKey, String displayName,
       {String? exchangeKey, String? secretKey}) {
     _myPublicKey = publicKey;
@@ -44,6 +184,9 @@ class ContactService extends ChangeNotifier {
   }
 
   String? _mySecretKey;
+
+  /// Our signed device list as JSON, for handshakes. Set by the app.
+  Map<String, dynamic>? Function()? myDevices;
   Timer? _inboxTimer;
 
   /// Called when a contact becomes usable — i.e. we know their X25519 key and
@@ -76,11 +219,21 @@ class ContactService extends ChangeNotifier {
     _inboxTimer?.cancel();
     _inboxTimer = Timer.periodic(interval, (_) => listenForHandshakes());
     listenForHandshakes();
+    // Bundles change rarely — a new device, a moved relay — but when they do,
+    // nothing else tells us. Once at start, then on a slow timer.
+    _bundleTimer?.cancel();
+    _bundleTimer = Timer.periodic(
+        const Duration(minutes: 10), (_) => refreshAllBundles());
+    unawaited(refreshAllBundles());
   }
+
+  Timer? _bundleTimer;
 
   void stopInboxPolling() {
     _inboxTimer?.cancel();
     _inboxTimer = null;
+    _bundleTimer?.cancel();
+    _bundleTimer = null;
   }
 
   @override
@@ -124,6 +277,8 @@ class ContactService extends ChangeNotifier {
             bundle['keyExchangePublicKey'] is String) {
           await setExchangeKey(
               contact.publicKey, bundle['keyExchangePublicKey'] as String);
+          await setRelayHost(contact.publicKey, bundle['relay']);
+          await applyDeviceList(contact.publicKey, bundle['devices']);
           DebugLogService().success(
               'Contacts', 'Can now encrypt to ${contact.displayName}');
         }
@@ -156,8 +311,9 @@ class ContactService extends ChangeNotifier {
   Future<void> _holdRequest(
     String publicKey,
     String name,
-    String? exchangeKey,
-  ) async {
+    String? exchangeKey, {
+    String? relayHost,
+  }) async {
     if (publicKey == _myPublicKey) return;
     if (_declined.contains(publicKey)) {
       DebugLogService()
@@ -175,12 +331,18 @@ class ContactService extends ChangeNotifier {
       return;
     }
 
+    if (_requests.length >= maxPendingRequests &&
+        !_requests.any((r) => r.publicKey == publicKey)) {
+      DebugLogService().warn('Contacts', 'Request queue full; ignoring a new one');
+      return;
+    }
     final index = _requests.indexWhere((r) => r.publicKey == publicKey);
     final request = ContactRequest(
       publicKey: publicKey,
       displayName: name,
       keyExchangePublicKey: exchangeKey,
       receivedAt: DateTime.now(),
+      relayHost: relayHost,
     );
     if (index == -1) {
       _requests.add(request);
@@ -191,6 +353,23 @@ class ContactService extends ChangeNotifier {
 
     DebugLogService().info('Contacts', '$name would like to connect');
     await _persistRequests();
+    notifyListeners();
+    InboundEvents.emit(InboundEvent(
+      kind: InboundKind.contactRequest,
+      id: 'request:$publicKey',
+      title: name,
+      body: 'Would like to connect',
+      route: '/contacts',
+      thread: 'requests',
+    ));
+  }
+
+  /// Tell someone we have added them, without them having asked first here —
+  /// used when an admin approves a join request that carried their keys.
+  Future<void> acceptSilently(String publicKey) async {
+    _requests.removeWhere((r) => r.publicKey == publicKey);
+    await _persistRequests();
+    _sendHandshake(publicKey, 'contact_accept');
     notifyListeners();
   }
 
@@ -205,6 +384,7 @@ class ContactService extends ChangeNotifier {
       request.publicKey,
       request.displayName,
       keyExchangePublicKey: request.keyExchangePublicKey,
+      relayHost: request.relayHost,
       announce: false,
     );
     // Only now do they hear anything back.
@@ -254,6 +434,8 @@ class ContactService extends ChangeNotifier {
     String publicKey,
     String displayName, {
     String? keyExchangePublicKey,
+    /// The relay they listen on, when a handshake or request told us.
+    String? relayHost,
     /// Whether to ask them to connect. False when we are answering a request
     /// they made, where the reply is sent separately.
     bool announce = true,
@@ -264,6 +446,8 @@ class ContactService extends ChangeNotifier {
     // key exchange key.
     String finalName = displayName;
     String? exchangeKey = keyExchangePublicKey;
+    String? relay = relayHost;
+    Object? devicesJson;
     try {
       // Only fetch when we do not already have the key — a scanned invite and
       // an inbound handshake both carry it, and the round trip would only add
@@ -284,6 +468,8 @@ class ContactService extends ChangeNotifier {
           if (exchangeKey == null && bundle['keyExchangePublicKey'] is String) {
             exchangeKey = bundle['keyExchangePublicKey'] as String;
           }
+          if (bundle['relay'] is String) relay = bundle['relay'] as String;
+          devicesJson = bundle['devices'];
         }
       }
     } catch (_) {
@@ -297,11 +483,14 @@ class ContactService extends ChangeNotifier {
       addedAt: DateTime.now(),
       // Waiting on them, not on us. Cleared when their acceptance arrives.
       isPending: announce,
+      relayHost: normaliseRelayHost(relay),
     );
 
     _contacts.add(contact);
     await _persistContacts();
     notifyListeners();
+    if (devicesJson != null) await applyDeviceList(publicKey, devicesJson);
+    _emitSync({'op': 'upsert', 'contact': getContact(publicKey)!.toJson()});
 
     if (contact.keyExchangePublicKey != null) {
       onContactReady?.call(publicKey);
@@ -313,6 +502,49 @@ class ContactService extends ChangeNotifier {
     }
   }
 
+  /// Someone used a sphere invite link. Set by the app; returns whether the
+  /// request was kept.
+  Future<bool> Function({
+    required String sphereId,
+    required String token,
+    required Map<String, dynamic> requester,
+  })? onJoinRequest;
+
+  /// Ask to join a sphere via the admin's open inbox. The admin decides.
+  Future<void> sendJoinRequest({
+    required String adminKey,
+    required String sphereId,
+    required String token,
+  }) async {
+    final payload = jsonEncode({
+      'type': 'sphere_join_request',
+      'sphere_id': sphereId,
+      'token': token,
+      'name': _myDisplayName ?? 'User',
+      'publicKey': _myPublicKey,
+      'keyExchangePublicKey': _myExchangeKey,
+      'relay': RelayConfig.primaryHost,
+      if (myDevices != null) 'devices': myDevices!(),
+    });
+    final ok = await _handshakeRelay.postToInbox(adminKey, payload);
+    if (!ok) throw StateError('Could not reach the relay to ask');
+  }
+
+  /// Handshakes per sender in the last hour. The inbox is the one open door,
+  /// so it gets a rate limit: a stranger may knock, not hammer.
+  final Map<String, List<DateTime>> _handshakeTimes = {};
+  static const int maxHandshakesPerHour = 5;
+  static const int maxPendingRequests = 50;
+
+  bool _withinRateLimit(String senderKey) {
+    final now = DateTime.now();
+    final times = _handshakeTimes.putIfAbsent(senderKey, () => [])
+      ..removeWhere((t) => now.difference(t) > const Duration(hours: 1));
+    if (times.length >= maxHandshakesPerHour) return false;
+    times.add(now);
+    return true;
+  }
+
   /// Handle incoming handshake from another peer.
   Future<void> handleIncomingHandshake(String senderKey, String data) async {
     try {
@@ -321,9 +553,32 @@ class ContactService extends ChangeNotifier {
       final name = json['name'] ?? 'Unknown';
       final publicKey = json['publicKey'];
       final exchangeKey = json['keyExchangePublicKey'];
+      final devices = json['devices'];
 
       if (publicKey is! String || publicKey.isEmpty) {
         DebugLogService().warn('Contacts', 'Handshake without a public key');
+        return;
+      }
+      if (!_withinRateLimit(publicKey)) {
+        DebugLogService().warn('Contacts', 'Too many handshakes from one key; ignoring');
+        return;
+      }
+
+      if (type == 'sphere_join_request') {
+        final sphereId = json['sphere_id'];
+        final token = json['token'];
+        if (sphereId is! String || token is! String) return;
+        await onJoinRequest?.call(
+          sphereId: sphereId,
+          token: token,
+          requester: {
+            'publicKey': publicKey,
+            'name': name,
+            if (exchangeKey is String) 'keyExchangePublicKey': exchangeKey,
+            if (json['relay'] is String) 'relay': json['relay'],
+            if (devices != null) 'devices': devices,
+          },
+        );
         return;
       }
 
@@ -332,6 +587,7 @@ class ContactService extends ChangeNotifier {
           publicKey,
           name,
           exchangeKey is String ? exchangeKey : null,
+          relayHost: normaliseRelayHost(json['relay']),
         );
       } else if (type == 'contact_accept') {
         DebugLogService().success('Contacts', '$name accepted your request');
@@ -339,6 +595,8 @@ class ContactService extends ChangeNotifier {
         if (exchangeKey is String) {
           await setExchangeKey(publicKey, exchangeKey);
         }
+        await setRelayHost(publicKey, json['relay']);
+        if (devices != null) await applyDeviceList(publicKey, devices);
       }
     } catch (e) {
       DebugLogService().error('Contacts', 'Handshake error: $e');
@@ -388,15 +646,120 @@ class ContactService extends ChangeNotifier {
       'name': _myDisplayName ?? 'User',
       'publicKey': _myPublicKey,
       'keyExchangePublicKey': _myExchangeKey,
+      'relay': RelayConfig.primaryHost,
+      if (myDevices != null) 'devices': myDevices!(),
     });
     
     _handshakeRelay.postToInbox(targetKey, payload);
+  }
+
+  /// Record which relay a contact listens on. Null or our own host means the
+  /// same relay as us. Only a hostname is accepted, so a bad value cannot turn
+  /// into a request to an arbitrary URL.
+  Future<void> setRelayHost(String publicKey, Object? host) async {
+    final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
+    if (index == -1) return;
+    final cleaned = normaliseRelayHost(host);
+    if (_contacts[index].relayHost == cleaned) return;
+    final c = _contacts[index];
+    _contacts[index] = Contact(
+      publicKey: c.publicKey,
+      keyExchangePublicKey: c.keyExchangePublicKey,
+      displayName: c.displayName,
+      nickname: c.nickname,
+      addedAt: c.addedAt,
+      blocked: c.blocked,
+      muted: c.muted,
+      following: c.following,
+      isPending: c.isPending,
+      feedDhtKey: c.feedDhtKey,
+      relayHost: cleaned,
+    );
+    await _persistContacts();
+    notifyListeners();
+  }
+
+  /// A relay host as it should be stored: lowercase hostname, or null when it
+  /// is ours, missing, or not a hostname.
+  static String? normaliseRelayHost(Object? host) {
+    if (host is! String) return null;
+    final trimmed = host.trim().toLowerCase();
+    if (trimmed.isEmpty) return null;
+    if (!RegExp(r'^[a-z0-9.-]+\.[a-z]{2,}$').hasMatch(trimmed)) return null;
+    if (trimmed == RelayConfig.primaryHost) return null;
+    return trimmed;
+  }
+
+  /// Where to send to this contact, or null for our own relay.
+  String? relayHostFor(String publicKey) => getContact(publicKey)?.relayHost;
+
+  // ── Profiles shared with contacts ─────────────────────────────────────────
+
+  /// Fetches a blob reference to a local file. Set by the app.
+  Future<String?> Function(String reference)? materialiseMedia;
+
+  /// A contact told us their current name, avatar and birthday. Avatars arrive
+  /// as blob references and are fetched like any media.
+  Future<void> applyProfile(String identityKey, Map<String, dynamic> profile) async {
+    final index = _contacts.indexWhere((c) => c.publicKey == identityKey);
+    if (index == -1) return;
+    final name = profile['name'];
+    final birthday = profile['birthday'];
+    String? avatar;
+    final avatarRef = profile['avatar'];
+    if (avatarRef is String && avatarRef.isNotEmpty) {
+      avatar = await materialiseMedia?.call(avatarRef);
+    }
+    _contacts[index] = _contacts[index].copyWith(
+      displayName: name is String && name.trim().isNotEmpty ? name.trim() : null,
+      birthday: birthday is String && RegExp(r'^\d\d-\d\d$').hasMatch(birthday) ? birthday : null,
+      avatarRef: avatar,
+    );
+    await _persistContacts();
+    notifyListeners();
+  }
+
+  /// Contacts whose birthday is today, MM-DD.
+  List<Contact> birthdaysToday() {
+    final now = DateTime.now();
+    final key = '${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    return _contacts.where((c) => c.birthday == key && !c.blocked).toList();
+  }
+
+  // ── Out-of-band verification ──────────────────────────────────────────────
+
+  /// Where a contact stands against the safety number computed right now.
+  ContactVerification verificationOf(String publicKey, String currentNumber) {
+    final stored = getContact(publicKey)?.verifiedFingerprint;
+    if (stored == null) return ContactVerification.unverified;
+    return stored == currentNumber
+        ? ContactVerification.verified
+        : ContactVerification.changed;
+  }
+
+  Future<void> markVerified(String publicKey, String number) async {
+    final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
+    if (index == -1) return;
+    _contacts[index] = _contacts[index].copyWith(verifiedFingerprint: number);
+    await _persistContacts();
+    notifyListeners();
+    _emitSync({'op': 'upsert', 'contact': _contacts[index].toJson()});
+  }
+
+  Future<void> clearVerified(String publicKey) async {
+    final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
+    if (index == -1) return;
+    _contacts[index] = _contacts[index].copyWith(clearVerified: true);
+    await _persistContacts();
+    notifyListeners();
+    _emitSync({'op': 'upsert', 'contact': _contacts[index].toJson()});
   }
 
   Future<void> removeContact(String publicKey) async {
     _contacts.removeWhere((c) => c.publicKey == publicKey);
     await _persistContacts();
     notifyListeners();
+    _emitSync({'op': 'remove', 'publicKey': publicKey});
   }
 
   Future<void> renameContact(String publicKey, String newName) async {
@@ -405,6 +768,7 @@ class ContactService extends ChangeNotifier {
       _contacts[index] = _contacts[index].copyWith(displayName: newName);
       await _persistContacts();
       notifyListeners();
+      _emitSync({'op': 'upsert', 'contact': _contacts[index].toJson()});
     }
   }
 
@@ -412,6 +776,7 @@ class ContactService extends ChangeNotifier {
     final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
     if (index != -1) {
       _contacts[index] = _contacts[index].copyWith(blocked: !_contacts[index].blocked);
+      _emitSync({'op': 'upsert', 'contact': _contacts[index].toJson()});
       await _persistContacts();
       notifyListeners();
     }
@@ -444,6 +809,7 @@ class ContactService extends ChangeNotifier {
       );
       _persistContacts();
       notifyListeners();
+      _emitSync({'op': 'upsert', 'contact': _contacts[index].toJson()});
     }
   }
 
@@ -472,3 +838,6 @@ class ContactService extends ChangeNotifier {
     await prefs.setString(_prefsContactsKey, jsonEncode(_contacts.map((e) => e.toJson()).toList()));
   }
 }
+
+/// Whether a contact's keys were confirmed out of band, and still match.
+enum ContactVerification { unverified, verified, changed }

@@ -89,6 +89,7 @@ class _ContactListTile extends StatelessWidget {
     return ListTile(
       leading: UserAvatar(
         displayName: contact.displayName,
+        imageRef: contact.avatarRef,
         size: AvatarSize.medium,
       ),
       title: Text(

@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'call_config.dart';
+
 /// Which relay this device talks to.
 ///
 /// The relay holds no keys, no configuration and no user records, so pointing
@@ -47,6 +49,7 @@ class RelayConfig extends ChangeNotifier {
     }
 
     primaryHost = trimmed;
+    CallConfig.forgetIssued();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsKey, trimmed);
     notifyListeners();
@@ -55,6 +58,7 @@ class RelayConfig extends ChangeNotifier {
 
   Future<void> resetToDefault() async {
     primaryHost = defaultHost;
+    CallConfig.forgetIssued();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);
     notifyListeners();

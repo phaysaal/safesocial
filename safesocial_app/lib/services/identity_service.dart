@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,10 +10,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:cryptography/cryptography.dart';
 
+import '../crypto/device.dart';
 import '../crypto/spheres_crypto.dart';
 import '../crypto/vault.dart';
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
+import 'relay_config.dart';
 import 'relay_service.dart';
 
 class IdentityKeyPair {
@@ -39,6 +42,8 @@ class IdentityService extends ChangeNotifier {
   static const _prefsPubKeyKey = 'spheres_identity_pubkey';
   static const _secureSecretKey = 'spheres_identity_secret';
   static const _secureExchangeSecretKey = 'spheres_identity_x25519_secret';
+  static const _secureDeviceIdKey = 'spheres_device_id';
+  static const _prefsDevicesKey = 'spheres_devices_v1';
 
   final _secureStorage = const FlutterSecureStorage();
 
@@ -47,7 +52,35 @@ class IdentityService extends ChangeNotifier {
   SimpleKeyPair? _exchangeKeyPair;
   String? _exchangePublicKeyHex;
 
+  /// This install's device id, and the signed list of every device this
+  /// identity uses. See [DeviceList] for what revocation can and cannot do.
+  String? _deviceId;
+  DeviceList? _deviceList;
+
+  /// Fired when the device list changes here, so the app can publish the new
+  /// bundle and tell contacts and our other devices.
+  void Function(DeviceList list)? onDeviceListChanged;
+
   IdentityService();
+
+  String? get deviceId => _deviceId;
+  DeviceList? get deviceList => _deviceList;
+
+  /// True when a newer list from another of our devices no longer includes
+  /// this one. Contacts have stopped sending here; the UI should say so.
+  bool get thisDeviceRevoked {
+    final list = _deviceList;
+    final key = _exchangePublicKeyHex;
+    return list != null && key != null && !list.hasExchangeKey(key);
+  }
+
+  /// Every X25519 device key this identity uses, this device included.
+  List<String> get deviceExchangeKeys {
+    final list = _deviceList;
+    if (list != null && list.devices.isNotEmpty) return list.exchangeKeys;
+    final key = _exchangePublicKeyHex;
+    return key == null ? const [] : [key];
+  }
 
   UserProfile? get currentIdentity => _currentIdentity;
   String? get publicKey => _keypair?.publicKey;
@@ -93,6 +126,9 @@ class IdentityService extends ChangeNotifier {
     _exchangeKeyPair = pair;
     _exchangePublicKeyHex = hex.encode((await pair.extractPublicKey()).bytes);
     DebugLogService().info('Identity', 'Key exchange keypair ready');
+    // A new device key means a new device entry; the old one, if any, stays
+    // listed until revoked — it may be a phone that is still in use.
+    await _ensureDeviceListed();
 
     // Publish it so contacts can start encrypting to us.
     if (_currentIdentity != null &&
@@ -103,6 +139,175 @@ class IdentityService extends ChangeNotifier {
       );
       await _persistIdentity();
     }
+  }
+
+  // ── Devices ───────────────────────────────────────────────────────────────
+
+  Future<String> _ensureDeviceId() async {
+    final existing = _deviceId ?? await _secureStorage.read(key: _secureDeviceIdKey);
+    if (existing != null && existing.isNotEmpty) {
+      _deviceId = existing;
+      return existing;
+    }
+    final id = hex.encode(SpheresCrypto.randomBytes(8));
+    await _secureStorage.write(key: _secureDeviceIdKey, value: id);
+    _deviceId = id;
+    return id;
+  }
+
+  Future<void> _loadDeviceList() async {
+    if (_deviceList != null) return;
+    final raw = await SecureStore.instance.getString(_prefsDevicesKey);
+    if (raw == null) return;
+    try {
+      final list = DeviceList.fromJson(jsonDecode(raw));
+      if (list != null && list.verify() && list.identityKey == _keypair?.publicKey) {
+        _deviceList = list;
+      }
+    } catch (_) {
+      // Rebuilt below from this device alone.
+    }
+  }
+
+  /// Make sure this device's key is in the signed list, signing a new list if
+  /// it is not. Runs whenever the exchange key is established.
+  Future<void> _ensureDeviceListed() async {
+    final keypair = _keypair;
+    final xk = _exchangePublicKeyHex;
+    if (keypair == null || xk == null) return;
+    await _loadDeviceList();
+    final id = await _ensureDeviceId();
+
+    final current = _deviceList;
+    if (current != null && current.hasExchangeKey(xk)) return;
+
+    final cert = DeviceCert.issue(
+      identityKey: keypair.publicKey,
+      identitySecret: keypair.secretKey,
+      deviceId: id,
+      exchangeKey: xk,
+      name: _defaultDeviceName(),
+    );
+    final devices = [
+      ...?current?.devices.where((d) => d.deviceId != id),
+      cert,
+    ];
+    await _adoptOwnList(DeviceList.sign(
+      identityKey: keypair.publicKey,
+      identitySecret: keypair.secretKey,
+      devices: devices,
+    ));
+  }
+
+  static String _defaultDeviceName() {
+    try {
+      return 'This ${Platform.operatingSystem} device';
+    } catch (_) {
+      return 'This device';
+    }
+  }
+
+  Future<void> _adoptOwnList(DeviceList list) async {
+    _deviceList = list;
+    await SecureStore.instance.setString(
+      _prefsDevicesKey,
+      jsonEncode(list.toJson(includeNames: true)),
+    );
+    notifyListeners();
+    onDeviceListChanged?.call(list);
+  }
+
+  /// Stop sending to a device. It keeps whatever it already has, and it still
+  /// holds the identity secret — see [DeviceList].
+  Future<void> revokeDevice(String deviceId) async {
+    final keypair = _keypair;
+    final list = _deviceList;
+    if (keypair == null || list == null) return;
+    if (deviceId == _deviceId) {
+      throw StateError('Revoke this device from another one, or reset it.');
+    }
+    final remaining = list.devices.where((d) => d.deviceId != deviceId).toList();
+    if (remaining.length == list.devices.length) return;
+    await _adoptOwnList(DeviceList.sign(
+      identityKey: keypair.publicKey,
+      identitySecret: keypair.secretKey,
+      devices: remaining,
+    ));
+  }
+
+  /// Label a device for our own list. Not signed and never sent.
+  Future<void> renameDevice(String deviceId, String name) async {
+    final list = _deviceList;
+    if (list == null) return;
+    final devices = list.devices
+        .map((d) => d.deviceId == deviceId ? d.withName(name.trim()) : d)
+        .toList();
+    _deviceList = DeviceList(
+      identityKey: list.identityKey,
+      devices: devices,
+      version: list.version,
+      signature: list.signature,
+    );
+    await SecureStore.instance.setString(
+      _prefsDevicesKey,
+      jsonEncode(_deviceList!.toJson(includeNames: true)),
+    );
+    notifyListeners();
+  }
+
+  /// A signed list from one of our other devices. Adopted when it is newer
+  /// and verifies; local names are kept.
+  Future<bool> adoptDeviceList(Object? json) async {
+    final keypair = _keypair;
+    if (keypair == null) return false;
+    final list = DeviceList.fromJson(json);
+    if (list == null || list.identityKey != keypair.publicKey || !list.verify()) {
+      return false;
+    }
+    final current = _deviceList;
+    if (current != null && list.version <= current.version) return false;
+
+    final named = list.devices
+        .map((d) => d.withName(current?.byId(d.deviceId)?.name ?? d.name))
+        .toList();
+    _deviceList = DeviceList(
+      identityKey: list.identityKey,
+      devices: named,
+      version: list.version,
+      signature: list.signature,
+    );
+    await SecureStore.instance.setString(
+      _prefsDevicesKey,
+      jsonEncode(_deviceList!.toJson(includeNames: true)),
+    );
+    notifyListeners();
+    return true;
+  }
+
+  /// Issue a certificate for a device being linked, and add it to the list.
+  Future<DeviceList?> addLinkedDevice({
+    required String deviceId,
+    required String exchangeKey,
+    String? name,
+  }) async {
+    final keypair = _keypair;
+    if (keypair == null) return null;
+    await _loadDeviceList();
+    final list = _deviceList;
+    if (list != null && list.hasExchangeKey(exchangeKey)) return list;
+    final cert = DeviceCert.issue(
+      identityKey: keypair.publicKey,
+      identitySecret: keypair.secretKey,
+      deviceId: deviceId,
+      exchangeKey: exchangeKey,
+      name: name,
+    );
+    await _adoptOwnList(DeviceList.sign(
+      identityKey: keypair.publicKey,
+      identitySecret: keypair.secretKey,
+      devices: [...?list?.devices.where((d) => d.deviceId != deviceId), cert],
+    ));
+    return _deviceList;
   }
 
   /// Generate a new identity keypair and profile.
@@ -138,16 +343,22 @@ class IdentityService extends ChangeNotifier {
     }
   }
 
+  /// Fired after the profile changes, so the app can tell contacts. Set by
+  /// the app.
+  Future<void> Function(UserProfile profile)? onProfileChanged;
+
   /// Update the user's profile information.
-  Future<void> updateProfile({String? displayName, String? bio}) async {
+  Future<void> updateProfile({String? displayName, String? bio, String? birthday}) async {
     if (_currentIdentity == null) return;
     _currentIdentity = _currentIdentity!.copyWith(
       displayName: displayName ?? _currentIdentity!.displayName,
       bio: bio ?? _currentIdentity!.bio,
+      birthday: birthday ?? _currentIdentity!.birthday,
       updatedAt: DateTime.now(),
     );
     await _persistIdentity();
     notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
   }
 
   /// Update the user's avatar.
@@ -159,6 +370,7 @@ class IdentityService extends ChangeNotifier {
     );
     await _persistIdentity();
     notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
   }
 
   /// Export the current identity as a passphrase-encrypted vault.
@@ -176,6 +388,7 @@ class IdentityService extends ChangeNotifier {
         'key': _keypair!.publicKey,
         'secret': _keypair!.secretKey,
         'profile': _currentIdentity?.toJson(),
+        if (_deviceList != null) 'devices': _deviceList!.toJson(),
       }),
       passphrase: passphrase,
     );
@@ -207,10 +420,21 @@ class IdentityService extends ChangeNotifier {
       }
 
       // A restored identity may predate key exchange, or its X25519 secret may
-      // not have travelled with it. Either way, establish one now.
+      // not have travelled with it. Either way, establish one now — this
+      // device gets its own key and adds itself to the device list.
       _exchangeKeyPair = null;
       _exchangePublicKeyHex = null;
+      _deviceList = null;
+      if (data['devices'] != null) {
+        final list = DeviceList.fromJson(data['devices']);
+        if (list != null && list.identityKey == _keypair!.publicKey && list.verify()) {
+          _deviceList = list;
+          await SecureStore.instance.setString(
+              _prefsDevicesKey, jsonEncode(list.toJson(includeNames: true)));
+        }
+      }
       await _ensureExchangeKeyPair();
+      await _ensureDeviceListed();
 
       await _persistIdentity();
       notifyListeners();
@@ -241,6 +465,7 @@ class IdentityService extends ChangeNotifier {
       if (pubKey != null && secretKey != null) {
         _keypair = IdentityKeyPair(publicKey: pubKey, secretKey: secretKey);
         await _ensureExchangeKeyPair();
+        await _ensureDeviceListed();
         DebugLogService().success('Identity', 'Secure identity restored');
       } else {
         // Migration from old SharedPreferences keypair if exists
@@ -272,6 +497,8 @@ class IdentityService extends ChangeNotifier {
     _keypair = null;
     _exchangeKeyPair = null;
     _exchangePublicKeyHex = null;
+    _deviceId = null;
+    _deviceList = null;
 
     try {
       final appDir = await getApplicationDocumentsDirectory();
@@ -313,6 +540,13 @@ class IdentityService extends ChangeNotifier {
     final bundle = {
       'publicKey': _keypair!.publicKey,
       'keyExchangePublicKey': exchangeKey,
+      // Where we listen. A contact on another relay sends here; that is the
+      // whole federation mechanism, and it rides inside the signature so an
+      // operator cannot redirect our mail.
+      'relay': RelayConfig.primaryHost,
+      // Every device we use, each with its own key, signed. A contact seals
+      // once per device so that all of them can read.
+      if (_deviceList != null) 'devices': _deviceList!.toJson(),
       'updatedAt': DateTime.now().toIso8601String(),
     };
     final bundleJson = jsonEncode(bundle);

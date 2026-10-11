@@ -381,6 +381,115 @@ class SphereService extends ChangeNotifier {
   static const _prefsAuditKey = 'spheres_sphere_audit_v1';
   static const _prefsOffersKey = 'spheres_transfer_offers_v1';
   static const _prefsProposalsKey = 'spheres_removal_proposals_v1';
+  static const _prefsInviteTokensKey = 'spheres_invite_tokens_v1';
+  static const _prefsJoinRequestsKey = 'spheres_join_requests_v1';
+
+  // ── Invite links and join requests ───────────────────────────────────────
+
+  /// Sphere id -> the secret in this admin's invite link. Anyone holding the
+  /// link can *ask*; an admin still says yes. Rotating the token retires every
+  /// copy of the link.
+  final Map<String, String> _inviteTokens = {};
+
+  /// Sphere id -> people who asked to join via a link, with what they sent.
+  final Map<String, List<Map<String, dynamic>>> _joinRequests = {};
+
+  List<Map<String, dynamic>> joinRequestsFor(String sphereId) =>
+      List.unmodifiable(_joinRequests[sphereId] ?? const []);
+
+  int get pendingJoinRequests =>
+      _joinRequests.values.fold(0, (n, l) => n + l.length);
+
+  /// The link to share. Carries the sphere id, this admin's identity key (so
+  /// the request can be posted to our inbox) and a token only our device knows.
+  String inviteLink(String sphereId) {
+    final sphere = _requireAdmin(sphereId);
+    var token = _inviteTokens[sphereId];
+    if (token == null) {
+      token = hex.encode(SpheresCrypto.randomBytes(16));
+      _inviteTokens[sphereId] = token;
+      SecureStore.instance.setString(_prefsInviteTokensKey, jsonEncode(_inviteTokens));
+    }
+    return Uri(
+      scheme: 'spheres',
+      host: 'join',
+      queryParameters: {
+        's': sphereId,
+        't': token,
+        'via': _myIdentityKey!,
+        'n': sphere.name,
+      },
+    ).toString();
+  }
+
+  Future<void> rotateInviteLink(String sphereId) async {
+    _requireAdmin(sphereId);
+    _inviteTokens.remove(sphereId);
+    await SecureStore.instance.setString(_prefsInviteTokensKey, jsonEncode(_inviteTokens));
+    notifyListeners();
+  }
+
+  /// Someone used a link. Kept only if the token is the current one.
+  Future<bool> recordJoinRequest({
+    required String sphereId,
+    required String token,
+    required Map<String, dynamic> requester,
+  }) async {
+    final sphere = _spheres[sphereId];
+    final me = _myIdentityKey;
+    if (sphere == null || me == null || !sphere.isAdmin(me)) return false;
+    if (_inviteTokens[sphereId] != token) {
+      DebugLogService().warn('Sphere', 'Join request with a stale or wrong token');
+      return false;
+    }
+    final key = requester['publicKey'];
+    if (key is! String || key.isEmpty) return false;
+    if (sphere.contains(key)) return false;
+    final list = _joinRequests.putIfAbsent(sphereId, () => []);
+    list.removeWhere((r) => r['publicKey'] == key);
+    list.add({...requester, 'at': DateTime.now().toIso8601String()});
+    await SecureStore.instance.setString(_prefsJoinRequestsKey, jsonEncode(_joinRequests));
+    notifyListeners();
+    return true;
+  }
+
+  /// The app makes the requester a contact first (so there is a channel), then
+  /// this adds them. Set by the app.
+  Future<void> Function(Map<String, dynamic> requester)? onBeforeApproveJoin;
+
+  Future<void> approveJoin(String sphereId, String publicKey) async {
+    final list = _joinRequests[sphereId];
+    final request = list?.firstWhere((r) => r['publicKey'] == publicKey, orElse: () => const {});
+    if (request == null || request.isEmpty) return;
+    await onBeforeApproveJoin?.call(request);
+    await addMember(sphereId, publicKey);
+    list!.removeWhere((r) => r['publicKey'] == publicKey);
+    await SecureStore.instance.setString(_prefsJoinRequestsKey, jsonEncode(_joinRequests));
+    notifyListeners();
+  }
+
+  Future<void> rejectJoin(String sphereId, String publicKey) async {
+    _joinRequests[sphereId]?.removeWhere((r) => r['publicKey'] == publicKey);
+    await SecureStore.instance.setString(_prefsJoinRequestsKey, jsonEncode(_joinRequests));
+    notifyListeners();
+  }
+
+  Future<void> _loadInviteState() async {
+    try {
+      final tokens = await SecureStore.instance.getString(_prefsInviteTokensKey);
+      if (tokens != null) {
+        (jsonDecode(tokens) as Map<String, dynamic>).forEach((k, v) {
+          if (v is String) _inviteTokens[k] = v;
+        });
+      }
+      final requests = await SecureStore.instance.getString(_prefsJoinRequestsKey);
+      if (requests != null) {
+        (jsonDecode(requests) as Map<String, dynamic>).forEach((k, v) {
+          _joinRequests[k] = (v as List).cast<Map<String, dynamic>>();
+        });
+      }
+    } catch (_) {}
+  }
 
   /// Entries kept per sphere. Enough to cover any argument worth having, and
   /// bounded so a long-lived sphere cannot grow local storage without limit.
@@ -419,7 +528,8 @@ class SphereService extends ChangeNotifier {
 
   /// Sends a sealed payload to one contact. Supplied by the app so this
   /// service does not need to own a transport.
-  Future<bool> Function(String peerIdentityKey, String payload)? sendToPeer;
+  Future<bool> Function(String peerIdentityKey, String payload,
+      {String? deviceKey})? sendToPeer;
 
   List<Sphere> get spheres => List.unmodifiable(_spheres.values);
 
@@ -1213,22 +1323,47 @@ class SphereService extends ChangeNotifier {
     if (send == null || sessions == null) return;
 
     final payload = jsonEncode({'statement': statement.toJson()});
-    for (final peer in sphere.othersThan(_myIdentityKey!)) {
+    await _sendOpPayload(sphere, payload, send, sessions, 'statement');
+  }
+
+  /// Seal an operation payload for every device of every other member, and
+  /// for our own other devices, and hand each copy to the transport.
+  Future<void> _sendOpPayload(
+    Sphere sphere,
+    String payload,
+    Future<bool> Function(String, String, {String? deviceKey}) send,
+    SessionManager sessions,
+    String what,
+  ) async {
+    final me = _myIdentityKey!;
+    for (final peer in sphere.othersThan(me)) {
       try {
-        final sealed = await sessions.seal(
+        final sealed = await sessions.sealForDevices(
           peerIdentityKey: peer,
-          peerKeyExchangePublicKey: _resolveExchangeKey?.call(peer),
+          fallbackExchangeKey: _resolveExchangeKey?.call(peer),
           type: 'sphere_op',
           plaintext: payload,
           mode: SealMode.wrap,
         );
-        await send(peer, sealed);
+        for (final item in sealed) {
+          await send(peer, item.sealed, deviceKey: item.deviceKey);
+        }
       } on NoSessionException {
         DebugLogService().warn(
-            'Sphere', 'No encryption key for $peer yet; they will not see this');
+            'Sphere', 'No encryption key for $peer yet; they will not see this $what');
       } catch (e) {
-        DebugLogService().error('Sphere', 'Could not send statement: $e');
+        DebugLogService().error('Sphere', 'Could not send $what: $e');
       }
+    }
+    // Our other devices learn the change — and, with it, the sphere key.
+    try {
+      final own = await sessions.sealForOwnDevices(
+          type: 'sphere_op', plaintext: payload, mode: SealMode.wrap);
+      for (final item in own) {
+        await send(me, item.sealed, deviceKey: item.deviceKey);
+      }
+    } catch (e) {
+      DebugLogService().warn('Sphere', 'Could not reach our other devices: $e');
     }
   }
 
@@ -1284,23 +1419,7 @@ class SphereService extends ChangeNotifier {
       if (key != null) 'sphereKey': base64Encode(key),
     });
 
-    for (final peer in sphere.othersThan(me)) {
-      try {
-        final sealed = await sessions.seal(
-          peerIdentityKey: peer,
-          peerKeyExchangePublicKey: _resolveExchangeKey?.call(peer),
-          type: 'sphere_op',
-          plaintext: payload,
-          mode: SealMode.wrap,
-        );
-        await send(peer, sealed);
-      } on NoSessionException {
-        DebugLogService().warn('Sphere',
-            'No encryption key for $peer yet; they will not receive this change');
-      } catch (e) {
-        DebugLogService().error('Sphere', 'Could not send membership op: $e');
-      }
-    }
+    await _sendOpPayload(sphere, payload, send, sessions, 'membership change');
   }
 
   // ── Inbound ────────────────────────────────────────────────────────────────
@@ -1960,6 +2079,7 @@ class SphereService extends ChangeNotifier {
   }
 
   Future<void> load() async {
+    await _loadInviteState();
     await keyring.load();
     final prefs = SecureStore.instance;
 

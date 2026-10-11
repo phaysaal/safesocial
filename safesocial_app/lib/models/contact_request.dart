@@ -22,11 +22,15 @@ class ContactRequest with EquatableMixin {
 
   final DateTime receivedAt;
 
+  /// The relay they listen on, if the request said and it is not ours.
+  final String? relayHost;
+
   const ContactRequest({
     required this.publicKey,
     required this.displayName,
     required this.keyExchangePublicKey,
     required this.receivedAt,
+    this.relayHost,
   });
 
   Map<String, dynamic> toJson() => {
@@ -35,6 +39,7 @@ class ContactRequest with EquatableMixin {
         if (keyExchangePublicKey != null)
           'keyExchangePublicKey': keyExchangePublicKey,
         'receivedAt': receivedAt.toIso8601String(),
+        if (relayHost != null) 'relayHost': relayHost,
       };
 
   static ContactRequest fromJson(Map<String, dynamic> json) => ContactRequest(
@@ -42,9 +47,10 @@ class ContactRequest with EquatableMixin {
         displayName: json['displayName'] as String? ?? 'Unknown',
         keyExchangePublicKey: json['keyExchangePublicKey'] as String?,
         receivedAt: DateTime.parse(json['receivedAt'] as String),
+        relayHost: json['relayHost'] as String?,
       );
 
   @override
   List<Object?> get props =>
-      [publicKey, displayName, keyExchangePublicKey, receivedAt];
+      [publicKey, displayName, keyExchangePublicKey, receivedAt, relayHost];
 }

@@ -9,7 +9,11 @@ import 'spheres_crypto.dart';
 
 /// Wire format version. Bump on any change to [Envelope._signedBytes] or the
 /// field set, and reject unknown versions rather than guessing.
-const int kEnvelopeVersion = 2;
+///
+/// 3 added [Envelope.fromDevice]: the sender's X25519 device key, so a
+/// receiver can pick the session for the device that sealed this when the
+/// sender has more than one.
+const int kEnvelopeVersion = 3;
 
 /// How the payload key was established.
 enum SealMode {
@@ -55,6 +59,11 @@ class Envelope {
   /// Sender's Ed25519 identity public key, hex.
   final String from;
 
+  /// X25519 public key of the sender's *device*, hex. One identity may have
+  /// several devices, each with its own pairwise session; this says which one
+  /// sealed the envelope. Signed, so a device cannot be misattributed.
+  final String fromDevice;
+
   /// Chain index. Meaningful in [SealMode.chain] only; -1 otherwise.
   final int sequence;
 
@@ -84,6 +93,7 @@ class Envelope {
     required this.mode,
     required this.type,
     required this.from,
+    required this.fromDevice,
     required this.sequence,
     required this.id,
     required this.timestampMs,
@@ -106,6 +116,7 @@ class Envelope {
     required SealMode mode,
     required String type,
     required String from,
+    required String fromDevice,
     required int sequence,
     required String id,
     required int timestampMs,
@@ -121,6 +132,7 @@ class Envelope {
       mode.name,
       type,
       from,
+      fromDevice,
       '$sequence',
       id,
       '$timestampMs',
@@ -138,6 +150,7 @@ class Envelope {
         mode: mode,
         type: type,
         from: from,
+        fromDevice: fromDevice,
         sequence: sequence,
         id: id,
         timestampMs: timestampMs,
@@ -165,6 +178,7 @@ class Envelope {
       mode: SealMode.chain,
       type: type,
       from: session.myIdentityKey,
+      fromDevice: session.myDeviceKey,
       sequence: step.index,
       payloadKey: step.key,
       plaintext: plaintext,
@@ -198,6 +212,7 @@ class Envelope {
       mode: SealMode.wrap,
       type: type,
       from: session.myIdentityKey,
+      fromDevice: session.myDeviceKey,
       sequence: -1,
       payloadKey: contentKey,
       plaintext: plaintext,
@@ -211,6 +226,7 @@ class Envelope {
     required SealMode mode,
     required String type,
     required String from,
+    required String fromDevice,
     required int sequence,
     required Uint8List payloadKey,
     required List<int> plaintext,
@@ -229,6 +245,7 @@ class Envelope {
       mode: mode,
       type: type,
       from: from,
+      fromDevice: fromDevice,
       sequence: sequence,
       id: id,
       timestampMs: timestampMs,
@@ -256,6 +273,7 @@ class Envelope {
       mode: mode,
       type: type,
       from: from,
+      fromDevice: fromDevice,
       sequence: sequence,
       id: id,
       timestampMs: timestampMs,
@@ -284,6 +302,7 @@ class Envelope {
     required List<int> plaintext,
     required String myIdentityKey,
     required String myIdentitySecretHex,
+    String myDeviceKey = '',
   }) async {
     final contentKey = SpheresCrypto.randomKey();
     final wrapNonce = SpheresCrypto.randomNonce();
@@ -298,6 +317,7 @@ class Envelope {
       mode: SealMode.sphere,
       type: type,
       from: myIdentityKey,
+      fromDevice: myDeviceKey,
       sequence: -1,
       payloadKey: contentKey,
       plaintext: plaintext,
@@ -352,6 +372,13 @@ class Envelope {
     if (session.peerIdentityKey != from) {
       throw EnvelopeException(
         'Session is for ${session.peerIdentityKey} but envelope is from $from',
+      );
+    }
+    if (fromDevice.isNotEmpty &&
+        session.peerDeviceKey.isNotEmpty &&
+        session.peerDeviceKey != fromDevice) {
+      throw const EnvelopeException(
+        'Session is for a different device of this sender',
       );
     }
 
@@ -427,6 +454,7 @@ class Envelope {
         'mode': mode.name,
         'type': type,
         'from': from,
+        'fd': fromDevice,
         'n': sequence,
         'id': id,
         'ts': timestampMs,
@@ -487,6 +515,7 @@ class Envelope {
 
     if (json['type'] is! String ||
         json['from'] is! String ||
+        json['fd'] is! String ||
         json['id'] is! String ||
         json['n'] is! int ||
         json['ts'] is! int) {
@@ -498,6 +527,7 @@ class Envelope {
       mode: mode,
       type: json['type'] as String,
       from: json['from'] as String,
+      fromDevice: json['fd'] as String,
       sequence: json['n'] as int,
       id: json['id'] as String,
       timestampMs: json['ts'] as int,

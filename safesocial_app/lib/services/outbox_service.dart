@@ -29,6 +29,11 @@ class OutboxEntry {
   /// Contact this is addressed to (Ed25519 identity key, hex).
   final String peer;
 
+  /// Which of their devices (X25519 key, hex), or null for a single-device
+  /// contact. One message to a contact with three devices is three entries
+  /// sharing an [id]; they are reported as one.
+  final String? device;
+
   /// The sealed envelope, ready to transmit. Already encrypted — the outbox
   /// never holds plaintext.
   final String payload;
@@ -43,6 +48,7 @@ class OutboxEntry {
     required this.peer,
     required this.payload,
     required this.queuedAt,
+    this.device,
     this.state = OutboxState.pending,
     this.attempts = 0,
     this.lastAttemptAt,
@@ -51,6 +57,7 @@ class OutboxEntry {
   Map<String, dynamic> toJson() => {
         'id': id,
         'peer': peer,
+        if (device != null) 'device': device,
         'payload': payload,
         'queuedAt': queuedAt.toIso8601String(),
         'state': state.name,
@@ -66,6 +73,7 @@ class OutboxEntry {
     return OutboxEntry(
       id: json['id'] as String,
       peer: json['peer'] as String,
+      device: json['device'] as String?,
       payload: json['payload'] as String,
       queuedAt: DateTime.parse(json['queuedAt'] as String),
       state: state,
@@ -112,7 +120,8 @@ class OutboxService extends ChangeNotifier {
   bool _flushing = false;
 
   /// Hands a payload to the transport. Returns true if the relay accepted it.
-  Future<bool> Function(String peer, String payload)? send;
+  /// [device] is the peer device it is for, or null for a single-device peer.
+  Future<bool> Function(String peer, String payload, {String? deviceKey})? send;
 
   List<OutboxEntry> get entries => List.unmodifiable(_entries);
 
@@ -120,11 +129,26 @@ class OutboxService extends ChangeNotifier {
   int get pendingCount =>
       _entries.where((e) => e.state == OutboxState.pending).length;
 
+  /// One state for a message, however many devices it went to: delivered if
+  /// any device confirmed, pending if any is still waiting, failed only if
+  /// every copy gave up.
   OutboxState? stateOf(String messageId) {
+    OutboxState? result;
     for (final entry in _entries) {
-      if (entry.id == messageId) return entry.state;
+      if (entry.id != messageId) continue;
+      final state = entry.state;
+      if (state == OutboxState.delivered) return state;
+      if (result == null) {
+        result = state;
+        continue;
+      }
+      if (state == OutboxState.pending || result == OutboxState.pending) {
+        result = OutboxState.pending;
+      } else if (state == OutboxState.sent || result == OutboxState.sent) {
+        result = OutboxState.sent;
+      }
     }
-    return null;
+    return result;
   }
 
   void start() {
@@ -142,15 +166,30 @@ class OutboxService extends ChangeNotifier {
     required String id,
     required String peer,
     required String payload,
-  }) async {
-    if (_entries.any((e) => e.id == id)) return;
+    String? device,
+  }) =>
+      enqueueAll(id: id, peer: peer, payloads: {device: payload});
 
-    _entries.add(OutboxEntry(
-      id: id,
-      peer: peer,
-      payload: payload,
-      queuedAt: DateTime.now(),
-    ));
+  /// Queue one message sealed for several devices of [peer]. The copies share
+  /// [id], so receipts and the UI treat them as one message.
+  Future<void> enqueueAll({
+    required String id,
+    required String peer,
+    required Map<String?, String> payloads,
+  }) async {
+    if (_entries.any((e) => e.id == id && e.peer == peer)) return;
+    if (payloads.isEmpty) return;
+
+    final now = DateTime.now();
+    for (final entry in payloads.entries) {
+      _entries.add(OutboxEntry(
+        id: id,
+        peer: peer,
+        device: entry.key,
+        payload: entry.value,
+        queuedAt: now,
+      ));
+    }
     await _persist();
     notifyListeners();
 
@@ -174,7 +213,7 @@ class OutboxService extends ChangeNotifier {
         entry.attempts++;
         entry.lastAttemptAt = DateTime.now();
 
-        final ok = await send!(entry.peer, entry.payload);
+        final ok = await send!(entry.peer, entry.payload, deviceKey: entry.device);
         if (ok) {
           entry.state = OutboxState.sent;
           changed = true;
@@ -199,29 +238,36 @@ class OutboxService extends ChangeNotifier {
     }
   }
 
-  /// Mark a message confirmed by the recipient.
+  /// Mark a message confirmed by the recipient. Any one of their devices
+  /// confirming is enough: the person has it.
   Future<void> markDelivered(String messageId) async {
+    var changed = false;
     for (final entry in _entries) {
       if (entry.id == messageId && entry.state != OutboxState.delivered) {
         entry.state = OutboxState.delivered;
-        await _persist();
-        notifyListeners();
-        return;
+        changed = true;
       }
+    }
+    if (changed) {
+      await _persist();
+      notifyListeners();
     }
   }
 
-  /// Retry an entry that previously gave up.
+  /// Retry the copies of a message that previously gave up.
   Future<void> retry(String messageId) async {
+    var changed = false;
     for (final entry in _entries) {
       if (entry.id == messageId && entry.state == OutboxState.failed) {
         entry.state = OutboxState.pending;
         entry.attempts = 0;
-        await _persist();
-        notifyListeners();
-        await flush();
-        return;
+        changed = true;
       }
+    }
+    if (changed) {
+      await _persist();
+      notifyListeners();
+      await flush();
     }
   }
 
