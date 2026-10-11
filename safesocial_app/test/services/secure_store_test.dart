@@ -124,13 +124,15 @@ void main() {
   });
 
   test('sensitive string lists are encrypted and round trip', () async {
+    // Markers long enough that random base64 ciphertext cannot contain
+    // one by chance, which 'p1' once did.
     await SecureStore.instance
-        .setStringList('spheres_hidden_posts', ['p1', 'p2']);
+        .setStringList('spheres_hidden_posts', ['post-one-marker', 'post-two-marker']);
 
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('spheres_hidden_posts'), isNot(contains('p1')));
+    expect(prefs.getString('spheres_hidden_posts'), isNot(contains('post-one-marker')));
     expect(await SecureStore.instance.getStringList('spheres_hidden_posts'),
-        ['p1', 'p2']);
+        ['post-one-marker', 'post-two-marker']);
   });
 
   test('clearing removes the key, so residue is unreadable', () async {

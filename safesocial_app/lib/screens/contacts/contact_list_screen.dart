@@ -87,10 +87,14 @@ class _ContactListTile extends StatelessWidget {
     final contactService = context.read<ContactService>();
 
     return ListTile(
-      leading: UserAvatar(
-        displayName: contact.displayName,
-        imageRef: contact.avatarRef,
-        size: AvatarSize.medium,
+      leading: InkWell(
+        onTap: () => context.push('/contact/${contact.publicKey}'),
+        borderRadius: BorderRadius.circular(24),
+        child: UserAvatar(
+          displayName: contact.displayName,
+          imageRef: contact.avatarRef,
+          size: AvatarSize.medium,
+        ),
       ),
       title: Text(
         contact.displayName,
@@ -105,6 +109,14 @@ class _ContactListTile extends StatelessWidget {
       trailing: PopupMenuButton<String>(
         onSelected: (value) => _handleMenuAction(context, value, contactService),
         itemBuilder: (context) => [
+          const PopupMenuItem(
+            value: 'profile',
+            child: ListTile(
+              leading: Icon(Icons.person_outline),
+              title: Text('View profile'),
+              dense: true,
+            ),
+          ),
           const PopupMenuItem(
             value: 'rename',
             child: ListTile(
@@ -146,6 +158,9 @@ class _ContactListTile extends StatelessWidget {
 
   void _handleMenuAction(BuildContext context, String action, ContactService service) {
     switch (action) {
+      case 'profile':
+        context.push('/contact/${contact.publicKey}');
+        break;
       case 'rename':
         _showRenameDialog(context, service);
         break;

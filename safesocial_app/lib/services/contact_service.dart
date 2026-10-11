@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
 
 import '../models/contact.dart';
+import '../models/profile_about.dart';
 import '../crypto/device.dart';
 import '../models/contact_request.dart';
 import 'debug_log_service.dart';
@@ -793,10 +794,41 @@ class ContactService extends ChangeNotifier {
     if (avatarRef is String && avatarRef.isNotEmpty) {
       avatar = await materialiseMedia?.call(avatarRef);
     }
+    // The message is their whole view of themselves for us: a field that is
+    // not in it was withheld, so it goes, rather than lingering from an
+    // earlier, more generous copy.
+    String? cover;
+    final coverRef = profile['cover'];
+    if (coverRef is String && coverRef.isNotEmpty) {
+      cover = await materialiseMedia?.call(coverRef);
+    }
+    final featured = <String>[];
+    final featuredRefs = profile['featured'];
+    if (featuredRefs is List) {
+      for (final ref in featuredRefs.whereType<String>().take(6)) {
+        final local = await materialiseMedia?.call(ref);
+        if (local != null) featured.add(local);
+      }
+    }
+    final about = profile['about'] is Map
+        ? ProfileAbout.fromJson((profile['about'] as Map).cast<String, dynamic>())
+        : ProfileAbout.empty;
+    final validBirthday =
+        birthday is String && RegExp(r'^\d\d-\d\d$').hasMatch(birthday);
+    final bio = profile['bio'];
     _contacts[index] = _contacts[index].copyWith(
       displayName: name is String && name.trim().isNotEmpty ? name.trim() : null,
-      birthday: birthday is String && RegExp(r'^\d\d-\d\d$').hasMatch(birthday) ? birthday : null,
+      birthday: validBirthday ? birthday : null,
+      // Absent means withheld; present but malformed is ignored.
+      clearBirthday: !profile.containsKey('birthday'),
       avatarRef: avatar,
+      bio: bio is String ? ProfileAbout.text(bio, ProfileAbout.longLimit) : '',
+      about: about,
+      coverRef: cover,
+      clearCover: !profile.containsKey('cover'),
+      featuredRefs: featured,
+      namedMeLegacy: profile['legacy'] == true,
+      pinnedPostIds: (profile['pinned'] as List?)?.whereType<String>().take(10).toList() ?? const [],
     );
     await _persistContacts();
     notifyListeners();

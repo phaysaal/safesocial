@@ -234,15 +234,22 @@ class ChatService extends ChangeNotifier {
   /// A contact's (or our own) new signed device list arrived.
   Future<void> Function(String from, Object? listJson)? onDeviceList;
 
-  /// A contact sent their current name, avatar and birthday.
+  /// A contact sent their profile as they let us see it: name, picture, and
+  /// whatever fields our shared spheres put us in the audience for.
   Future<void> Function(String from, Map<String, dynamic> profile)? onProfile;
 
   /// Tell every contact, and our other devices, how we look now. Wrapped, so
   /// it never consumes a ratchet step.
-  Future<void> broadcastProfile(Map<String, dynamic> profile) async {
+  ///
+  /// Each contact gets their own copy from [payloadFor], because fields have
+  /// audiences: what one person may see another may not. [everything] is
+  /// what our other devices get, which is all of it.
+  Future<void> broadcastProfile(
+    Map<String, dynamic> Function(String peer) payloadFor, {
+    Map<String, dynamic>? everything,
+  }) async {
     final sessions = _sessions;
     if (sessions == null) return;
-    final payload = jsonEncode(profile);
     for (final peer in _conversations.keys.toList()) {
       if (peer == _myPublicKey) continue;
       try {
@@ -250,13 +257,15 @@ class ChatService extends ChangeNotifier {
           peerIdentityKey: peer,
           fallbackExchangeKey: _resolveExchangeKey?.call(peer),
           type: 'profile',
-          plaintext: payload,
+          plaintext: jsonEncode(payloadFor(peer)),
           mode: SealMode.wrap,
         );
         await _relayService.sendSealed(peer, sealed);
       } catch (_) {}
     }
-    await sendToOwnDevices('profile', payload);
+    final me = _myPublicKey;
+    await sendToOwnDevices(
+        'profile', jsonEncode(everything ?? (me == null ? {} : payloadFor(me))));
   }
 
   /// A contact-list change from one of our other devices.

@@ -78,6 +78,16 @@ class _SocialRecoveryScreenState extends State<SocialRecoveryScreen> with Single
         _buildInfoCard(theme, 'Split your recovery key into shards and send them to trusted friends.'),
         const SizedBox(height: 24),
         Text('Select Guardians', style: theme.textTheme.titleMedium),
+        if (identityService.currentIdentity?.legacyContact != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Your legacy contact, '
+              '${trustedContacts.where((c) => c.publicKey == identityService.currentIdentity!.legacyContact).map((c) => c.displayName).firstOrNull ?? 'no longer in your list'}, '
+              'is the natural first guardian.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
         const SizedBox(height: 8),
         if (trustedContacts.isEmpty)
           const Center(child: Text('Add contacts to set up guardians.'))

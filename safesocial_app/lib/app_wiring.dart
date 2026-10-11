@@ -8,6 +8,7 @@ import 'services/feed_service.dart';
 import 'services/identity_service.dart';
 import 'services/library_service.dart';
 import 'services/media_service.dart';
+import 'services/profile_sharing.dart';
 import 'services/location_provider.dart';
 import 'services/sphere_migration.dart';
 import 'dart:async';
@@ -127,20 +128,49 @@ Future<void> wireIdentity({
   // Our profile goes to contacts as a sealed message, never to the public
   // bundle. The avatar travels as an encrypted blob like any photo.
   identityService.onProfileChanged = (profile) async {
-    String? avatar;
-    final local = profile.avatarRef;
-    if (local != null && local.isNotEmpty) {
+    Future<String?> upload(String? local) async {
+      if (local == null || local.isEmpty) return null;
       try {
-        avatar = await MediaService.prepareForRelay(local);
-      } catch (_) {}
+        return await MediaService.prepareForRelay(local);
+      } catch (_) {
+        return null;
+      }
     }
-    await chatService.broadcastProfile({
-      'name': profile.displayName,
-      'bio': profile.bio,
-      if (avatar != null) 'avatar': avatar,
-      if (profile.birthday != null) 'birthday': profile.birthday,
-    });
+
+    final avatar = await upload(profile.avatarRef);
+    final cover = await upload(profile.coverRef);
+    final featured = <String>[];
+    for (final ref in profile.featuredRefs) {
+      final up = await upload(ref);
+      if (up != null) featured.add(up);
+    }
+    final me = identityService.publicKey;
+    // The spheres a contact shares with us decide which fields they get.
+    Set<String> sharedWith(String peer) => {
+          for (final s in sphereService.spheres)
+            if (s.contains(peer) && me != null && s.contains(me)) s.id,
+        };
+    await chatService.broadcastProfile(
+      (peer) => ProfileSharing.payloadFor(
+        profile: profile,
+        peer: peer,
+        sharedSpheres: sharedWith(peer),
+        avatarRef: avatar,
+        coverRef: cover,
+        featuredRefs: featured,
+      ),
+      everything: ProfileSharing.payloadFor(
+        profile: profile,
+        peer: me ?? '',
+        sharedSpheres: {for (final s in sphereService.spheres) s.id},
+        avatarRef: avatar,
+        coverRef: cover,
+        featuredRefs: featured,
+      ),
+    );
   };
+  // A temporary picture whose time ran out while the app was closed.
+  unawaited(identityService.expireTemporaryAvatar());
   // Invite links: a request lands in our inbox; approving makes them a
   // contact and a member in one step.
   contactService.onJoinRequest = ({required sphereId, required token, required requester}) =>

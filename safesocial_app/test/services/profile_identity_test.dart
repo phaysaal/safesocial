@@ -1,0 +1,146 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:spheres_app/models/profile_about.dart';
+import 'package:spheres_app/services/contact_service.dart';
+import 'package:spheres_app/services/identity_service.dart';
+import 'package:spheres_app/services/secure_store.dart';
+
+/// Our side and theirs. Ours: a temporary picture goes back to the old one
+/// when its time is up, and an audience set back to "all contacts" leaves no
+/// trace. Theirs: a profile message is their whole view of themselves for
+/// us, so a field it no longer carries is gone, while a malformed one does
+/// not wipe what was there.
+void main() {
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+    await SecureStore.instance.init();
+  });
+
+  group('our profile', () {
+    test('a temporary picture comes back to the earlier one when it runs out',
+        () async {
+      final identity = IdentityService();
+      await identity.createIdentity('Fai');
+      final changes = <String?>[];
+      identity.onProfileChanged = (p) async => changes.add(p.avatarRef);
+
+      await identity.updateAvatar('/old.jpg');
+      await identity.updateAvatar('/party.jpg',
+          temporaryFor: const Duration(milliseconds: 1));
+      expect(identity.currentIdentity!.avatarIsTemporary, isTrue);
+      expect(identity.currentIdentity!.avatarRef, '/party.jpg');
+
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      expect(await identity.expireTemporaryAvatar(), isTrue);
+      expect(identity.currentIdentity!.avatarRef, '/old.jpg');
+      expect(identity.currentIdentity!.avatarIsTemporary, isFalse);
+      expect(changes.last, '/old.jpg', reason: 'contacts are told');
+
+      expect(await identity.expireTemporaryAvatar(), isFalse,
+          reason: 'nothing temporary left');
+    });
+
+    test('a temporary picture with no earlier one goes back to none', () async {
+      final identity = IdentityService();
+      await identity.createIdentity('Fai');
+      await identity.updateAvatar('/party.jpg',
+          temporaryFor: const Duration(milliseconds: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await identity.expireTemporaryAvatar();
+      expect(identity.currentIdentity!.avatarRef, isNull);
+    });
+
+    test('a temporary picture over a temporary picture restores the original',
+        () async {
+      final identity = IdentityService();
+      await identity.createIdentity('Fai');
+      await identity.updateAvatar('/original.jpg');
+      await identity.updateAvatar('/first.jpg', temporaryFor: const Duration(days: 1));
+      await identity.updateAvatar('/second.jpg',
+          temporaryFor: const Duration(milliseconds: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await identity.expireTemporaryAvatar();
+      expect(identity.currentIdentity!.avatarRef, '/original.jpg');
+    });
+
+    test('an audience of all contacts is the default and leaves no entry', () async {
+      final identity = IdentityService();
+      await identity.createIdentity('Fai');
+      await identity.setFieldAudience(ProfileField.work, FieldAudience.me);
+      expect(identity.currentIdentity!.audience[ProfileField.work], FieldAudience.me);
+      await identity.setFieldAudience(ProfileField.work, FieldAudience.contacts);
+      expect(identity.currentIdentity!.audience.containsKey(ProfileField.work), isFalse);
+    });
+
+    test('the legacy contact can be named and unnamed', () async {
+      final identity = IdentityService();
+      await identity.createIdentity('Fai');
+      await identity.setLegacyContact('sis');
+      expect(identity.currentIdentity!.legacyContact, 'sis');
+      await identity.setLegacyContact(null);
+      expect(identity.currentIdentity!.legacyContact, isNull);
+    });
+  });
+
+  group('a contact\'s profile', () {
+    test('about, cover, featured and the legacy flag are taken in', () async {
+      final contacts = ContactService();
+      contacts.setMyInfo('me', 'Me');
+      contacts.materialiseMedia = (ref) async => '/local/$ref';
+      await contacts.addContact('bob', 'Bob',
+          keyExchangePublicKey: 'aa' * 32, announce: false);
+
+      await contacts.applyProfile('bob', {
+        'name': 'Bob',
+        'bio': 'hi there',
+        'birthday': '01-02',
+        'cover': 'blob:c',
+        'featured': ['blob:1', 'blob:2'],
+        'about': {'work': 'Baker', 'pronouns': 'he/him'},
+        'legacy': true,
+      });
+      final c = contacts.getContact('bob')!;
+      expect(c.bio, 'hi there');
+      expect(c.birthday, '01-02');
+      expect(c.coverRef, '/local/blob:c');
+      expect(c.featuredRefs, ['/local/blob:1', '/local/blob:2']);
+      expect(c.about.work, 'Baker');
+      expect(c.namedMeLegacy, isTrue);
+    });
+
+    test('a field the next message leaves out is withdrawn', () async {
+      final contacts = ContactService();
+      contacts.setMyInfo('me', 'Me');
+      contacts.materialiseMedia = (ref) async => '/local/$ref';
+      await contacts.addContact('bob', 'Bob',
+          keyExchangePublicKey: 'aa' * 32, announce: false);
+      await contacts.applyProfile('bob', {
+        'name': 'Bob',
+        'birthday': '01-02',
+        'cover': 'blob:c',
+        'about': {'work': 'Baker'},
+        'legacy': true,
+      });
+
+      // Bob moved us out of the audience for all of it.
+      await contacts.applyProfile('bob', {'name': 'Bob'});
+      final c = contacts.getContact('bob')!;
+      expect(c.birthday, isNull);
+      expect(c.coverRef, isNull);
+      expect(c.about.isEmpty, isTrue);
+      expect(c.namedMeLegacy, isFalse);
+    });
+
+    test('a malformed field does not wipe the last good one', () async {
+      final contacts = ContactService();
+      contacts.setMyInfo('me', 'Me');
+      await contacts.addContact('bob', 'Bob',
+          keyExchangePublicKey: 'aa' * 32, announce: false);
+      await contacts.applyProfile('bob', {'name': 'Bob', 'birthday': '01-02'});
+      await contacts.applyProfile('bob', {'name': 'Bob', 'birthday': 'soon'});
+      expect(contacts.getContact('bob')!.birthday, '01-02');
+    });
+  });
+}

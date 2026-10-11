@@ -13,6 +13,7 @@ import 'package:cryptography/cryptography.dart';
 import '../crypto/device.dart';
 import '../crypto/spheres_crypto.dart';
 import '../crypto/vault.dart';
+import '../models/profile_about.dart';
 import '../models/user_profile.dart';
 import 'debug_log_service.dart';
 import 'relay_config.dart';
@@ -358,12 +359,14 @@ class IdentityService extends ChangeNotifier {
   Future<void> Function(UserProfile profile)? onProfileChanged;
 
   /// Update the user's profile information.
-  Future<void> updateProfile({String? displayName, String? bio, String? birthday}) async {
+  Future<void> updateProfile(
+      {String? displayName, String? bio, String? birthday, bool clearBirthday = false}) async {
     if (_currentIdentity == null) return;
     _currentIdentity = _currentIdentity!.copyWith(
       displayName: displayName ?? _currentIdentity!.displayName,
       bio: bio ?? _currentIdentity!.bio,
-      birthday: birthday ?? _currentIdentity!.birthday,
+      birthday: birthday,
+      clearBirthday: clearBirthday,
       updatedAt: DateTime.now(),
     );
     await _persistIdentity();
@@ -371,11 +374,126 @@ class IdentityService extends ChangeNotifier {
     await onProfileChanged?.call(_currentIdentity!);
   }
 
-  /// Update the user's avatar.
-  Future<void> updateAvatar(String mediaRef) async {
+  /// Update the user's avatar. With [temporaryFor] the current picture is
+  /// kept and comes back when the time is up (see [expireTemporaryAvatar]).
+  Future<void> updateAvatar(String mediaRef, {Duration? temporaryFor}) async {
+    final current = _currentIdentity;
+    if (current == null) return;
+    if (temporaryFor != null) {
+      _currentIdentity = current.copyWith(
+        avatarRef: mediaRef,
+        // A temporary picture on top of a temporary picture goes back to the
+        // original, not to the first temporary one.
+        avatarBefore: current.avatarBefore ?? current.avatarRef ?? '',
+        avatarUntil: DateTime.now().add(temporaryFor),
+        updatedAt: DateTime.now(),
+      );
+    } else {
+      _currentIdentity = current.copyWith(
+        avatarRef: mediaRef,
+        clearTemporaryAvatar: true,
+        updatedAt: DateTime.now(),
+      );
+    }
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  /// Put the earlier picture back if the temporary one has run out. Called
+  /// at startup and whenever the profile is shown; returns true if it did.
+  Future<bool> expireTemporaryAvatar() async {
+    final current = _currentIdentity;
+    final until = current?.avatarUntil;
+    if (current == null || until == null || DateTime.now().isBefore(until)) {
+      return false;
+    }
+    final before = current.avatarBefore;
+    // An empty "before" means there was no picture to go back to.
+    final none = before == null || before.isEmpty;
+    _currentIdentity = current.copyWith(
+      avatarRef: none ? null : before,
+      clearAvatar: none,
+      clearTemporaryAvatar: true,
+      updatedAt: DateTime.now(),
+    );
+    await _persistIdentity();
+    notifyListeners();
+    DebugLogService().info('Identity', 'Temporary picture expired; earlier one restored');
+    await onProfileChanged?.call(_currentIdentity!);
+    return true;
+  }
+
+  /// Everything beyond name, bio, picture and birthday, in one go.
+  Future<void> updateAbout(ProfileAbout about) async {
+    if (_currentIdentity == null) return;
+    _currentIdentity =
+        _currentIdentity!.copyWith(about: about, updatedAt: DateTime.now());
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  /// Who may see one field. Contacts get a fresh copy cut to their audience.
+  Future<void> setFieldAudience(String field, FieldAudience audience) async {
+    if (_currentIdentity == null) return;
+    final next = Map<String, FieldAudience>.from(_currentIdentity!.audience);
+    if (audience.isContacts) {
+      next.remove(field);
+    } else {
+      next[field] = audience;
+    }
+    _currentIdentity =
+        _currentIdentity!.copyWith(audience: next, updatedAt: DateTime.now());
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  Future<void> updateCover(String? mediaRef) async {
     if (_currentIdentity == null) return;
     _currentIdentity = _currentIdentity!.copyWith(
-      avatarRef: mediaRef,
+      coverRef: mediaRef,
+      clearCover: mediaRef == null,
+      updatedAt: DateTime.now(),
+    );
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  Future<void> updateFeatured(List<String> mediaRefs) async {
+    if (_currentIdentity == null) return;
+    _currentIdentity = _currentIdentity!.copyWith(
+      featuredRefs: mediaRefs.take(6).toList(),
+      updatedAt: DateTime.now(),
+    );
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  /// Pin or unpin one of our posts on our profile. At most ten.
+  Future<void> setPinnedToProfile(String postId, bool pinned) async {
+    if (_currentIdentity == null) return;
+    final next = List<String>.from(_currentIdentity!.pinnedPostIds)..remove(postId);
+    if (pinned) next.insert(0, postId);
+    _currentIdentity = _currentIdentity!.copyWith(
+      pinnedPostIds: next.take(10).toList(),
+      updatedAt: DateTime.now(),
+    );
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  /// Name, or unname, the contact who speaks for us if we cannot. They are
+  /// told; nobody else is.
+  Future<void> setLegacyContact(String? contactKey) async {
+    if (_currentIdentity == null) return;
+    _currentIdentity = _currentIdentity!.copyWith(
+      legacyContact: contactKey,
+      clearLegacyContact: contactKey == null,
       updatedAt: DateTime.now(),
     );
     await _persistIdentity();

@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import 'profile_about.dart';
+
 /// A contact in the user's address book, identified by public key.
 class Contact with EquatableMixin {
   /// Ed25519 identity key, hex. How this contact is addressed and verified.
@@ -47,6 +49,19 @@ class Contact with EquatableMixin {
   /// from their signed profile message. Shared with contacts only.
   final String? avatarRef;
   final String? birthday;
+  final String bio;
+
+  /// What else they told us about themselves, already cut to what they
+  /// decided we may see, and their cover and featured photos as local paths.
+  final ProfileAbout about;
+  final String? coverRef;
+  final List<String> featuredRefs;
+
+  /// They named us their legacy contact.
+  final bool namedMeLegacy;
+
+  /// Posts they pinned to their profile, by id; shown if we have them.
+  final List<String> pinnedPostIds;
 
   const Contact({
     required this.publicKey,
@@ -65,6 +80,12 @@ class Contact with EquatableMixin {
     this.verifiedFingerprint,
     this.avatarRef,
     this.birthday,
+    this.bio = '',
+    this.about = ProfileAbout.empty,
+    this.coverRef,
+    this.featuredRefs = const [],
+    this.namedMeLegacy = false,
+    this.pinnedPostIds = const [],
   });
 
   /// Every device key to seal to.
@@ -90,6 +111,18 @@ class Contact with EquatableMixin {
       verifiedFingerprint: json['verifiedFingerprint'] as String?,
       avatarRef: json['avatarRef'] as String?,
       birthday: json['birthday'] as String?,
+      bio: json['bio'] is String ? json['bio'] as String : '',
+      about: json['about'] is Map
+          ? ProfileAbout.fromJson((json['about'] as Map).cast<String, dynamic>())
+          : ProfileAbout.empty,
+      coverRef: json['coverRef'] as String?,
+      featuredRefs:
+          (json['featuredRefs'] as List<dynamic>?)?.whereType<String>().toList() ??
+              const [],
+      namedMeLegacy: json['namedMeLegacy'] == true,
+      pinnedPostIds:
+          (json['pinnedPostIds'] as List<dynamic>?)?.whereType<String>().toList() ??
+              const [],
     );
   }
 
@@ -111,6 +144,12 @@ class Contact with EquatableMixin {
       if (verifiedFingerprint != null) 'verifiedFingerprint': verifiedFingerprint,
       if (avatarRef != null) 'avatarRef': avatarRef,
       if (birthday != null) 'birthday': birthday,
+      if (bio.isNotEmpty) 'bio': bio,
+      if (!about.isEmpty) 'about': about.toJson(),
+      if (coverRef != null) 'coverRef': coverRef,
+      if (featuredRefs.isNotEmpty) 'featuredRefs': featuredRefs,
+      if (namedMeLegacy) 'namedMeLegacy': true,
+      if (pinnedPostIds.isNotEmpty) 'pinnedPostIds': pinnedPostIds,
     };
   }
 
@@ -132,6 +171,14 @@ class Contact with EquatableMixin {
     bool clearVerified = false,
     String? avatarRef,
     String? birthday,
+    bool clearBirthday = false,
+    String? bio,
+    ProfileAbout? about,
+    String? coverRef,
+    bool clearCover = false,
+    List<String>? featuredRefs,
+    bool? namedMeLegacy,
+    List<String>? pinnedPostIds,
   }) {
     return Contact(
       publicKey: publicKey ?? this.publicKey,
@@ -150,7 +197,13 @@ class Contact with EquatableMixin {
       verifiedFingerprint:
           clearVerified ? null : (verifiedFingerprint ?? this.verifiedFingerprint),
       avatarRef: avatarRef ?? this.avatarRef,
-      birthday: birthday ?? this.birthday,
+      birthday: clearBirthday ? null : (birthday ?? this.birthday),
+      bio: bio ?? this.bio,
+      about: about ?? this.about,
+      coverRef: clearCover ? null : (coverRef ?? this.coverRef),
+      featuredRefs: featuredRefs ?? this.featuredRefs,
+      namedMeLegacy: namedMeLegacy ?? this.namedMeLegacy,
+      pinnedPostIds: pinnedPostIds ?? this.pinnedPostIds,
     );
   }
 
@@ -172,5 +225,11 @@ class Contact with EquatableMixin {
         verifiedFingerprint,
         avatarRef,
         birthday,
+        bio,
+        about,
+        coverRef,
+        featuredRefs,
+        namedMeLegacy,
+        pinnedPostIds,
       ];
 }

@@ -28,6 +28,7 @@ import 'screens/contacts/add_contact_screen.dart';
 import 'screens/media/album_list_screen.dart';
 import 'screens/media/album_detail_screen.dart';
 import 'screens/profile/profile_screen.dart';
+import 'screens/contacts/contact_profile_screen.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
 import 'screens/spheres/sphere_list_screen.dart';
@@ -231,6 +232,11 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
         GoRoute(
           path: '/profile/edit',
           builder: (context, state) => const EditProfileScreen(),
+        ),
+        GoRoute(
+          path: '/contact/:key',
+          builder: (context, state) =>
+              ContactProfileScreen(contactKey: state.pathParameters['key']!),
         ),
         GoRoute(
           path: '/media/view',

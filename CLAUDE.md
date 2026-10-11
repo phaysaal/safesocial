@@ -79,6 +79,16 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   is local to the device. Every one is attributed to the signed sender and, where it matters, checked
   against sphere roles on receipt. Add a new kind by extending the model, the sender, the
   switch in the receiver, and `describeMessage` for notifications.
+- **Profiles.** `UserProfile` carries name, bio, picture, birthday, a structured
+  `ProfileAbout` (pronouns, nickname, pronunciation, work, education, city, hometown,
+  relationship and partner, family, languages, websites, hobbies, quotes, life events),
+  cover and featured photos, a temporary-picture timer, a legacy contact, pinned posts,
+  and an audience per field (`FieldAudience`: all contacts, named spheres, or only me).
+  The `profile` envelope is built per contact by `ProfileSharing.payloadFor`, which cuts
+  the profile to what that contact's shared spheres allow; the receiver treats the
+  message as the sender's whole view and drops any field it no longer carries, while a
+  malformed field is ignored. Only the legacy contact is told they are one. "View as" on
+  the profile screen renders exactly that cut. Photos travel as encrypted blobs.
 - **Invite links** are `spheres://join?s=&t=&via=&n=`; the request goes to the admin's open
   inbox and approval makes the requester a contact and a member in one step.
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
@@ -119,7 +129,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 644 tests in 53 files under test/{crypto,models,screens,services}
+flutter test                       # 668 tests in 56 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

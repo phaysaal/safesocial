@@ -16,25 +16,26 @@ Each item carries one mark for Spheres:
 ## 1. Profile
 
 **Profile photo.** Upload from gallery ✓ · take with camera ✓ · pick from own earlier
-photos ○ · crop and zoom ~ · temporary profile picture that expires ○ · frames and
+photos ○ · crop and zoom ~ · temporary profile picture that expires ✓ · frames and
 filters ○ · cartoon avatar as profile picture ○ · the change becomes a post that friends
-react to and comment on ○ · audience for the photo itself ○.
+react to and comment on ✓ (into the spheres you tick) · audience for the photo itself ✗
+by design (a contact who cannot see your picture is not a contact).
 
-**Cover photo.** Upload ○ · reposition ○ · pick from album ○.
+**Cover photo.** Upload ✓ · reposition ○ · pick from album ○ · audience ✓.
 
-**Identity fields.** Display name ✓ · other names and nickname ○ · pronouns ○ · short bio
-○ · name pronunciation ○ · gender ○ · birthday with its own audience ✓ (shared with
-contacts) · featured photos ○ · work and education ○ · current city and hometown ○ ·
-relationship status with partner tagging ○ · family members ○ · contact info and
-websites ○ · social links ○ · languages ○ · religious and political views ○ · places
-lived ○ · favourite quotes ○ · hobbies ○ · life events ○.
+**Identity fields.** Display name ✓ · nickname ✓ · pronouns ✓ · short bio ✓ · name
+pronunciation ✓ · gender ○ (pronouns cover most of it) · birthday with its own audience ✓
+· featured photos ✓ · work and education ✓ · current city and hometown ✓ · relationship
+status with partner tagging ✓ · family members ✓ · websites ✓ · contact info and social
+links ○ · languages ✓ · religious and political views ○ (deliberately not a field) ·
+places lived ~ (city and hometown) · favourite quotes ✓ · hobbies ✓ · life events ✓.
 
-**Profile mechanics.** Per-field audience (public, friends, friends except, specific,
-only me) ~ (there is no public; everything is contacts or spheres) · profile lock ✗ ·
-"view as" ○ · profile link and QR code ✓ · vanity username ✗ (a central name index) ·
-tabs for posts, photos, videos, reels, check-ins, friends, about ~ · professional mode ✗
-· multiple personal profiles ✓ (several identities, one per device set) · legacy contact
-and memorialisation ○ · Meta Verified ✗.
+**Profile mechanics.** Per-field audience ✓ (all contacts, named spheres, or only me;
+there is no public) · profile lock ✗ · "view as" ✓ · profile link and QR code ✓ · vanity
+username ✗ (a central name index) · tabs for posts, photos, videos, reels, check-ins,
+friends, about ~ · professional mode ✗ · multiple personal profiles ✓ (several
+identities, one per device set) · legacy contact ✓ (told, and suggested as a recovery
+guardian) · memorialisation ○ · Meta Verified ✗.
 
 **Activity log and history.** Activity log ✓ (audit log) · manage posts in bulk ○ ·
 archive ✓ · trash with 30-day restore ○ · story archive ○ · download your information ✓
@@ -219,7 +220,7 @@ same commit.
 | # | Milestone | What lands | Wire | Days |
 |---|---|---|---|---|
 | P1 ✓ 11 Oct 2026 | **Comments and reactions, the daily loop** | The seven reaction kinds on posts, reactions on comments, edit a comment with history, delete and hide comments, pin a comment, comments off or members-only per post, subscribe to a post, reaction and reply notifications, newest-first and threaded views polished | `post_react` carries a kind; `comment_edit`, `comment_hide`, `comment_pin`, `post_settings` sealed to the sphere and checked against roles on receipt | 5 |
-| P2 | **Profile** | Bio, pronouns, nickname, name pronunciation, cover photo, featured photos, the about fields (work, education, city, hometown, relationship with partner mention, family, languages, websites, hobbies, quotes, life events), temporary profile picture, "updated their picture" post into chosen spheres, per-field audience (all contacts or named spheres), view-as, legacy contact tied to social recovery | `profile` envelope grows typed fields and per-field audience; cover and featured photos ride as blobs | 6 |
+| P2 ✓ 11 Oct 2026 | **Profile** | Bio, pronouns, nickname, name pronunciation, cover photo, featured photos, the about fields (work, education, city, hometown, relationship with partner mention, family, languages, websites, hobbies, quotes, life events), temporary profile picture, "updated their picture" post into chosen spheres, per-field audience (all contacts or named spheres), view-as, legacy contact tied to social recovery | `profile` envelope grows typed fields and per-field audience; cover and featured photos ride as blobs | 6 |
 | P3 | **Composer and media** | Coloured text backgrounds, feeling and activity, crop, rotate, filters, text and stickers on photos, video trim and thumbnail choice, life events, "ask for recommendations" as a poll variant, reshare a post into another sphere with attribution (author's signature travels; the author can forbid resharing), pin to profile, trash with 30-day restore, bulk archive and trash | `post_reshare` with the original envelope embedded; `post.allowReshare` | 7 |
 | P4 | **Stories** | Boomerang, layouts, selfie mode, quiz and slider stickers, feeling sticker, link sticker (no preview), hide from named contacts, archive, highlights on the profile | Story payload gains sticker kinds; highlights are a local list plus a `profile` field | 4 |
 | P5 | **Messaging comforts** | Files of any type, chat themes and nicknames (local), chat emoji, ignore, scheduled messages, original-quality media toggle, chat bubbles on Android, profile notes, a vanish-mode preset over disappearing messages, avatar stickers once avatars exist | Files are blobs with a name and type; the rest is local or reuses existing kinds | 5 |

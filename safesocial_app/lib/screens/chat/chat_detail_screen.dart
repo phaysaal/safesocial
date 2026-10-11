@@ -710,9 +710,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           children: [
             Stack(
               children: [
-                UserAvatar(
-                  displayName: displayName,
-                  size: AvatarSize.small,
+                InkWell(
+                  onTap: () => context.push('/contact/${widget.conversationId}'),
+                  borderRadius: BorderRadius.circular(20),
+                  child: UserAvatar(
+                    displayName: displayName,
+                    size: AvatarSize.small,
+                  ),
                 ),
                 Positioned(
                   right: 0,
