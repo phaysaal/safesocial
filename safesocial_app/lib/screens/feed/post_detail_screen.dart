@@ -114,7 +114,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          "$authorName's Post",
+          post.authorId == myKey ? 'Your post' : "$authorName's post",
           style: theme.textTheme.titleLarge?.copyWith(fontSize: 18),
         ),
       ),
@@ -289,8 +289,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
           // ── Comment input ──────────────────────────────────
           Container(
-            padding: EdgeInsets.fromLTRB(
-                16, 8, 8, MediaQuery.of(context).viewInsets.bottom + 8),
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
             decoration: BoxDecoration(
               color: cs.surface,
               border: Border(top: BorderSide(color: cs.outline)),

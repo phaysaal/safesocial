@@ -163,6 +163,7 @@ class _PostCardState extends State<PostCard> {
                             : 'Turn comments off'),
                       ),
                     ],
+                    const PopupMenuItem(value: 'open', child: Text('Open post and comments')),
                     PopupMenuItem(
                       value: 'notify',
                       child: Text(context.read<FeedService>().postNotifies(post)
@@ -287,9 +288,12 @@ class _PostCardState extends State<PostCard> {
                     const Spacer(),
                   ],
                   if (post.visibleComments(myKey).isNotEmpty)
-                    Text(
-                      '${post.visibleComments(myKey).length} comment${post.visibleComments(myKey).length == 1 ? '' : 's'}',
-                      style: theme.textTheme.bodySmall,
+                    GestureDetector(
+                      onTap: () => context.push('/post/${post.id}'),
+                      child: Text(
+                        '${post.visibleComments(myKey).length} comment${post.visibleComments(myKey).length == 1 ? '' : 's'}',
+                        style: theme.textTheme.bodySmall,
+                      ),
                     ),
                 ],
               ),
@@ -378,7 +382,7 @@ class _PostCardState extends State<PostCard> {
                     ),
                   if (post.visibleComments(myKey).length > 2)
                     GestureDetector(
-                      onTap: () => _showCommentSheet(context, post),
+                      onTap: () => context.push('/post/${post.id}'),
                       child: Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
@@ -472,6 +476,10 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _handlePostMenu(BuildContext context, String action, Post post) {
+    if (action == 'open') {
+      context.push('/post/${post.id}');
+      return;
+    }
     if (action == 'comments') {
       final feed = context.read<FeedService>();
       final off = !post.commentsOff;
@@ -610,6 +618,9 @@ class _PostCardState extends State<PostCard> {
     final cs = theme.colorScheme;
     String? replyToId;
     String? replyToName;
+    // What this viewer may see; hidden comments stay with their writer.
+    final visible =
+        post.visibleComments(context.read<IdentityService>().publicKey);
 
     showModalBottomSheet(
       context: context,
@@ -623,7 +634,7 @@ class _PostCardState extends State<PostCard> {
           builder: (ctx, setSheetState) {
             // Build threaded comment list: top-level first, then replies indented
             final topLevel =
-                post.comments.where((c) => c.replyToId == null).toList();
+                visible.where((c) => c.replyToId == null).toList();
 
             return DraggableScrollableSheet(
               expand: false,
@@ -644,12 +655,29 @@ class _PostCardState extends State<PostCard> {
                         ),
                       ),
                     ),
-                    Text('Comments',
-                        style: theme.textTheme.titleLarge
-                            ?.copyWith(fontSize: 16)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('Comments',
+                            style: theme.textTheme.titleLarge
+                                ?.copyWith(fontSize: 16)),
+                        const SizedBox(width: 8),
+                        // React, edit, hide, pin and the rest live on the
+                        // full thread; this sheet is for a quick word.
+                        TextButton.icon(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            context.push('/post/${post.id}');
+                          },
+                          icon: const Icon(Icons.open_in_full, size: 16),
+                          label: const Text('Full thread',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
                     const Divider(),
                     Expanded(
-                      child: post.comments.isEmpty
+                      child: visible.isEmpty
                           ? Center(
                               child: Text('No comments yet. Be the first!',
                                   style: theme.textTheme.bodySmall),
@@ -661,7 +689,7 @@ class _PostCardState extends State<PostCard> {
                               itemCount: topLevel.length,
                               itemBuilder: (ctx, i) {
                                 final c = topLevel[i];
-                                final replies = post.comments
+                                final replies = visible
                                     .where((r) => r.replyToId == c.id)
                                     .toList();
                                 return _CommentThread(
