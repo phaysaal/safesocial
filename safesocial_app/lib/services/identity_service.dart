@@ -266,6 +266,16 @@ class IdentityService extends ChangeNotifier {
     }
     final current = _deviceList;
     if (current != null && list.version <= current.version) return false;
+    // A newer list that leaves this device out is how a revocation from
+    // another of our devices arrives: it is adopted, and [thisDeviceRevoked]
+    // then tells the UI. The one way a sibling omitted us by mistake, a
+    // restore that threw away the certified key, is closed in BackupService.
+    final xk = _exchangePublicKeyHex;
+    if (xk != null && !list.hasExchangeKey(xk)) {
+      DebugLogService().warn('Identity',
+          'A newer device list from another of our devices omits this one; '
+          'treating this device as revoked');
+    }
 
     final named = list.devices
         .map((d) => d.withName(current?.byId(d.deviceId)?.name ?? d.name))

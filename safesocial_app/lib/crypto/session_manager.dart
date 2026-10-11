@@ -109,6 +109,23 @@ class SessionManager {
     _myIdentityKey = identityKey;
     _myIdentitySecret = identitySecret;
     _myDeviceKey = hex.encode((await keyExchangeKeyPair.extractPublicKey()).bytes);
+    _dropSessionsOfOtherKeys();
+  }
+
+  /// Forget every session that was derived from an exchange key other than
+  /// the one we hold now.
+  ///
+  /// A session's root is the Diffie-Hellman of our key and theirs; when our
+  /// key changes (a device re-linked, an identity restored, a key
+  /// regenerated) every stored session is for a key we no longer have. Kept,
+  /// they were handed out by [sessionFor] and derived mailbox addresses the
+  /// other side did not share: a re-linked phone listened on channels nobody
+  /// wrote to and never saw why. Sessions saved without a device key predate
+  /// devices and go the same way; all of them re-derive on first use.
+  void _dropSessionsOfOtherKeys() {
+    final mine = _myDeviceKey;
+    if (mine == null) return;
+    _sessions.removeWhere((_, s) => s.myDeviceKey != mine);
   }
 
   static String _key(String peer, String device) => '$peer|$device';
@@ -430,6 +447,7 @@ class SessionManager {
           // A single unreadable session is dropped and re-derived on next use.
         }
       });
+      _dropSessionsOfOtherKeys();
     } catch (_) {
       // Never wipe the whole store on a parse failure; leave it for inspection.
     }

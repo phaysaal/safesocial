@@ -49,13 +49,33 @@ class ContactService extends ChangeNotifier {
   Future<bool> applyDeviceList(String identityKey, Object? json) async {
     final index = _contacts.indexWhere((c) => c.publicKey == identityKey);
     if (index == -1) return false;
+    if (json == null) return false;
     final list = DeviceList.fromJson(json);
-    if (list == null || list.identityKey != identityKey || !list.verify()) {
+    final contact = _contacts[index];
+    // Each refusal says why: a list that is silently ignored leaves a
+    // contact sealing to keys nobody holds, with nothing in the log to show
+    // for it.
+    if (list == null) {
+      DebugLogService().warn('Contacts',
+          'Device list for ${contact.displayName} could not be parsed');
       return false;
     }
-    final contact = _contacts[index];
+    if (list.identityKey != identityKey) {
+      DebugLogService().warn('Contacts',
+          'Device list for ${contact.displayName} names another identity; ignored');
+      return false;
+    }
+    if (!list.verify()) {
+      DebugLogService().warn('Contacts',
+          'Device list for ${contact.displayName} is not signed by them; ignored');
+      return false;
+    }
     if (list.version <= contact.devicesVersion) return false;
-    if (list.devices.isEmpty) return false;
+    if (list.devices.isEmpty) {
+      DebugLogService().warn('Contacts',
+          'Device list for ${contact.displayName} is empty; ignored');
+      return false;
+    }
 
     final keys = list.exchangeKeys;
     final primary = contact.keyExchangePublicKey;
@@ -94,12 +114,17 @@ class ContactService extends ChangeNotifier {
     final contact = getContact(identityKey);
     if (contact == null) return false;
     final prekeyStr = await _handshakeRelay.fetchPrekey(identityKey);
-    if (prekeyStr == null) return false;
+    if (prekeyStr == null) {
+      DebugLogService().warn('Contacts', 'No bundle on the relay for ${contact.displayName}');
+      return false;
+    }
     try {
       final envelope = jsonDecode(prekeyStr) as Map<String, dynamic>;
       final bundle = envelope['bundle'];
       if (bundle is! Map<String, dynamic> ||
           !_prekeyIsAuthentic(identityKey, bundle, envelope['signature'])) {
+        DebugLogService().warn('Contacts',
+            'Bundle for ${contact.displayName} is not signed by their identity; ignored');
         return false;
       }
       var changed = false;
@@ -146,6 +171,7 @@ class ContactService extends ChangeNotifier {
     _applyingSync = true;
     try {
       final type = op['op'];
+      DebugLogService().info('Contacts', 'Applying $type from another of our devices');
       if (type == 'upsert') {
         final contact = Contact.fromJson(op['contact'] as Map<String, dynamic>);
         if (contact.publicKey == _myPublicKey) return;
@@ -165,6 +191,40 @@ class ContactService extends ChangeNotifier {
         if (key is String) {
           _contacts.removeWhere((c) => c.publicKey == key);
           await _persistContacts();
+          notifyListeners();
+        }
+      } else if (type == 'request') {
+        // A request another of our devices took from the shared inbox.
+        final request = ContactRequest.fromJson(op['request'] as Map<String, dynamic>);
+        if (request.publicKey == _myPublicKey ||
+            _declined.contains(request.publicKey) ||
+            _contacts.any((c) => c.publicKey == request.publicKey)) {
+          return;
+        }
+        final index = _requests.indexWhere((r) => r.publicKey == request.publicKey);
+        if (index == -1) {
+          _requests.add(request);
+        } else {
+          _requests[index] = request;
+        }
+        await _persistRequests();
+        notifyListeners();
+        InboundEvents.emit(InboundEvent(
+          kind: InboundKind.contactRequest,
+          id: 'request:${request.publicKey}',
+          title: request.displayName,
+          body: 'Would like to connect',
+          route: '/contacts',
+          thread: 'requests',
+        ));
+      } else if (type == 'request_resolved') {
+        // Decided on another device: approved (the contact arrives as its own
+        // upsert) or declined.
+        final key = op['publicKey'];
+        if (key is String) {
+          _requests.removeWhere((r) => r.publicKey == key);
+          if (op['declined'] == true) _declined.add(key);
+          await _persistRequests();
           notifyListeners();
         }
       }
@@ -354,6 +414,9 @@ class ContactService extends ChangeNotifier {
     DebugLogService().info('Contacts', '$name would like to connect');
     await _persistRequests();
     notifyListeners();
+    // The inbox is read by whichever of our devices polls first, which then
+    // acknowledges it; the others never see the request unless told.
+    _emitSync({'op': 'request', 'request': request.toJson()});
     InboundEvents.emit(InboundEvent(
       kind: InboundKind.contactRequest,
       id: 'request:$publicKey',
@@ -395,6 +458,7 @@ class ContactService extends ChangeNotifier {
     } catch (_) {}
     // Only now do they hear anything back.
     _sendHandshake(publicKey, 'contact_accept');
+    _emitSync({'op': 'request_resolved', 'publicKey': publicKey});
     notifyListeners();
   }
 
@@ -403,6 +467,7 @@ class ContactService extends ChangeNotifier {
     _requests.removeWhere((r) => r.publicKey == publicKey);
     _declined.add(publicKey);
     await _persistRequests();
+    _emitSync({'op': 'request_resolved', 'publicKey': publicKey, 'declined': true});
     notifyListeners();
   }
 
@@ -597,6 +662,18 @@ class ContactService extends ChangeNotifier {
         );
       } else if (type == 'contact_accept') {
         DebugLogService().success('Contacts', '$name accepted your request');
+        if (!_contacts.any((c) => c.publicKey == publicKey)) {
+          // The request went out from another of our devices; the inbox is
+          // shared, so the answer landed here. Take it on their behalf: the
+          // contact is created here and the upsert reaches them.
+          await addContact(
+            publicKey,
+            name,
+            keyExchangePublicKey: exchangeKey is String ? exchangeKey : null,
+            relayHost: normaliseRelayHost(json['relay']),
+            announce: false,
+          );
+        }
         _updateContactInfo(publicKey, name, isPending: false);
         if (exchangeKey is String) {
           await setExchangeKey(publicKey, exchangeKey);

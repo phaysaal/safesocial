@@ -173,6 +173,10 @@ Future<void> wireIdentity({
   chatService.onUnknownDevice = contactService.refreshBundle;
   contactService.onContactsChanged =
       (op) => chatService.sendToOwnDevices('contacts', jsonEncode(op));
+  chatService.contactKeys = () => [
+        for (final c in contactService.contacts)
+          if (!c.blocked && !c.isPending) c.publicKey,
+      ];
   identityService.onDeviceListChanged = (list) {
     unawaited(identityService.publishProfileToRelay(relayService));
     unawaited(chatService.broadcastDeviceList(list.toJson()));

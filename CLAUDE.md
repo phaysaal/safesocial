@@ -86,8 +86,10 @@ invisible incomplete work. If a feature is not finished, the UI says so.
 
 ### Second rule
 
-**The message path has run on two real phones exactly once** (11 October 2026, a Samsung
-S23+ on Android 16 and a Motorola Edge 20 Fusion on Android 13, driven over adb). Direct
+**The message path has run on real hardware once** (11 October 2026: a Samsung S23+ on
+Android 16, a Motorola Edge 20 Fusion on Android 13 over Wi-Fi adb, and a Samsung tablet
+as a third party; two devices linked to one identity, a message from the third landing on
+both and a reply from either reaching the third and the sibling). Direct
 chat, media, offline delivery, spheres, posts and sphere chat worked; the first call
 crashed the receiver and a half-dead socket lost sphere messages, both fixed the same
 day. When a change touches the message path, say so in the commit and prefer changes
@@ -100,7 +102,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 618 tests in 50 files under test/{crypto,models,screens,services}
+flutter test                       # 623 tests in 51 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

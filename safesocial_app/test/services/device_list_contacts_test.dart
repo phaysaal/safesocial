@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:convert/convert.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -150,6 +151,68 @@ void main() {
 
     await other.applyContactSync({'op': 'remove', 'publicKey': bobId});
     expect(other.getContact(bobId), isNull);
+  });
+
+  test('a request one device took from the inbox reaches the others, and so does the decision',
+      () async {
+    // Device A held the request (the inbox hands it to whoever polls first).
+    final a = ContactService();
+    a.setMyInfo('me', 'Me');
+    final opsFromA = <Map<String, dynamic>>[];
+    a.onContactsChanged = (op) async => opsFromA.add(op);
+
+    final request = {
+      'op': 'request',
+      'request': {
+        'publicKey': bobId,
+        'displayName': 'Bob',
+        'keyExchangePublicKey': 'ab' * 32,
+        'receivedAt': DateTime(2026, 10, 11).toIso8601String(),
+      },
+    };
+
+    // Device B learns of it from A's sync and shows it.
+    final b = ContactService();
+    b.setMyInfo('me', 'Me');
+    await b.applyContactSync(request);
+    expect(b.requests.single.publicKey, bobId);
+    expect(b.requests.single.displayName, 'Bob');
+
+    // A decides; B follows without being asked again.
+    await a.applyContactSync(request);
+    expect(a.requests, hasLength(1));
+    await a.declineRequest(bobId);
+    expect(opsFromA.last['op'], 'request_resolved');
+    expect(opsFromA.last['declined'], isTrue);
+    await b.applyContactSync(opsFromA.last);
+    expect(b.requests, isEmpty);
+
+    // Once declined there, a repeat does not come back here either.
+    await b.applyContactSync(request);
+    expect(b.requests, isEmpty, reason: 'the decline is remembered');
+  });
+
+  test('an acceptance that lands on the device that did not ask still creates the contact',
+      () async {
+    // Device A asked; the shared inbox handed the answer to device B.
+    final b = ContactService();
+    b.setMyInfo('me', 'Me');
+    final synced = <Map<String, dynamic>>[];
+    b.onContactsChanged = (op) async => synced.add(op);
+
+    await b.handleIncomingHandshake(bobId, jsonEncode({
+      'type': 'contact_accept',
+      'name': 'Bob',
+      'publicKey': bobId,
+      'keyExchangePublicKey': 'ab' * 32,
+    }));
+
+    final bob = b.getContact(bobId);
+    expect(bob, isNotNull);
+    expect(bob!.isPending, isFalse);
+    expect(bob.keyExchangePublicKey, 'ab' * 32);
+    expect(synced.any((op) => op['op'] == 'upsert' && op['contact']['publicKey'] == bobId),
+        isTrue, reason: 'device A learns that its request was accepted');
   });
 
   group('outbox with several devices', () {

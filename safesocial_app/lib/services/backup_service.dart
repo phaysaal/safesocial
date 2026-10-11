@@ -276,9 +276,20 @@ class BackupService extends ChangeNotifier {
     // The X25519 key is restored when present. Without it a new one is
     // generated on load, which is safe but silently invalidates every existing
     // pairwise session until contacts pick up the new prekey.
+    //
+    // As a new device the key already on this device is kept: it is the one
+    // the primary certified and put in the list it just sent. Deleting it
+    // here, as this used to, made the device generate a third key on load,
+    // find itself missing from the list, and sign a new list naming only
+    // itself, which every contact then adopted. The primary's key is simply
+    // not written.
     final exchangeSecret = keypair['exchangeSecret'];
     if (asNewDevice) {
-      await _secureStorage.delete(key: 'spheres_identity_x25519_secret');
+      final own = await _secureStorage.read(key: 'spheres_identity_x25519_secret');
+      if (own == null || own.isEmpty) {
+        throw Exception(
+            'This device has no key of its own to be linked with; start linking again.');
+      }
     } else if (exchangeSecret is String && exchangeSecret.isNotEmpty) {
       await _secureStorage.write(
         key: 'spheres_identity_x25519_secret',

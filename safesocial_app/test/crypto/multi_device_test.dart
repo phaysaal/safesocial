@@ -300,6 +300,37 @@ void main() {
       expect((await bob2.sessions.open(raw: toBob2, resolveExchangeKey: resolver)).plaintext, 'untouched');
     });
 
+    test('a device whose exchange key changed forgets the sessions of the old key',
+        () async {
+      // Alice's phone was re-linked and generated a fresh key. Sessions saved
+      // under the old key derive mailboxes the other side does not share, so
+      // they must not come back from storage.
+      await alice1.sessions.seal(
+          peerIdentityKey: bob1.identity, peerKeyExchangePublicKey: bob1.exchangeKey, type: 'chat', plaintext: '1');
+      final oldMailbox = await alice1.sessions.mailboxFor(
+          peerIdentityKey: bob1.identity, peerKeyExchangePublicKey: bob1.exchangeKey, purpose: 'chat');
+
+      final rekeyed = SessionManager();
+      await rekeyed.configure(
+          keyExchangeKeyPair: await SpheresCrypto.newKeyExchangeKeyPair(),
+          identityKey: alice1.identity,
+          identitySecret: alice1.identitySecret);
+      await rekeyed.load();
+      final newMailbox = await rekeyed.mailboxFor(
+          peerIdentityKey: bob1.identity, peerKeyExchangePublicKey: bob1.exchangeKey, purpose: 'chat');
+
+      expect(newMailbox.id, isNot(oldMailbox.id),
+          reason: 'a fresh session from the new key, not the stale one');
+      // And the one who kept their key still reloads its sessions as before.
+      final same = SessionManager();
+      await same.configure(
+          keyExchangeKeyPair: alice1.exchange, identityKey: alice1.identity, identitySecret: alice1.identitySecret);
+      await same.load();
+      final kept = await same.mailboxFor(
+          peerIdentityKey: bob1.identity, peerKeyExchangePublicKey: bob1.exchangeKey, purpose: 'chat');
+      expect(kept.id, oldMailbox.id);
+    });
+
     test('sessions persist keyed by device and reload', () async {
       await alice1.sessions.seal(
           peerIdentityKey: bob1.identity, peerKeyExchangePublicKey: bob1.exchangeKey, type: 'chat', plaintext: '1');

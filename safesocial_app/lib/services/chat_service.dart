@@ -187,19 +187,33 @@ class ChatService extends ChangeNotifier {
     try {
       final sealed = await sessions.sealForOwnDevices(
           type: type, plaintext: plaintext, mode: mode);
-      if (sealed.isEmpty) return;
-      await _relayService.sendSealed(me, sealed);
+      if (sealed.isEmpty) {
+        DebugLogService().info('Chat', 'No other devices to tell about $type');
+        return;
+      }
+      final ok = await _relayService.sendSealed(me, sealed);
+      DebugLogService().info('Chat',
+          '${ok ? 'Told' : 'Could not tell'} ${sealed.length} other device(s) about $type');
     } catch (e) {
       DebugLogService().warn('Chat', 'Could not reach our other devices: $e');
     }
   }
 
+  /// Every contact we could seal to. Set by the app; without it only peers
+  /// with an open conversation are told about device changes.
+  List<String> Function()? contactKeys;
+
   /// Tell every contact, and our other devices, which devices we now use.
+  ///
+  /// Goes to every contact, not only those with a conversation: a contact who
+  /// has never written to us still seals to our device list, and a stale one
+  /// sends their first message to a key nobody holds.
   Future<void> broadcastDeviceList(Map<String, dynamic> listJson) async {
     final sessions = _sessions;
     if (sessions == null) return;
     final payload = jsonEncode({'devices': listJson});
-    for (final peer in _conversations.keys.toList()) {
+    final peers = {...?contactKeys?.call(), ..._conversations.keys};
+    for (final peer in peers.toList()) {
       if (peer == _myPublicKey) continue;
       try {
         final sealed = await sessions.sealForDevices(
@@ -293,7 +307,12 @@ class ChatService extends ChangeNotifier {
     final sessions = _sessions;
     final me = _myPublicKey;
     if (sessions == null || me == null) return;
-    for (final device in sessions.devicesOf(me)) {
+    final others = sessions.devicesOf(me);
+    DebugLogService().info('Chat',
+        others.isEmpty
+            ? 'No other devices of ours to listen for'
+            : 'Listening for ${others.length} other device(s) of ours');
+    for (final device in others) {
       try {
         final mailbox = await sessions.mailboxFor(
           peerIdentityKey: me,
@@ -941,6 +960,8 @@ class ChatService extends ChangeNotifier {
 
       final fromSelf = opened.from == _myPublicKey;
       if (opened.type == 'contacts') {
+        DebugLogService().info('Chat',
+            fromSelf ? 'Contact change from another of our devices' : 'Ignoring contacts envelope from a peer');
         if (fromSelf) {
           final json = jsonDecode(opened.plaintext);
           if (json is Map<String, dynamic>) await onContactSync?.call(json);
