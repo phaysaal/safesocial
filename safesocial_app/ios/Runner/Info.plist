@@ -2,6 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Only when you choose to share your live location in a chat. It is encrypted to that chat.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>To unlock Spheres or a locked chat.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Only used when you choose "Save to gallery" on a photo or video.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>To pick photos and videos to share into a sphere.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>For video calls and scanning a contact's QR code.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>For voice and video calls, and voice notes.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

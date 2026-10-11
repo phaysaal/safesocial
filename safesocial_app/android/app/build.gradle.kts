@@ -21,6 +21,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications needs java.time on older Android.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -87,4 +89,16 @@ gradle.taskGraph.whenReady {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+
+// Two plugins pull in Google Tink under two artifact names — `tink` (via the
+// UnifiedPush connector) and `tink-android` (via androidx.security, used by
+// flutter_secure_storage). They ship the same classes, which fails the build
+// with "Duplicate class". tink-android is the superset for Android; keep it.
+configurations.all {
+    exclude(group = "com.google.crypto.tink", module = "tink")
 }
