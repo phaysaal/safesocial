@@ -1,6 +1,6 @@
 # Feature review — what to build
 
-**Date:** 30 July 2026
+**Date:** 30 July 2026 — status columns refreshed 11 October 2026; see `rebuild_plan.md` §13 for what changed
 **Companion to:** `docs/feature_landscape.md` (what Facebook and Instagram have)
 
 This is a working document. It exists to be argued with and marked up, not admired.
@@ -49,16 +49,16 @@ local-only, all are used dozens of times a day, and their absence is felt immedi
 ### A2. Composing
 | Feature | Status | Effort | Note |
 |---|---|---|---|
-| Multi-photo post (carousel) | **Missing** | M | Very common; model and UI change |
-| Edit a post after publishing | **Missing** | S | With an "edited" marker |
+| Multi-photo post (carousel) | **Built** | — | Grid presentation; swipe view is cosmetic |
+| Edit a post after publishing | **Built** | — | Sphere-sealed `post_edit`, author-checked |
 | Delete own post | **Built** | — | |
-| Alt text on images | **Missing** | S | Accessibility; also cheap |
-| Co-authored post | **Missing** | M | Natural fit — both are sphere members |
-| Draft / scheduled send | **Missing** | M | Outbox already does the hard part |
-| Pin a post in a sphere | **Missing** | S | |
-| Video posts | **Partial** | L | Uploads untranscoded, no thumbnail, 24MB cap |
-| Story stickers: poll, quiz, question, countdown, slider | **Missing** | M each | High engagement, no server needed |
-| Story text/drawing tools | **Missing** | M | |
+| Alt text on images | **Built** | — | Long-press an attachment in the composer |
+| Co-authored post | **Built** | — | Shown once the co-author confirms, signed |
+| Draft / scheduled send | **Built** | — | Posts from this device when due |
+| Pin a post in a sphere | **Built** | — | Admins; checked against the signature on receipt |
+| Video posts | **Built** | — | On-device 720p transcode, posters, 64 MB |
+| Story stickers: poll, question, countdown | **Built** | — | Answers arrive as private replies; quiz and slider not built |
+| Story text/drawing tools | **Partial** | M | Caption overlay built; drawing not |
 | GIFs | **Missing** | — | **N/A** as normally built — GIPHY is a central index |
 
 ### A3. Organising and finding
@@ -66,12 +66,12 @@ local-only, all are used dozens of times a day, and their absence is felt immedi
 |---|---|---|---|
 | Search messages, posts, spheres, people | **Built** | — | Local, no server sees the query |
 | Saves / collections | **Built** | — | `/saved`, private to the device |
-| Archive a sphere or chat | **Missing** | S | Hide without leaving or deleting |
+| Archive a sphere or chat | **Built** | — | Local; nothing leaves or is deleted |
 | Mute a sphere or chat | **Built** | — | Muted spheres drop out of the feed |
 | Pin a chat to the top | **Built** | S | Long-press a chat to pin |
-| Unread counts / badges | **Partial** | M | Needs a real notification service |
+| Unread counts / badges | **Built** | — | Notifications with per-kind settings; content-free wake |
 | Memories / on-this-day | **Built** | — | |
-| Media gallery per sphere | **Missing** | M | "All photos in this sphere" |
+| Media gallery per sphere | **Built** | — | Posts, albums and chat attachments, local |
 
 ### A4. Cannot exist here
 Explore · hashtags · global search · algorithmic recommendations · trending · follower
@@ -104,9 +104,9 @@ structural, not a promise.
 | No post-compromise security | Stolen DM chain state follows the conversation forward | XL — needs a DH ratchet |
 | No forward secrecy on sphere content | Epoch key opens everything in that epoch | L |
 | Mailbox addresses don't rotate | Operator sees a long-lived pair is talking | L — needs a lookback window |
-| Concurrent multi-device unsupported | Two devices reuse ratchet keys | XL |
-| No safety-number / key verification UI | Cannot detect a swapped prekey out of band | **M — do this** |
-| Screenshot notification or prevention | Stories offer neither | M |
+| Concurrent multi-device | Per-device keys and sessions, signed device lists | **Built** |
+| Safety-number / key verification UI | Sixty digits plus QR, covers every device key | **Built** |
+| Screenshot notification or prevention | Stories offer neither; view-once media says so plainly | M |
 
 **Key verification is the notable one.** Everything rests on getting the right X25519 key,
 and there is currently no way for two people to confirm out of band that they did. Signal
@@ -124,13 +124,14 @@ transferable admin — is the right substitute, and §3 works it through.
 | Leave a sphere | **Built** | — | Keys discarded; the strongest remedy and always available |
 | Block a person | **Built** | — | |
 | Remove a member | **Built** (admin only) | — | Epoch bump + re-key; cryptographically real |
-| **Vote to remove** | **Missing** | L | §3.3 |
-| **Transfer admin** | **Partial** | M | Can promote; cannot demote self or hand over cleanly |
-| **Admin succession** | **Missing** | M | §3.5 — a sphere can currently be orphaned |
-| Mute a member within a sphere | **Missing** | S | Hide their content without removing them |
-| Hidden-words filter | **Missing** | M | Meta runs this on-device; fully portable |
-| Report to *the sphere* | **Missing** | M | Flag content to admins — no external authority needed |
-| Nudity blurring | **Missing** | L | On-device at Meta; needs a local model |
+| **Vote to remove** | **Built** | — | |
+| **Transfer admin** | **Built** | — | Owner role, demotion, ownership transfer |
+| **Admin succession** | **Built** | — | |
+| Mute a member within a sphere | **Built** | — | Local, they are not told |
+| Hidden-words filter | **Built** | — | Posts and sphere chat, on device |
+| Report to *the sphere* | **Built** | — | Admins see a queue on the sphere page |
+| Nudity blurring | **Replaced** | — | No model: per-chat / per-sphere "blur media until tapped" instead; strangers cannot reach a chat anyway |
+| Media origin / AI-image signal | **Built** | — | 0–10 trust score from the file's own data on the sender's device, with disclaimer; in-app camera = 10, maker's AI mark = 0; no pixel classifier by decision |
 | Teen/parental supervision | **Missing** | XL | Largely depends on age assurance we cannot do |
 
 ### B4. Efficiency — mostly unmeasured
@@ -139,7 +140,7 @@ measurements.
 
 | Concern | Current design | Risk | Effort |
 |---|---|---|---|
-| Connection count | One WebSocket **per contact per purpose** (chat, feed, call) | **High** — battery and sockets scale linearly with contacts | **L — multiplex** |
+| Connection count | One WebSocket per client (hub); mailboxes subscribed over it | Resolved | — |
 | Battery | Persistent sockets, no backoff when idle | Medium | M |
 | Data usage | Posts fan out **once per member** | Medium — an *n*-member sphere sends *n* copies | L |
 | Storage growth | Media cached forever; no cap | Medium | S |
@@ -326,3 +327,22 @@ voting-based removal.
 
 Deliberately last: post-compromise security, sphere forward secrecy, address rotation,
 multi-device. All real, all XL, none blocking day-to-day use.
+
+## Addendum — 11 October 2026
+
+Added since the table above, from the WhatsApp/Facebook comparison: disappearing messages,
+view-once media, edit and unsend, forward, star, pin, mentions, polls (chat and feed), read
+receipts and read-by, video notes, live location, contact cards, chat lock and app lock,
+export, chat filters, events with RSVP, birthdays, invite links with approval, member notes,
+call history and missed-call notices, screen sharing, call links in sphere chat, local
+sticker packs, security notices on key changes, inbox rate limiting, avatars shared with
+contacts.
+
+Added later the same day: a media origin score (0–10, from camera EXIF, editing tags,
+Content Credentials and generator marks, file name and dimensions, read on the sender's
+device before re-encoding, carried as codes and rendered with a disclaimer), an in-app
+camera button in the composer, chat and stories, and blur-until-tapped per chat or sphere.
+
+Deliberately not built: an SFU for large group calls, any pixel-level classifier (nudity
+or AI-image detection), communities, pending-post approval, story drawing tools, GIF
+search.

@@ -4,132 +4,177 @@
 
 Spheres is an in-development social network built so that no content has a public
 audience: everything lives inside a *sphere*, a named group with an explicit
-membership list. Your identity is a cryptographic keypair — not an email address or
-phone number.
+membership list and its own encryption key. Your identity is a cryptographic keypair,
+not an email address or phone number.
 
-> ## ⚠️ Pre-alpha — unaudited
+> ## ⚠️ Pre-alpha — unaudited, not yet run on real devices
 >
-> Messages, sphere posts and call signalling are now genuinely encrypted
-> (XChaCha20-Poly1305 with X25519 key agreement, everything signed), and the relay
-> derives its addresses from shared secrets so it cannot tell who talks to whom.
-> What is still true:
+> Everything that crosses the network is end-to-end encrypted (X25519 key agreement,
+> HKDF, XChaCha20-Poly1305, Ed25519 signatures), local storage is encrypted at rest,
+> and the relay derives its addresses from shared secrets so it cannot tell who talks
+> to whom. What is still true:
 >
-> - **Nothing here has been independently audited**, and none of it has been
->   exercised on real devices end to end.
-> - **Local storage is unencrypted.** Message history and sphere keys sit in
->   SharedPreferences; only the identity key is in the platform keystore.
-> - **Albums are still sent in the clear**, and there is no peer-to-peer
->   networking — all traffic goes through one relay, which sees timing and
->   approximate message size.
-> - **Several features are disabled** because they reported success without working:
->   encrypted identity export/import, social recovery, and multi-device linking.
+> - **Nothing here has been independently audited.**
+> - **No two physical devices have exchanged a message.** Everything has been
+>   exercised through 534 unit tests, a relay test suite and two emulators. Unknown
+>   unknowns dominate every other risk; the first two-phone test is the next milestone.
+> - **The relay sees timing and bucketed message sizes**, and Cloudflare sees IP
+>   addresses. There is no peer-to-peer path. Each person uses the relay they choose
+>   and contacts send there, so no single operator is structural, but today there is
+>   one default.
+> - **Calls need the relay operator to run a TURN server.** The relay issues short-lived
+>   credentials for it; until one is configured, calls fall back to public STUN and only
+>   connect over a direct path. Settings says which applies. The old public TURN default
+>   is gone.
+> - **Push is content-free and self-hosted.** Android wakes through UnifiedPush (bring a
+>   distributor such as ntfy; no Google SDK in the build), iOS through APNs. The relay
+>   operator must run the ntfy server and hold the APNs key; without them the app says so.
+> - **Multi-device is new and untested on hardware.** Each device has its own key,
+>   certified by the identity; contacts seal once per device. See `docs/rebuild_plan.md`
+>   §12.4 for what revoking a device can and cannot do.
 >
-> The plan for closing these gaps is in [`docs/rebuild_plan.md`](docs/rebuild_plan.md),
-> which also records why Veilid was evaluated and set aside as a transport for now.
+> The plan for closing these gaps, and the decisions behind it, is in
+> [`docs/rebuild_plan.md`](docs/rebuild_plan.md).
 
-## Planned model
+## The model
 
-The organising idea is that **everything is a sphere**. A direct message is a sphere
-with two members; a group chat, a shared album, and a "close friends" audience are all
-the same primitive with different presentation. There is no "everyone" and no public
-profile — content that is not addressed to a sphere does not exist.
+**Everything is a sphere.** A direct message is a sphere with two members; a group chat,
+a shared album, and a "close friends" audience are the same primitive with different
+presentation. There is no "everyone" and no public profile. Content that is not addressed
+to a sphere does not exist, and the code path that would produce it does not exist either.
 
-## Current state
+Non-goals, deliberately: global discovery, trending, public profiles, follower counts,
+server-side moderation (membership is the moderation), and resistance to a state-level
+adversary who already controls your device. The target is no bulk surveillance and no
+platform-side data mining.
+
+## Current state (v0.8.0)
 
 | Area | Status |
 |---|---|
-| Identity (Ed25519 keypair, local generation, secure storage) | Working |
-| Contacts, QR exchange, local contact management | Working |
-| Spheres (member-scoped groups) | Working: create, invite, accept, remove with key rotation |
-| 1:1 chat | Encrypted and ratcheted, with a durable outbox and delivery receipts |
-| Feed, posts, stories, reactions | Encrypted and scoped to a sphere |
-| Photo sharing | Works in the feed; chat and album media still send local file paths |
-| Voice/video calls | 1:1 works via WebRTC, signalling encrypted; group calls still broken |
-| EXIF/GPS stripping on images | Working |
-| Encrypted backup, identity export, social recovery, device linking | Disabled — not implemented |
-| Veilid / DHT / peer-to-peer | Not implemented |
+| Identity (Ed25519 signing + X25519 exchange keys, platform keystore) | Working |
+| Contacts: QR exchange, approval before adding, blocking | Working |
+| Spheres: create, invite, accept, leave, remove with key rotation | Working |
+| Sphere governance: owner/admin roles, transfer, removal by vote, audit log | Working |
+| Direct chat: ratcheted sessions per device pair, durable outbox, receipts, session repair | Working |
+| Sphere chat: group conversation owned by a sphere | Working |
+| Feed: posts to one or several spheres, comments, replies, reactions, saves | Working |
+| Stories: sphere-scoped expiry, author-only view receipts, private replies | Working |
+| Albums: sealed per sphere, synced like everything else | Working |
+| Media: per-blob keys, 48 KB encrypted chunks, inline thumbnails, EXIF/GPS stripped | Working; video transcoded on-device to 720p (60 s feed, 3 min chat, 64 MB), poster frames, in-app playback, save to gallery |
+| Media origin score: a 0–10 trust badge on every picture, from the file's own data on the sender's device (camera EXIF, editing tags, Content Credentials and generator marks, name, size); in-app camera capture scores 10; blur-until-tapped per chat or sphere | Working; a reading of the file's claims with a disclaimer, not a detector; untested on hardware |
+| Voice/video calls over WebRTC, signalling encrypted | 1:1 and group (mesh) working on emulators; TURN credentials issued by the relay |
+| Local search over messages, posts, comments, spheres, contacts | Working |
+| Edit own posts, pin posts in a sphere (admins), archive chats and spheres, mute a member within a sphere, per-sphere media gallery | Working |
+| Key verification: safety number and QR comparison per contact, with a banner when keys change | Working |
+| Messaging extras: disappearing messages, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, chat lock, export, filters | Working; untested on hardware |
+| Feed extras: events with RSVP, poll posts, co-authored posts, alt text, drafts and scheduled posts, story captions and stickers, hidden-words filter, report to the sphere | Working; untested on hardware |
+| Spheres: invite links with admin approval, private member notes, birthdays and avatars shared with contacts | Working; untested on hardware |
+| Calls: history, missed-call notifications, screen sharing, join a sphere call from its chat | Working; screen share needs platform support, large calls still mesh |
+| Local sticker packs, app lock and locked chats with biometrics, security notices on key changes, inbox rate limiting | Working |
+| Encrypted backup, identity export/import (Argon2id + XChaCha20) | Working; covers every store except sessions and outboxes |
+| Social recovery (Shamir, verified against the public key) | Working |
+| Multiple devices (per-device keys, signed device list, link/revoke) | Implemented, with tests; not yet exercised on hardware |
+| Local storage encrypted at rest (`SecureStore`) | Working; key names and entry counts remain visible |
+| Notifications and push wake (UnifiedPush / APNs, content-free) | Implemented; needs the operator's ntfy server and APNs key |
+| Federation: each contact reached on the relay they chose | Implemented; relay host travels in the signed bundle |
+| Peer-to-peer / Veilid / DHT | Not implemented, not planned for now |
 
 ## Architecture (as built)
 
 ```
-+---------------------------------------------------+
-|                   Flutter UI                       |
-|  (screens, widgets, theme — Material Design 3)     |
-+---------------------------------------------------+
-|                  Dart Services                     |
-|  IdentityService | ChatService   | FeedService     |
-|  ContactService  | SphereService | CallService     |
-|  MediaService    | RelayService  | OutboxService   |
-+---------------------------------------------------+
-|            Crypto (lib/crypto/)                    |
-|  X25519 + HKDF + XChaCha20-Poly1305, Ed25519 sigs  |
-|  pairwise sessions · sphere keyring · envelopes    |
-+---------------------------------------------------+
-|              Cloudflare Worker relay               |
-|  Secret-derived mailboxes + offline queue + prekey |
-+---------------------------------------------------+
-
-safesocial_core/ (Rust) exists but is dormant: it is not compiled
-into the app and nothing calls it at runtime.
++---------------------------------------------------------------+
+|                         Flutter UI                            |
+|      screens, widgets, Material 3 theme — Provider + GoRouter |
++---------------------------------------------------------------+
+|                       Dart services                           |
+|  Identity · Contact · Chat · SphereChat · Feed · Album        |
+|  Sphere · SphereSync · Sync (device link) · Call · Media      |
+|  Blob · Outbox · Search · Backup · Library · SecureStore      |
++---------------------------------------------------------------+
+|                     Crypto (lib/crypto/)                      |
+|  pairwise ratchet sessions · sphere keyring · envelopes       |
+|  mailbox derivation · chunked blobs · vault · Shamir          |
++---------------------------------------------------------------+
+|              relay/worker.js — Cloudflare Worker (EU)         |
+|  /hub   one socket per client, mailboxes subscribed by sig    |
+|  /mbx   secret-derived pairwise mailboxes, 30-day queue, wake |
+|  /inbox first contact   /blob media chunks   /prekey bundles  |
+|  /turn  short-lived credentials for the operator's coturn     |
++---------------------------------------------------------------+
 ```
+
+The app is 100% Dart. The dormant Rust crate and its bridge were removed in October 2026;
+git history has them.
+
+There is no database. Everything is local, in `SharedPreferences` behind `SecureStore`
+(sealed with XChaCha20-Poly1305 under a key in the platform keystore), with the identity
+secret itself in `flutter_secure_storage`. Decoded media and backups live in the app
+documents directory.
 
 ## Prerequisites
 
-- **Flutter SDK** -- version 3.8 or higher (the app is pure Dart; no Rust toolchain needed)
-- **Platform tools** -- Android SDK / Xcode for mobile builds, or Linux/macOS/Windows desktop toolchains
-- **Rust toolchain** -- only if you intend to work on the dormant `safesocial_core` crate
+- **Flutter**, pinned for reproducible builds in [`FLUTTER_TOOLCHAIN`](FLUTTER_TOOLCHAIN)
+  (currently 3.41.5 / Dart 3.11.3).
+- **Platform tools**: Android SDK or Xcode for mobile; the desktop targets exist but are
+  untested.
+- **Node 22 and wrangler**, to test or deploy the relay.
 
-## Quick Start
+## Quick start
 
 ```bash
 cd safesocial_app
 flutter pub get
+flutter analyze --no-fatal-infos   # must be clean
+flutter test                       # 590 tests in 46 files
 flutter run
 ```
 
-Release builds require `safesocial_app/android/key.properties` with your signing
-keystore details. Without it the release build fails by design — it must never fall
-back to the public Android debug key.
+Release builds require `safesocial_app/android/key.properties`. Without it the release
+build fails by design: it must never fall back to the public Android debug key.
+`build_release.sh` bumps the version, builds, and writes `SHA256SUMS.txt`;
+`scripts/verify_build.sh` lets anyone rebuild a release and diff the bytes.
 
-## Project Structure
+## Project structure
 
 ```
 safesocial/
-  safesocial_app/         Flutter application (this is what ships)
+  safesocial_app/        Flutter application (Dart package name: spheres_app)
     lib/
-      main.dart           Entry point, service initialization, Provider setup
-      app.dart            GoRouter configuration, bottom navigation shell
-      app_info.dart       Version strings shown in the UI
-      services/           Dart service layer (identity, chat, feed, contacts, relay, media)
-      screens/            UI screens (onboarding, chat, feed, contacts, profile, media)
-      models/             Data models
-      widgets/            Reusable UI components
-      theme/              Material Design 3 theme
-    test/                 Unit tests
-    assets/images/        Static image assets
-  relay/                  Cloudflare Worker — WebSocket rooms and offline mailbox
-  safesocial_core/        Rust crate — dormant, not built into the app
-  landing/                Project website
-  docs/                   Technical documentation
-    rebuild_plan.md       The current plan — start here
-    architecture_weaknesses.md  Known defects in the shipping build
-    privacy_protocol.md   The cryptographic design, now largely implemented
-    protocol.md           Original Veilid wire protocol spec (aspirational)
-    threat_model.md       Threat model — current, describes what is built
+      main.dart          Entry point, Provider setup
+      app_wiring.dart    Connects an identity to every service (startup and post-onboarding)
+      app.dart           GoRouter configuration, navigation shell
+      app_info.dart      Version strings shown in the UI
+      crypto/            Sessions, sphere keyring, envelopes, blobs, vault, Shamir
+      services/          One ChangeNotifier per concern; SecureStore for storage
+      screens/           UI by area (chat, feed, spheres, media, settings, ...)
+      models/            Equatable data models with JSON serialization
+      widgets/           Reusable components
+    test/                crypto/, models/, services/ — plus a seeded parser fuzzer
+  relay/                 Cloudflare Worker + Durable Objects, with tests; see relay/README.md
+  landing/               Project website
+  scripts/               verify_build.sh
+  docs/
+    rebuild_plan.md             The plan, its decisions, and what remains — start here
+    threat_model.md             Current; adversary by adversary against what is built
+    privacy_protocol.md         The cryptographic design, now implemented
+    reproducible_builds.md      How to verify a release
+    architecture_weaknesses.md  The 2026-07 findings that motivated the rebuild (historical)
+    feature_landscape.md        What mainstream platforms have and what Spheres cannot build
+    feature_review.md           What to build from that landscape
+    architecture.md, protocol.md, analysis_review.md   Original Veilid-era design (historical)
 ```
-
-> Note on the docs: `architecture.md` and `protocol.md` describe the originally intended
-> Veilid-based system, not what is built today, and are kept only as design references.
-> `rebuild_plan.md` is the authoritative plan and `threat_model.md` is current.
 
 ## Part of SafeSelf
 
 Spheres is the second phase of the **SafeSelf** umbrella project:
 
-1. **SeeSelf** (Phase 1) -- Personal data audit crawler that discovers what information about you is publicly available and models what an AI system could infer from it.
-2. **Spheres** (Phase 2) -- This project. A social network with no public audience, intended as a practical alternative to surveillance-based platforms.
+1. **SeeSelf** (Phase 1): a personal data audit crawler that discovers what information
+   about you is publicly available and models what an AI system could infer from it.
+2. **Spheres** (Phase 2): this project. A social network with no public audience, as a
+   practical alternative to surveillance-based platforms.
 
-The motivation: if SeeSelf shows you how exposed you are, Spheres gives you a way to take back control.
+If SeeSelf shows you how exposed you are, Spheres gives you a way to take back control.
 
 ## License
 

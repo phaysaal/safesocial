@@ -1,7 +1,7 @@
 # Spheres — Rebuild Plan
 
-**Date:** 2026-07-29
-**Status:** Proposed
+**Date:** 2026-07-29, decisions added 2026-10-10
+**Status:** Active. §12 records the decisions taken; §13 is the plan to finish.
 **Supersedes:** the aspirational parts of `architecture.md`, `protocol.md`, `CLAUDE.md`
 
 ---
@@ -579,8 +579,8 @@ Carried into later phases:
 **Exit:** a user can do everything they expect from a mainstream social app, entirely within
 spheres, with no path that produces unscoped content.
 
-**Phase 4 is complete except push notifications**, which is blocked on a product decision
-rather than on work — see the note at the end of this phase.
+**Phase 4 is complete except push notifications** (decided in §12.1, scheduled in §13) and
+video transcoding (decided in §12.2, scheduled in §13).
 
 **Progress — the data-loss and dead-feature bugs are fixed.**
 
@@ -612,14 +612,9 @@ Remaining in Phase 4:
   than the content hash — content-addressing would let the operator see that two people
   hold the same image. **Video is uploaded untranscoded** (there is no codec in the
   dependency set) and capped at 24 MB, with no thumbnail, since extracting a frame needs a
-  decoder we do not have. Adding one is a dependency decision, not a coding one.
-- **Push notifications**: nothing exists, and this is the one remaining item that is
-  genuinely blocked on a decision rather than on work. Every practical option puts a third
-  party (FCM/APNs) in a position to see that *this device* received something and when,
-  which is metadata the relay redesign was specifically built to avoid handing out. The
-  options are: accept that with content-free wakeups, ship without push and rely on
-  foreground sync, or take a dependency on a self-hosted UnifiedPush-style provider. That
-  is a product call, so it is left explicitly unmade.
+  decoder we do not have. The dependency decision was taken on 2026-10-10 — see §12.2.
+- **Push notifications**: nothing exists. This was blocked on a product decision, which
+  was taken on 2026-10-10 — see §12.1. Work is scheduled as milestone M4 in §13.
 - ~~**Search**~~ — done. Covers messages, posts, comments, spheres and contacts, with
   snippets trimmed around the hit. Entirely local: there is no server that could answer a
   query without being told what you are looking for.
@@ -638,12 +633,14 @@ Remaining in Phase 4:
 - ~~**TURN**~~ — now configurable (`CallConfig`): custom STUN/TURN servers, or TURN off
   entirely so calls only connect over a direct path. The default is still the free public
   `openrelay.metered.ca`, which is stated plainly in the UI along with what a TURN server
-  can see. Shipping a better *default* needs infrastructure to point at, which is an
-  operational decision rather than a code one.
+  can see. Shipping a better *default* needs infrastructure to point at; that decision
+  was taken on 2026-10-10 — see §12.3.
 
 ### Phase 5 — Decentralisation and recovery *(4–6 weeks)*
 
-- Multi-relay support, user-configurable relay, published self-host image.
+- ~~User-configurable relay~~ — done (`RelayConfig`, Settings → Relay Server).
+  Multi-relay (different spheres on different operators) and a published one-click
+  self-host deployment remain — milestone M8 in §13.
 - **Multi-device — partially done, and deliberately so.** Device linking works: the primary
   shows a pairing code, the identity travels as a vault keyed by that code (so the relay
   carries only ciphertext it has no key for), and the secondary actually adopts it. That
@@ -737,12 +734,8 @@ matches its description. Phases 0–2 are the highest-value stretch: they take t
 "insecure and unreliable" to "genuinely private and dependable messaging", and they are the
 prerequisite for everything else.
 
-Recommended immediate order:
-
-1. Phase 0 in full — it is measured in days and removes real user harm.
-2. Phase 1, because Phase 2's mailbox derivation depends on having real pairwise secrets.
-3. Phase 2, which resolves the stability complaint.
-4. Then reassess scope before the larger Phase 3 refactor.
+The order originally recommended here (Phase 0, then 1, then 2, then reassess) was
+followed, and Phases 0–3 are complete as of 2026-10. The remaining work is sequenced in §13.
 
 ---
 
@@ -764,6 +757,152 @@ plan and in `architecture_weaknesses.md`. The load-bearing ones for sequencing:
 - `recovery.rs:16-33` — `threshold == 1` accepted; no threshold enforcement, no shard
   authentication, no verification of the reconstructed secret; panics on malformed shards.
 - `build.gradle.kts:49-53` — release builds fall back to the Android debug signing key.
+
+---
+
+## 12. Decisions taken on 2026-10-10
+
+Three items in Phase 4 were waiting on a decision rather than on work. The decisions below
+take the standard, well-trodden option in each case and record the costs honestly. The
+operating preference behind all three: **infrastructure we run ourselves, in the EU**, and
+third parties only where no self-run alternative exists.
+
+### 12.1 Push notifications — content-free wakeups through a swappable provider
+
+**What the problem is.** A phone cannot keep a WebSocket open in the background. Something
+has to wake the app when mail arrives, and on both platforms that something is ultimately a
+service run by Google (FCM) or Apple (APNs). Whoever runs it learns *that this device was
+woken, and when*. The relay was redesigned specifically so that no party learns who is
+talking to whom; push re-introduces one party that sees timing per device.
+
+**Decision.**
+
+1. **The app talks to one abstraction, `WakeService`,** which knows how to register a wake
+   endpoint and to react to a wake by syncing. Everything else is a provider behind it.
+2. **Android default: UnifiedPush**, pointed at a **project-run ntfy server in the EU**.
+   No Google SDK in the default build, so reproducible builds and F-Droid are unaffected,
+   and the server that sees wake timing is ours. Users who want Google's delivery can
+   install the UnifiedPush FCM distributor; the app code path is identical.
+3. **Android fallback inside the app: none that bypasses the abstraction.** If no
+   distributor is present, the app says so plainly in Settings and relies on foreground
+   sync. It does not silently degrade.
+4. **iOS: APNs**, because there is no alternative. Background pushes carry no content and
+   no alert text; the app wakes, syncs from the relay, and raises a local notification
+   from decrypted content.
+5. **The relay does the waking.** A client registers a wake endpoint on a mailbox's Durable
+   Object (`POST /mbx/<addr>/wake`, signed by the mailbox key like every other request).
+   On new mail the object `POST`s an empty body to that endpoint, coalescing wakes within a
+   short window so a burst of messages is one wake. Registrations expire and are renewed
+   on every connect, so a retired device stops being woken.
+6. **One endpoint per mailbox on Android.** UnifiedPush hands out a distinct URL per
+   registration, so the relay cannot tell that mailboxes A and B wake the same device. On
+   iOS the APNs token is per device, so that linkage exists at the relay; it is recorded in
+   `threat_model.md` rather than hidden.
+
+**Why this is the long-term stable choice.** The app depends on a published open standard
+rather than a vendor SDK; the server component is one we operate and can move; FCM is
+available to users who need it without a second code path; and the mechanism is the same
+one Signal and Element use (content-free wake, then fetch), which has survived a decade of
+OS background-execution changes. The honest cost is that on Android without FCM, some
+manufacturers' battery managers kill background connections, so delivery on those phones
+depends on the user allowing the distributor to run. Settings will detect and explain this.
+
+### 12.2 Video — transcode on device with the platform codec
+
+**Decision.** Use the platform's hardware encoder through the `video_compress` plugin
+(MediaCodec on Android, AVFoundation on iOS) and play back with `video_player`.
+
+- **Output:** H.264 + AAC in MP4, 720p, target 2 Mbps, with a poster frame extracted at
+  transcode time and sent as the inline thumbnail. Container metadata (including GPS atoms)
+  is dropped by the re-mux; a test fixture with location metadata must come out clean.
+- **Limits:** 60 seconds for feed posts and stories, 3 minutes for chat and albums; a
+  hard cap of 64 MB after transcoding, up from 24 MB. The relay's chunk index widens from
+  three to four digits and enforces a per-blob byte cap of 64 MB.
+- **Why not ffmpeg.** `ffmpeg-kit` was retired upstream in 2025; its forks ship 30 MB or
+  more of native code per ABI, which inflates the APK and makes the reproducible build
+  fragile. The platform encoder is already on every phone.
+- **Cost.** A native plugin, pinned like everything else in `FLUTTER_TOOLCHAIN`. The
+  reproducible-build CI job is the check that it stays pinned. Desktop targets get no
+  transcoding and keep the current untranscoded upload with the lower cap.
+
+### 12.3 Calls — run our own STUN and TURN in the EU
+
+**What TURN is.** A voice or video call tries to connect the two phones directly. STUN is a
+tiny service that tells a phone its own public address so it can offer it to the other
+side. When both phones sit behind NATs that refuse inbound connections, which is common on
+mobile networks, a direct path is impossible and the encrypted media is relayed through a
+TURN server instead. The TURN operator cannot read the call (it is encrypted end to end
+with DTLS-SRTP) but it does see both parties' IP addresses and how much data flowed. Today
+the default TURN is `openrelay.metered.ca`, a free public service run by a company neither
+we nor the user has any relationship with, and STUN is Google's.
+
+**Decision.** Run a `coturn` server on a small VM in Germany (Hetzner, Falkenstein or
+Nuremberg), serving both STUN and TURN, and make it the default in `CallConfig`. The relay
+issues **short-lived TURN credentials** (HMAC time-limited, the standard TURN REST scheme)
+to any authenticated mailbox address, so no credential is baked into the binary and the
+server cannot be used as a free relay by strangers. Google STUN goes. "Custom" and "off"
+remain available in Settings. Cost is a few euros a month plus bandwidth.
+
+**Also, EU data location for the relay.** Cloudflare runs Workers wherever the user is,
+but Durable Object storage can be pinned: construct ids via
+`env.RELAY_ROOM.jurisdiction("eu").idFromName(...)`, so mailboxes, blobs and prekeys are
+stored in the EU. One-line change, applied together with the TURN work.
+
+**Longer term.** The relay itself stays on Cloudflare for now because the free tier and the
+Durable Object alarms do exactly what a store-and-forward relay needs. A self-run relay on
+EU hardware is the natural next step once the Worker's behaviour is stable and documented;
+the client already takes an arbitrary host.
+
+### 12.4 Smaller decisions recorded at the same time
+
+- **Delete the dormant Rust.** `safesocial_core/` and `RustCoreService` are removed from
+  the tree. Git history keeps them; nothing in the app references them except a dead
+  provider and one unused `context.read`.
+- **Concurrent multi-device is built properly, later.** Per-device keypairs with a
+  certificate signed by the identity key, sessions keyed by (contact, device), fan-out to
+  every device, and a device list with revocation. It touches the whole message path, so
+  it comes after the first real-device test (M1), not before.
+- **SQLCipher stays deferred** until there is a device to test a native plugin on.
+  `SecureStore` is the interface it will slot behind.
+- **Media viewer "Share" and "Download".** Share means re-sharing into a sphere through the
+  composer; there is no other audience. Download saves to the system gallery after a
+  confirmation that explains the file leaves the encrypted store.
+
+---
+
+## 13. Plan to finish
+
+Ordered by what unblocks the most. Each milestone has an exit criterion; a milestone is not
+done until it is met. Sizes are focused part-time weeks.
+
+| # | Milestone | Size | Exit criterion |
+|---|---|---|---|
+| M1 | **Ground truth on hardware** | 1 | Two physical Android phones on different networks exchange direct and sphere messages, share a photo, complete a call, link a device, back up and restore. A checklist in `docs/device_test.md` passes end to end. Fix what breaks before anything below. |
+| M2 | **Housekeeping** | 1 | Rust crate and `RustCoreService` deleted. Media viewer Share and Download implemented. One multiplexed `RelayService` replaces the six. `architecture_weaknesses.md` and `analysis_review.md` marked historical in their headers. |
+| M3 | **EU infrastructure** | 1 | `coturn` running in Germany; relay issues short-lived TURN credentials; `CallConfig` default points at it and `openrelay` is gone; Durable Objects pinned to the EU jurisdiction; an `infra/` directory holds the server setup as code. Exit: a call between two phones on different cellular networks connects through our TURN. |
+| M4 | **Push notifications** (§12.1) | 2 | `WakeService` abstraction, UnifiedPush client, `/mbx/<addr>/wake` registration and coalesced wake on the relay, project ntfy server in the EU, APNs for iOS, notification preferences in Settings. Exit: with the app killed, a message produces a notification on Android via UnifiedPush and on iOS via APNs, and the relay log shows no content. |
+| M5 | **Video** (§12.2) | 1–2 | Transcode on pick, poster thumbnail, caps enforced in UI, relay chunk index and byte cap widened, playback in chat, feed, stories and albums. Exit: a 3-minute 4K phone recording sends as a 720p clip under 64 MB with no location metadata and plays on the other phone. |
+| M6 | **Backups cover everything** | 1 | Vault includes spheres, keyring, sphere chats, messages, albums and saved items; ratchet state stays excluded by design. Exit: restore onto a wiped phone reproduces every screen's content. |
+| M7 | **Concurrent multi-device** (§12.4) | 3–4 | Device certificates, per-device sessions, fan-out, device list with revocation; linking adds a device instead of moving the identity. Exit: two phones with one identity both send and receive in a direct chat and a sphere without decryption failures, and revoking one stops its delivery. |
+| M8 | **Self-hosting and multi-relay** | 1 | A one-click relay deployment (template repository plus "Deploy to Cloudflare"); a sphere can name its relay and members honour it. Exit: a sphere hosted on a second relay works end to end. |
+| M9 | **Hardening, continued** | ongoing | A release published with `SHA256SUMS.txt` and reproduced by `verify_build.sh` on a second machine; pinned build container; F-Droid metadata; address rotation and sequence numbers for sphere content (Phase 2 remainders); then an independent security review. |
+
+**Status, 2026-10-11.** The code side of M2–M8 landed in one pass, ahead of M1, at the
+owner's request to have everything in place before the two-phone test: hub transport with
+relay tests, Rust removed, media viewer share/save, video transcoding, full backups,
+notifications with UnifiedPush/APNs wake, relay-issued TURN, EU jurisdiction, federation
+(each contact reached on their own relay), and multi-device with per-device sessions,
+signed device lists, link and revoke. 534 app tests and 14 relay tests pass; a debug APK
+builds. What M3 and M4 still need is *infrastructure*: a coturn, an ntfy server and the
+APNs key, each a `wrangler secret`. M1 is now the gating item: every one of these changes
+touches the message path and none has been seen on hardware.
+
+Roughly **three to four months** was the original estimate at the pace of the earlier
+phases; the remaining work is M1, the operator infrastructure, and M9.
+
+**Not doing**, so that nobody re-opens it by accident: Veilid or any DHT transport (§3);
+a public audience of any kind (§1); server-side moderation; an in-app FCM code path that
+bypasses the wake abstraction; ffmpeg in the app.
 
 ## Session recovery
 
