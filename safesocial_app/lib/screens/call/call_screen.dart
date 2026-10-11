@@ -200,12 +200,26 @@ class _CallScreenState extends State<CallScreen> {
                   onTap: () => callService.toggleMute(),
                   active: !callService.isMuted,
                 ),
-                if (callService.callType == CallType.video)
+                if (callService.callType == CallType.video) ...[
                   _CallActionButton(
                     icon: callService.isCameraOff ? Icons.videocam_off : Icons.videocam,
                     onTap: () => callService.toggleCamera(),
                     active: !callService.isCameraOff,
                   ),
+                  _CallActionButton(
+                    icon: callService.sharingScreen ? Icons.stop_screen_share : Icons.screen_share,
+                    onTap: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      try {
+                        await callService.toggleScreenShare();
+                      } catch (e) {
+                        messenger.showSnackBar(SnackBar(
+                            content: Text('Screen sharing is not available here: $e')));
+                      }
+                    },
+                    active: !callService.sharingScreen,
+                  ),
+                ],
                 _CallActionButton(
                   icon: Icons.call_end,
                   onTap: () {

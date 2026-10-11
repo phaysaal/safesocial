@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,8 @@ import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import 'call_config.dart';
 import 'debug_log_service.dart';
+import 'secure_store.dart';
+import 'inbound_events.dart';
 import 'relay_service.dart';
 
 /// Call state.
@@ -43,12 +46,17 @@ class CallService extends ChangeNotifier {
     final sessions = _sessions;
     if (sessions == null) return;
     try {
-      final mailbox = await sessions.mailboxFor(
-        peerIdentityKey: contactKey,
-        peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactKey),
-        purpose: 'call',
-      );
-      await _signaling.connectMailbox(contactKey, mailbox);
+      final devices = sessions.devicesOf(contactKey,
+          fallback: _resolveExchangeKey?.call(contactKey));
+      if (devices.isEmpty) throw NoSessionException(contactKey);
+      for (final device in devices) {
+        final mailbox = await sessions.mailboxFor(
+          peerIdentityKey: contactKey,
+          peerKeyExchangePublicKey: device,
+          purpose: 'call',
+        );
+        await _signaling.connectMailbox(contactKey, mailbox, deviceKey: device);
+      }
     } on NoSessionException {
       // Calls need the same pairwise secret as messages; without it there is
       // no address to listen on.
@@ -85,10 +93,26 @@ class CallService extends ChangeNotifier {
 
   void Function(String contactKey, String contactName, CallType type)? onIncomingCall;
 
-  /// STUN and TURN come from [CallConfig] so the default third-party relay can
-  /// be replaced or switched off. A TURN server sees both parties' IPs and the
-  /// shape of the call when a direct path is unavailable.
-  List<Map<String, String>> get _iceServers => CallConfig.active;
+  /// STUN and TURN for a call. By default the relay issues short-lived
+  /// credentials for its own coturn; [CallConfig] handles custom servers and
+  /// the no-TURN choice. A TURN server sees both parties' IPs and the shape of
+  /// the call when a direct path is unavailable, so whose server it is matters.
+  Future<List<Map<String, String>>> _iceServersFor(String peerKey) {
+    return CallConfig.resolve(() async {
+      final sessions = _sessions;
+      if (sessions == null) return null;
+      try {
+        final mailbox = await sessions.mailboxFor(
+          peerIdentityKey: peerKey,
+          peerKeyExchangePublicKey: _resolveExchangeKey?.call(peerKey),
+          purpose: 'call',
+        );
+        return _signaling.fetchTurnCredentials(mailbox);
+      } on NoSessionException {
+        return null;
+      }
+    });
+  }
 
   void setMyInfo(String key, String secretKey) {
     _myPublicKey = key;
@@ -100,6 +124,95 @@ class CallService extends ChangeNotifier {
     DebugLogService().info('Call', 'Connecting signaling channel → $contactKey');
     _connectSignalingMailbox(contactKey);
   }
+
+  // ── Call history ──────────────────────────────────────────────────────────
+
+  static const _logKey = 'spheres_call_log_v1';
+  final List<Map<String, dynamic>> _log = [];
+  List<Map<String, dynamic>> get callLog => List.unmodifiable(_log);
+  DateTime? _connectedAt;
+
+  Future<void> loadLog() async {
+    try {
+      final raw = await SecureStore.instance.getString(_logKey);
+      if (raw != null) {
+        _log
+          ..clear()
+          ..addAll((jsonDecode(raw) as List).cast<Map<String, dynamic>>());
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _record({
+    required String peer,
+    required bool incoming,
+    required bool answered,
+    required bool video,
+    int seconds = 0,
+  }) async {
+    _log.insert(0, {
+      'peer': peer,
+      'incoming': incoming,
+      'answered': answered,
+      'video': video,
+      'at': DateTime.now().toIso8601String(),
+      'seconds': seconds,
+    });
+    if (_log.length > 200) _log.removeRange(200, _log.length);
+    await SecureStore.instance.setString(_logKey, jsonEncode(_log));
+    notifyListeners();
+    if (incoming && !answered) {
+      InboundEvents.emit(InboundEvent(
+        kind: InboundKind.call,
+        id: 'missed:$peer:${DateTime.now().millisecondsSinceEpoch}',
+        title: _remoteContactName ?? 'Someone',
+        body: 'Missed ${video ? 'video' : 'voice'} call',
+        route: '/chat/$peer',
+        thread: 'call:$peer',
+      ));
+    }
+  }
+
+  // ── Screen sharing ────────────────────────────────────────────────────────
+
+  bool _sharingScreen = false;
+  bool get sharingScreen => _sharingScreen;
+  MediaStream? _screenStream;
+  MediaStreamTrack? _cameraTrack;
+
+  /// Replace the camera with the screen on every peer connection, or back.
+  /// Android needs a foreground service for capture; if the platform refuses,
+  /// the call carries on with the camera and the error is reported.
+  Future<void> toggleScreenShare() async {
+    if (_sharingScreen) {
+      final camera = _cameraTrack;
+      for (final pc in _peerConnections.values) {
+        for (final sender in await pc.getSenders()) {
+          if (sender.track?.kind == 'video') await sender.replaceTrack(camera);
+        }
+      }
+      _screenStream?.getTracks().forEach((t) => t.stop());
+      _screenStream = null;
+      _sharingScreen = false;
+      notifyListeners();
+      return;
+    }
+    final screen = await navigator.mediaDevices.getDisplayMedia({'video': true, 'audio': false});
+    final track = screen.getVideoTracks().first;
+    _cameraTrack = _localStream?.getVideoTracks().firstOrNull;
+    for (final pc in _peerConnections.values) {
+      for (final sender in await pc.getSenders()) {
+        if (sender.track?.kind == 'video') await sender.replaceTrack(track);
+      }
+    }
+    _screenStream = screen;
+    _sharingScreen = true;
+    notifyListeners();
+  }
+
+  /// Fired when a group call starts, so the sphere chat can carry a "join"
+  /// line. Set by the app.
+  Future<void> Function(String groupId, List<String> members, CallType type)? onGroupCallStarted;
 
   /// Start a 1:1 call.
   Future<void> startCall(String contactKey, String contactName, CallType type) async {
@@ -132,6 +245,7 @@ class CallService extends ChangeNotifier {
 
   /// Start a Group Call.
   Future<void> startGroupCall(String groupId, List<String> members, CallType type) async {
+    unawaited(onGroupCallStarted?.call(groupId, members, type));
     if (_state != CallState.idle) return;
     _groupId = groupId;
     _callType = type;
@@ -226,6 +340,19 @@ class CallService extends ChangeNotifier {
 
   Future<void> endCall() async {
     DebugLogService().info('Call', 'endCall — closing ${_peerConnections.length} peer connection(s)');
+    final remoteForLog = _remoteContactKey;
+    if (remoteForLog != null && _groupId == null) {
+      final answered = _connectedAt != null || _state == CallState.connected;
+      await _record(
+        peer: remoteForLog,
+        incoming: _isIncomingCall,
+        answered: answered || !_isIncomingCall,
+        video: _callType == CallType.video,
+        seconds: _connectedAt == null ? 0 : DateTime.now().difference(_connectedAt!).inSeconds,
+      );
+    }
+    _connectedAt = null;
+    if (_sharingScreen) await toggleScreenShare();
     // Include the remote party even when no peer connection exists. Declining
     // a ringing call created none, so no call_end was ever sent and the
     // caller's phone rang until they gave up.
@@ -300,7 +427,10 @@ class CallService extends ChangeNotifier {
     }
     DebugLogService().info('Call', '_setupPeer: creating PeerConnection for $peerKey (initiator=$isInitiator)');
 
-    final pc = await createPeerConnection({'iceServers': _iceServers, 'sdpSemantics': 'unified-plan'});
+    final iceServers = await _iceServersFor(peerKey);
+    DebugLogService().info('Call',
+        'ICE: ${iceServers.length} server(s), TURN ${iceServers.any((s) => s['urls']!.startsWith('turn')) ? 'available' : 'absent'}');
+    final pc = await createPeerConnection({'iceServers': iceServers, 'sdpSemantics': 'unified-plan'});
     _peerConnections[peerKey] = pc;
 
     pc.onConnectionState = (state) {
@@ -365,6 +495,15 @@ class CallService extends ChangeNotifier {
   /// Sealed with [SealMode.wrap] rather than the ratchet: signalling is bursty,
   /// lossy and order-independent, so a chain both peers must advance in
   /// lockstep is the wrong fit. Replay is still covered by envelope-id dedup.
+  /// The device on the other end of the current 1:1 call, once known.
+  ///
+  /// An offer rings every device the contact has; whichever answers first is
+  /// the call, and everything after the offer goes to that device alone. On
+  /// the callee side it is the device the offer came from.
+  String? _remoteDeviceKey;
+
+  static const _ringsAllDevices = {'call_offer', 'group_call_invite', 'group_call_join'};
+
   Future<void> _sendSignal(String contactKey, Map<String, dynamic> data) async {
     final sessions = _sessions;
     if (sessions == null) {
@@ -373,14 +512,21 @@ class CallService extends ChangeNotifier {
     }
 
     try {
-      final sealed = await sessions.seal(
+      final type = data['type'];
+      if (type == 'call_offer') _remoteDeviceKey = null;
+      final onlyDevice = (!_ringsAllDevices.contains(type) &&
+              contactKey == _remoteContactKey)
+          ? _remoteDeviceKey
+          : null;
+      final sealed = await sessions.sealForDevices(
         peerIdentityKey: contactKey,
-        peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactKey),
+        fallbackExchangeKey: _resolveExchangeKey?.call(contactKey),
         type: 'call',
         plaintext: jsonEncode(data),
         mode: SealMode.wrap,
+        onlyDevice: onlyDevice,
       );
-      await _signaling.sendViaRelay(contactKey, sealed);
+      await _signaling.sendSealed(contactKey, sealed);
     } on NoSessionException {
       DebugLogService().warn(
           'Call', 'No encryption key for $contactKey — cannot signal securely');
@@ -416,12 +562,21 @@ class CallService extends ChangeNotifier {
         case 'call_offer':
           if (_state == CallState.idle) {
             _remoteContactKey = senderKey;
+            _remoteDeviceKey = opened.fromDevice;
             _remoteContactName = data['caller_name'];
             _callType = data['call_type'] == 'video' ? CallType.video : CallType.audio;
             _pendingOffer = RTCSessionDescription(data['sdp'], data['sdp_type']);
             _isIncomingCall = true;
             _state = CallState.ringing;
             DebugLogService().info('Call', 'Incoming ${_callType.name} call from $_remoteContactName — stored pending offer, firing onIncomingCall');
+            InboundEvents.emit(InboundEvent(
+              kind: InboundKind.call,
+              id: 'call:$senderKey:${DateTime.now().millisecondsSinceEpoch ~/ 30000}',
+              title: _remoteContactName!,
+              body: 'Incoming ${_callType == CallType.video ? 'video' : 'voice'} call',
+              route: '/call',
+              thread: 'call:$senderKey',
+            ));
             onIncomingCall?.call(senderKey, _remoteContactName!, _callType);
           } else {
             DebugLogService().info('Call', 'call_offer received while busy ($state) — auto-answering as mesh peer');
@@ -434,10 +589,30 @@ class CallService extends ChangeNotifier {
           }
           break;
         case 'call_answer':
+          if (senderKey == _remoteContactKey && _groupId == null) {
+            if (_remoteDeviceKey == null) {
+              // First device to pick up gets the call.
+              _remoteDeviceKey = opened.fromDevice;
+            } else if (_remoteDeviceKey != opened.fromDevice) {
+              // Another of their devices answered too late; let it go.
+              DebugLogService().info('Call', 'A second device answered; declining it');
+              final sealed = await sessions.sealForDevices(
+                peerIdentityKey: senderKey,
+                fallbackExchangeKey: _resolveExchangeKey?.call(senderKey),
+                type: 'call',
+                plaintext: jsonEncode({'type': 'call_end'}),
+                mode: SealMode.wrap,
+                onlyDevice: opened.fromDevice,
+              );
+              await _signaling.sendSealed(senderKey, sealed);
+              break;
+            }
+          }
           DebugLogService().info('Call', 'call_answer received from $senderKey — setting remote description');
           await _peerConnections[senderKey]?.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
           await _flushPendingCandidates(senderKey);
           _state = CallState.connected;
+          _connectedAt ??= DateTime.now();
           DebugLogService().success('Call', 'Call connected with $senderKey');
           break;
         case 'ice_candidate':
@@ -480,7 +655,23 @@ class CallService extends ChangeNotifier {
           }
           break;
         case 'call_end':
+          if (senderKey == _remoteContactKey &&
+              _remoteDeviceKey != null &&
+              _remoteDeviceKey != opened.fromDevice &&
+              _groupId == null) {
+            // One of their other devices stopped ringing; the call itself is
+            // with a different device.
+            break;
+          }
           DebugLogService().info('Call', 'call_end from $senderKey — closing connection');
+          if (_state == CallState.ringing && _isIncomingCall && senderKey == _remoteContactKey) {
+            await _record(
+                peer: senderKey, incoming: true, answered: false,
+                video: _callType == CallType.video);
+            _remoteContactKey = null;
+            _pendingOffer = null;
+            _isIncomingCall = false;
+          }
           await _peerConnections[senderKey]?.close();
           _peerConnections.remove(senderKey);
           _remoteStreams.remove(senderKey);

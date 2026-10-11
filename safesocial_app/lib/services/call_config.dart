@@ -5,62 +5,66 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Which STUN and TURN servers calls use.
 ///
-/// This matters for privacy, and the default is not good. A STUN server learns
-/// your public IP; a TURN server, when direct connection fails, relays the
-/// whole call and therefore sees both parties' IPs and the timing and volume of
-/// the media — the content stays protected by SRTP, but the metadata does not.
+/// This matters for privacy. A STUN server learns your public IP; a TURN
+/// server, when direct connection fails, relays the whole call and therefore
+/// sees both parties' IPs and the timing and volume of the media — the content
+/// stays protected by SRTP, but the metadata does not.
 ///
-/// The defaults are Google's public STUN and the free shared-credential
-/// `openrelay.metered.ca` TURN, which means an unaffiliated third party is in
-/// that position by default. Replacing them with your own coturn instance is
-/// the recommended setup for anything sensitive; this makes that possible
-/// without rebuilding the app.
+/// The default is **servers run by whoever runs your relay**: the relay issues
+/// short-lived TURN credentials (`/turn`) for its own coturn, so no credential
+/// lives in the app and no unaffiliated third party is in the path. If the
+/// relay has no TURN configured it says so, and calls fall back to public STUN
+/// only, which is stated in Settings rather than papered over. The old default
+/// — the free shared-credential `openrelay.metered.ca` — is gone.
 ///
-/// Turning TURN off entirely is also offered: calls then only connect when a
-/// direct path exists, which fails behind some NATs but guarantees no third
-/// party carries the media.
+/// Custom servers remain available, as does turning TURN off entirely: calls
+/// then only connect when a direct path exists, which fails behind some NATs
+/// but guarantees no third party carries the media.
 class CallConfig extends ChangeNotifier {
   static const _serversKey = 'spheres_ice_servers';
   static const _turnEnabledKey = 'spheres_turn_enabled';
 
-  static const List<Map<String, String>> defaultStun = [
+  /// Used only when the relay offers no TURN of its own. A STUN lookup
+  /// reveals your IP to Google; that is stated in Settings when it applies.
+  static const List<Map<String, String>> fallbackStun = [
     {'urls': 'stun:stun.l.google.com:19302'},
     {'urls': 'stun:stun1.l.google.com:19302'},
   ];
 
-  static const List<Map<String, String>> defaultTurn = [
-    {
-      'urls': 'turn:openrelay.metered.ca:80',
-      'username': 'openrelayproject',
-      'credential': 'openrelayproject',
-    },
-    {
-      'urls': 'turn:openrelay.metered.ca:443',
-      'username': 'openrelayproject',
-      'credential': 'openrelayproject',
-    },
-    {
-      'urls': 'turn:openrelay.metered.ca:443?transport=tcp',
-      'username': 'openrelayproject',
-      'credential': 'openrelayproject',
-    },
-  ];
+  /// Snapshot read by code that is not a widget. Static mirrors of the
+  /// instance state, kept in sync by every setter.
+  static List<Map<String, String>>? _custom;
+  static bool _turnEnabled = true;
 
-  /// Read by CallService, which is not a widget and cannot watch a provider.
-  static List<Map<String, String>> active = [...defaultStun, ...defaultTurn];
+  /// Credentials the relay issued, and when they stop being trusted.
+  static List<Map<String, String>>? _issued;
+  static DateTime? _issuedUntil;
 
-  List<Map<String, String>>? _custom;
-  bool _turnEnabled = true;
+  /// Null until the relay has been asked; false after it answered that it has
+  /// no TURN configured.
+  static bool? relayOffersTurn;
+
+  /// Replaceable clock, for tests.
+  @visibleForTesting
+  static DateTime Function() now = DateTime.now;
 
   bool get turnEnabled => _turnEnabled;
   bool get isCustom => _custom != null;
 
   /// A human-readable summary for the settings screen.
   String get summary {
-    if (_custom != null) return 'Custom (${_custom!.length} server(s))';
-    return _turnEnabled
-        ? 'Default STUN + public TURN relay'
-        : 'Default STUN only — no relay fallback';
+    final custom = _custom;
+    if (custom != null) return 'Custom (${custom.length} server(s))';
+    if (!_turnEnabled) return 'Direct connections only — no TURN relay';
+    switch (relayOffersTurn) {
+      case true:
+        return 'STUN + TURN issued by your relay';
+      case false:
+        return 'Your relay offers no TURN — direct connections only, '
+            'public STUN';
+      case null:
+        return 'STUN + TURN from your relay (not yet contacted)';
+    }
   }
 
   Future<void> load() async {
@@ -72,7 +76,6 @@ class CallConfig extends ChangeNotifier {
       final parsed = _parse(raw);
       if (parsed != null) _custom = parsed;
     }
-    _apply();
     notifyListeners();
   }
 
@@ -91,7 +94,6 @@ class CallConfig extends ChangeNotifier {
     _custom = parsed;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_serversKey, trimmed);
-    _apply();
     notifyListeners();
     return null;
   }
@@ -100,7 +102,6 @@ class CallConfig extends ChangeNotifier {
     _turnEnabled = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_turnEnabledKey, enabled);
-    _apply();
     notifyListeners();
   }
 
@@ -110,16 +111,81 @@ class CallConfig extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_serversKey);
     await prefs.remove(_turnEnabledKey);
-    _apply();
     notifyListeners();
   }
 
-  void _apply() {
-    if (_custom != null) {
-      active = _custom!;
-      return;
+  /// The ICE servers for a call that is about to be set up.
+  ///
+  /// [fetchFromRelay] asks the relay for credentials; it returns the `/turn`
+  /// body, or null when the relay could not be reached or has none. Issued
+  /// credentials are cached for most of their lifetime so a reconnect inside
+  /// one call does not need a second round trip.
+  static Future<List<Map<String, String>>> resolve(
+    Future<Map<String, dynamic>?> Function() fetchFromRelay,
+  ) async {
+    final custom = _custom;
+    if (custom != null) return custom;
+
+    final cached = _issued;
+    final until = _issuedUntil;
+    if (cached == null || until == null || now().isAfter(until)) {
+      final body = await fetchFromRelay();
+      final issued = _fromRelay(body);
+      if (issued == null) {
+        relayOffersTurn = false;
+        _issued = null;
+        _issuedUntil = null;
+      } else {
+        relayOffersTurn = true;
+        _issued = issued;
+        final ttl = (body!['ttl'] as num?)?.toInt() ?? 3600;
+        _issuedUntil = now().add(Duration(seconds: (ttl * 0.8).round()));
+      }
     }
-    active = [...defaultStun, if (_turnEnabled) ...defaultTurn];
+
+    final issued = _issued;
+    if (issued == null) return fallbackStun;
+    if (!_turnEnabled) {
+      return issued.where((s) => s['urls']!.startsWith('stun:')).toList();
+    }
+    return issued;
+  }
+
+  /// Turn a `/turn` response into ICE servers: every TURN URL with the issued
+  /// credential, plus a STUN entry on the same host so address discovery also
+  /// stays with the relay operator.
+  static List<Map<String, String>>? _fromRelay(Map<String, dynamic>? body) {
+    if (body == null || body['configured'] != true) return null;
+    final urls = (body['urls'] as List?)?.whereType<String>().toList() ?? [];
+    final username = body['username'];
+    final credential = body['credential'];
+    if (urls.isEmpty || username is! String || credential is! String) {
+      return null;
+    }
+
+    final servers = <Map<String, String>>[];
+    final stunHosts = <String>{};
+    for (final url in urls) {
+      if (url.startsWith('stun:')) {
+        servers.add({'urls': url});
+        continue;
+      }
+      if (!url.startsWith('turn:') && !url.startsWith('turns:')) continue;
+      servers.add({'urls': url, 'username': username, 'credential': credential});
+      // turn:host:port?transport=udp → stun:host:port
+      final hostPort = url.substring(url.indexOf(':') + 1).split('?').first;
+      if (url.startsWith('turn:') && stunHosts.add(hostPort)) {
+        servers.insert(0, {'urls': 'stun:$hostPort'});
+      }
+    }
+    return servers.isEmpty ? null : servers;
+  }
+
+  /// Forget issued credentials, e.g. after the relay host changed.
+  static void forgetIssued() {
+    _issued = null;
+    _issuedUntil = null;
+    relayOffersTurn = null;
   }
 
   static List<Map<String, String>>? _parse(String text) {
@@ -130,7 +196,11 @@ class CallConfig extends ChangeNotifier {
 
       final parts = trimmed.split(',').map((p) => p.trim()).toList();
       final url = parts.first;
-      if (!url.startsWith('stun:') && !url.startsWith('turn:')) return null;
+      if (!url.startsWith('stun:') &&
+          !url.startsWith('turn:') &&
+          !url.startsWith('turns:')) {
+        return null;
+      }
 
       if (parts.length == 1) {
         servers.add({'urls': url});
