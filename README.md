@@ -155,6 +155,7 @@ safesocial/
       widgets/           Reusable components
     test/                crypto/, models/, services/ — plus a seeded parser fuzzer
   relay/                 Cloudflare Worker + Durable Objects, with tests; see relay/README.md
+  infra/                 The EU edge box as code: coturn, ntfy, Caddy; setup and check scripts
   landing/               Project website
   scripts/               verify_build.sh
   docs/

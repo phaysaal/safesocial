@@ -108,6 +108,8 @@ With `TURN_SECRET` and `TURN_URLS` configured, `/turn/<address>` issues two-hour
 `use-auth-secret` credentials to any client that can sign with a mailbox key. The username
 is a hash prefix of the address, so a TURN log does not contain mailbox addresses. Without
 the secrets it answers 501 and the client falls back to public STUN, saying so in Settings.
+The coturn itself, and the ntfy server the wakes go through, are set up from `infra/`
+at the repository root.
 
 ## Limits
 

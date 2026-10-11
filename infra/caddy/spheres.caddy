@@ -1,0 +1,22 @@
+# Spheres blocks for /etc/caddy/Caddyfile. setup.sh appends them once; other
+# sites on the same box keep their own blocks.
+
+# Wake server (UnifiedPush). Subscriptions are long-lived streams, so no timeouts.
+__NTFY_HOST__ {
+    reverse_proxy 127.0.0.1:2586 {
+        transport http {
+            read_timeout 0
+            write_timeout 0
+        }
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+    }
+}
+
+# Only here so Caddy keeps a certificate for the TURN name; coturn uses it
+# (see coturn/coturn-cert-sync).
+__TURN_HOST__ {
+    respond "turn" 200
+}

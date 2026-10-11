@@ -138,6 +138,13 @@ npx wrangler dev
 npx wrangler deploy                # deploy together with the client; v3 clients need the hub
 ```
 
+### Edge box (`infra/`)
+coturn and ntfy on the Scaleway instance, as code: `setup.sh` (run on the box with
+`PUBLIC_IP`, `TURN_HOST`, `NTFY_HOST`) writes the configs from the templates there and
+`check.sh` proves STUN, TURN-over-TLS and ntfy from outside. The TURN secret lives in
+`/etc/turnserver.conf` on the box and as the Worker secret `TURN_SECRET`; it is not in
+the repo. Change a config there, not by hand on the box.
+
 ### CI (`.github/workflows/ci.yml`)
 Analyze, test, debug APK; a second job builds the same commit twice and fails if the bytes
 differ; a third runs the relay tests.

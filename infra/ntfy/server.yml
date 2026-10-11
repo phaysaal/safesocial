@@ -1,0 +1,24 @@
+# Spheres wake server. Topics are random per phone (UnifiedPush), bodies are
+# empty knocks from the relay; nothing here is worth reading.
+base-url: "https://__NTFY_HOST__"
+listen-http: "127.0.0.1:2586"
+behind-proxy: true
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "12h"
+attachment-cache-dir: ""
+auth-file: "/var/lib/ntfy/user.db"
+auth-default-access: "deny-all"
+auth-access:
+  - "*:up*:rw"
+enable-signup: false
+enable-login: false
+enable-reservations: false
+enable-metrics: false
+web-root: "disable"
+upstream-base-url: ""
+visitor-request-limit-burst: 60
+visitor-request-limit-replenish: "5s"
+visitor-subscription-limit: 30
+keepalive-interval: "45s"
+manager-interval: "1m"
+log-level: "warn"

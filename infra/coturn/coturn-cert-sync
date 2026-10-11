@@ -1,0 +1,12 @@
+#!/bin/sh
+# Copy the certificate Caddy renews for __TURN_HOST__ where coturn can read
+# it, and tell coturn to reload (SIGUSR2) when it changed.
+set -e
+SRC=/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/__TURN_HOST__
+DST=/etc/coturn/certs
+mkdir -p $DST
+if ! cmp -s $SRC/__TURN_HOST__.crt $DST/turn.crt || ! cmp -s $SRC/__TURN_HOST__.key $DST/turn.key; then
+  install -o root -g turnserver -m 640 $SRC/__TURN_HOST__.crt $DST/turn.crt
+  install -o root -g turnserver -m 640 $SRC/__TURN_HOST__.key $DST/turn.key
+  systemctl kill -s USR2 coturn 2>/dev/null || true
+fi
