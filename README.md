@@ -28,10 +28,10 @@ not an email address or phone number.
 >   coturn runs on a Scaleway instance in Amsterdam and has carried one forced call
 >   between a phone and a tablet. The old public TURN default is gone.
 > - **Push is content-free and self-hosted.** Android wakes through UnifiedPush (bring a
->   distributor such as ntfy; no Google SDK in the build), iOS through APNs. Proven once on
->   a phone with the app process gone: a message woke it through ntfy and produced a
->   notification within five seconds. The relay operator must still run the ntfy server
->   and hold the APNs key; without them the app says so.
+>   distributor such as ntfy; no Google SDK in the build), iOS through APNs. Proven on a
+>   phone with the app process gone: a knock through the project's own ntfy server in
+>   Amsterdam brought it back and a message produced a notification within five seconds.
+>   The APNs key is still to come; without it the iOS app says so.
 > - **Multi-device has run on hardware once.** Each device has its own key, certified by
 >   the identity; contacts seal once per device. See `docs/rebuild_plan.md` §12.4 for what
 >   revoking a device can and cannot do.
@@ -79,7 +79,7 @@ platform-side data mining.
 | Social recovery (Shamir, verified against the public key) | Working |
 | Multiple devices (per-device keys, signed device list, link/revoke) | Implemented, with tests; not yet exercised on hardware |
 | Local storage encrypted at rest (`SecureStore`) | Working; key names and entry counts remain visible |
-| Notifications and push wake (UnifiedPush / APNs, content-free) | Working on Android through ntfy (one phone, app process gone, woken and notified); needs the operator's ntfy server and the APNs key |
+| Notifications and push wake (UnifiedPush / APNs, content-free) | Working on Android through the project's ntfy server (one phone, app process gone, woken and notified); the APNs key is still to come |
 | Federation: each contact reached on the relay they chose | Implemented; relay host travels in the signed bundle |
 | Peer-to-peer / Veilid / DHT | Not implemented, not planned for now |
 

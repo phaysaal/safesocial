@@ -53,8 +53,8 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   iOS runner). `main()` has a `--unifiedpush-bg` entry that runs `BackgroundSync` with no UI.
 - **Calls** get STUN/TURN from the relay (`CallConfig.resolve`); without an operator TURN
   they fall back to public STUN and say so. The operator's coturn runs on the Scaleway
-  instance beside ntfy (`turn:51.158.179.30:3478`, secrets `TURN_SECRET`/`TURN_URLS` on
-  the Worker). A "relay every call through TURN" switch under Call Servers sets the ICE
+  instance beside ntfy (`turn.spheres.dev`, UDP/TCP 3478 and TLS 5349 with a Let's
+  Encrypt certificate Caddy renews; secrets `TURN_SECRET`/`TURN_URLS` on the Worker). A "relay every call through TURN" switch under Call Servers sets the ICE
   policy to relay only; that is how the TURN path was proven on 11 October 2026.
 - **Hub identity.** The hub id in the socket URL is minted once per install and kept in
   plain `SharedPreferences`, because a mailbox holds one subscriber slot per hub and a
@@ -79,10 +79,11 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
   classifier (nudity or AI-image detection; the origin score reads metadata only),
   communities as spheres of spheres, pending-post approval queues, story drawing.
-- **Still open:** DNS names and TLS for the project's coturn and ntfy (both run on the
-  Scaleway instance; the phones still register with the public ntfy.sh until
-  `ntfy.spheres.dev` resolves), APNs, reproducible-build proof, external audit. See the
-  plan's §13. Every M1 item has now run on hardware: background wakes through ntfy,
+- **Still open:** APNs, reproducible-build proof, external audit. See the plan's §13.
+  The project's coturn and ntfy both run on the Scaleway instance under their own names
+  with TLS; a phone whose ntfy app points at `https://ntfy.spheres.dev` is woken through
+  it (the Samsung is, the Motorola still uses the public ntfy.sh until its ntfy app is
+  pointed over). Every M1 item has now run on hardware: background wakes through ntfy,
   restoring an encrypted backup from Settings and a call forced through TURN all passed
   on 11 October 2026.
 - Directory names: the app is `safesocial_app/`, the Dart package `spheres_app`, the
