@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException;
 import 'dart:collection';
 import 'dart:math';
 
@@ -59,6 +60,47 @@ class RelayListener {
 }
 
 /// One mailbox the hub is (or wants to be) subscribed to.
+/// Hosts to try for a plain HTTP call, in order: the configured relay, then
+/// the workers.dev name when the configured one is the default domain. A
+/// custom relay has no fallback we could know about.
+List<String> relayHttpHosts() =>
+    RelayConfig.primaryHost == RelayConfig.defaultHost
+        ? [RelayConfig.primaryHost, RelayConfig.fallbackHost]
+        : [RelayConfig.primaryHost];
+
+/// Run [call] against each host until one answers at all.
+///
+/// A transport failure (name lookup, refused connection, timeout) moves to
+/// the next host; any HTTP status is an answer and is returned as is. The
+/// hub socket has failed over like this since the first custom-domain
+/// outage; the HTTP calls kept retrying the dead name, which on a phone
+/// whose Wi-Fi drops name resolution for a minute at a time meant handshakes
+/// and prekeys waited that minute too. Signatures cover method, path, body
+/// and time, never the host, so a retry elsewhere verifies the same.
+Future<http.Response> relayHttp(
+  Future<http.Response> Function(String host) call, {
+  @visibleForTesting List<String>? hosts,
+}) async {
+  final candidates = hosts ?? relayHttpHosts();
+  Object? last;
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      return await call(candidates[i]);
+    } on SocketException catch (e) {
+      last = e;
+    } on http.ClientException catch (e) {
+      last = e;
+    } on TimeoutException catch (e) {
+      last = e;
+    }
+    if (i + 1 < candidates.length) {
+      DebugLogService().warn('Relay',
+          'No answer from ${candidates[i]}; trying ${candidates[i + 1]}');
+    }
+  }
+  throw last ?? StateError('No relay host configured');
+}
+
 class RelaySubscription {
   final Mailbox mailbox;
   final Set<RelayListener> listeners = {};
@@ -645,19 +687,18 @@ class RelayHub {
     if (override != null) {
       return override(sub.mailbox, (payload) => _acceptFromDrain(sub, payload));
     }
-    final host = _host();
     final path = '/mbx/${sub.mailbox.id}';
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       final signature = sub.mailbox.sign('GET', '$path/sync', '', timestamp);
 
-      final response = await http.get(
-        Uri.parse('https://$host$path/sync'),
-        headers: {
-          'X-Spheres-Signature': signature,
-          'X-Spheres-Timestamp': timestamp,
-        },
-      );
+      final response = await relayHttp((host) => http.get(
+            Uri.parse('https://$host$path/sync'),
+            headers: {
+              'X-Spheres-Signature': signature,
+              'X-Spheres-Timestamp': timestamp,
+            },
+          ));
 
       if (response.statusCode == 401) {
         _log.error('Relay', 'Mailbox sync rejected: unauthorized');
@@ -684,15 +725,15 @@ class RelayHub {
 
       final body = jsonEncode({'ids': processed});
       final ackTs = DateTime.now().millisecondsSinceEpoch.toString();
-      await http.post(
-        Uri.parse('https://$host$path/ack'),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Spheres-Signature': sub.mailbox.sign('POST', '$path/ack', body, ackTs),
-          'X-Spheres-Timestamp': ackTs,
-        },
-        body: body,
-      );
+      await relayHttp((host) => http.post(
+            Uri.parse('https://$host$path/ack'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Spheres-Signature': sub.mailbox.sign('POST', '$path/ack', body, ackTs),
+              'X-Spheres-Timestamp': ackTs,
+            },
+            body: body,
+          ));
       return fresh;
     } catch (e) {
       _log.error('Relay', 'Failed to sync mailbox: $e');
@@ -849,7 +890,6 @@ class RelayService extends ChangeNotifier {
     notifyListeners();
   }
 
-  String _host() => RelayConfig.primaryHost;
 
   // -- Sealed mailboxes -------------------------------------------------------
 
@@ -919,18 +959,17 @@ class RelayService extends ChangeNotifier {
   ) async {
     final inboxId = Mailbox.inboxIdFor(myIdentityPublicKeyHex);
     final path = '/inbox/$inboxId';
-    final host = _host();
 
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final response = await http.get(
-        Uri.parse('https://$host$path/sync'),
-        headers: {
-          'X-Spheres-Signature':
-              _signWithIdentity('GET$path/sync$timestamp', myIdentitySecretHex),
-          'X-Spheres-Timestamp': timestamp,
-        },
-      );
+      final response = await relayHttp((host) => http.get(
+            Uri.parse('https://$host$path/sync'),
+            headers: {
+              'X-Spheres-Signature':
+                  _signWithIdentity('GET$path/sync$timestamp', myIdentitySecretHex),
+              'X-Spheres-Timestamp': timestamp,
+            },
+          ));
       if (response.statusCode != 200) return const [];
 
       final pending = jsonDecode(response.body) as List<dynamic>;
@@ -946,16 +985,16 @@ class RelayService extends ChangeNotifier {
 
       final body = jsonEncode({'ids': ids});
       final ackTs = DateTime.now().millisecondsSinceEpoch.toString();
-      await http.post(
-        Uri.parse('https://$host$path/ack'),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Spheres-Signature':
-              _signWithIdentity('POST$path/ack$body$ackTs', myIdentitySecretHex),
-          'X-Spheres-Timestamp': ackTs,
-        },
-        body: body,
-      );
+      await relayHttp((host) => http.post(
+            Uri.parse('https://$host$path/ack'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Spheres-Signature':
+                  _signWithIdentity('POST$path/ack$body$ackTs', myIdentitySecretHex),
+              'X-Spheres-Timestamp': ackTs,
+            },
+            body: body,
+          ));
 
       return payloads;
     } catch (e) {
@@ -980,15 +1019,15 @@ class RelayService extends ChangeNotifier {
     final path = '/prekey/$address';
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final response = await http.post(
-        Uri.parse('https://${_host()}$path'),
-        headers: {
-          'X-Spheres-Signature': _signWithIdentity(
-              'POST$path$payload$timestamp', myIdentitySecretHex),
-          'X-Spheres-Timestamp': timestamp,
-        },
-        body: payload,
-      );
+      final response = await relayHttp((host) => http.post(
+            Uri.parse('https://$host$path'),
+            headers: {
+              'X-Spheres-Signature': _signWithIdentity(
+                  'POST$path$payload$timestamp', myIdentitySecretHex),
+              'X-Spheres-Timestamp': timestamp,
+            },
+            body: payload,
+          ));
       return response.statusCode == 200;
     } catch (e) {
       _log.error('Relay', 'Failed to publish prekey: $e');
@@ -999,8 +1038,8 @@ class RelayService extends ChangeNotifier {
   Future<String?> fetchPrekey(String identityPublicKeyHex) async {
     final address = Mailbox.inboxIdFor(identityPublicKeyHex);
     try {
-      final response =
-          await http.get(Uri.parse('https://${_host()}/prekey/$address'));
+      final response = await relayHttp(
+          (host) => http.get(Uri.parse('https://$host/prekey/$address')));
       return response.statusCode == 200 ? response.body : null;
     } catch (e) {
       _log.error('Relay', 'Failed to fetch prekey: $e');
@@ -1017,13 +1056,13 @@ class RelayService extends ChangeNotifier {
     final path = '/turn/${anyMailbox.id}';
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final response = await http.get(
-        Uri.parse('https://${_host()}$path'),
-        headers: {
-          'X-Spheres-Signature': anyMailbox.sign('GET', path, '', timestamp),
-          'X-Spheres-Timestamp': timestamp,
-        },
-      );
+      final response = await relayHttp((host) => http.get(
+            Uri.parse('https://$host$path'),
+            headers: {
+              'X-Spheres-Signature': anyMailbox.sign('GET', path, '', timestamp),
+              'X-Spheres-Timestamp': timestamp,
+            },
+          ));
       if (response.statusCode != 200) return null;
       return jsonDecode(response.body) as Map<String, dynamic>;
     } catch (e) {
@@ -1042,15 +1081,15 @@ class RelayService extends ChangeNotifier {
     final body = jsonEncode({'url': target});
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final response = await http.post(
-        Uri.parse('https://${_host()}$path'),
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Spheres-Signature': mailbox.sign('POST', path, body, timestamp),
-          'X-Spheres-Timestamp': timestamp,
-        },
-        body: body,
-      );
+      final response = await relayHttp((host) => http.post(
+            Uri.parse('https://$host$path'),
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Spheres-Signature': mailbox.sign('POST', path, body, timestamp),
+              'X-Spheres-Timestamp': timestamp,
+            },
+            body: body,
+          ));
       if (response.statusCode == 200) return null;
       try {
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;

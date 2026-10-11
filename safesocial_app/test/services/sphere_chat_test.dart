@@ -209,6 +209,29 @@ void main() {
       expect(chat.messagesIn(sphere.id), isEmpty);
     });
 
+    test('unread counts survive a restart', () async {
+      final spheres = sphereServiceFor(alice, aliceSecret);
+      final sphere = await spheres.create(
+          name: 'Trips', kind: SphereKind.group, initialMembers: [bob]);
+      final chat = SphereChatService(spheres)..configure(identityKey: alice);
+      await chat.handleIncoming(
+          bob, sphere.id, wirePayload(messageFrom(bob, sphere.id, id: 'u1')));
+      await chat.handleIncoming(
+          bob, sphere.id, wirePayload(messageFrom(bob, sphere.id, id: 'u2')));
+      expect(chat.unreadIn(sphere.id), 2);
+
+      final restarted = SphereChatService(spheres)..configure(identityKey: alice);
+      await restarted.load();
+      expect(restarted.unreadIn(sphere.id), 2, reason: 'nobody opened it');
+
+      restarted.setOpenThread(sphere.id);
+      expect(restarted.unreadIn(sphere.id), 0);
+      await Future<void>.delayed(Duration.zero);
+      final again = SphereChatService(spheres)..configure(identityKey: alice);
+      await again.load();
+      expect(again.unreadIn(sphere.id), 0, reason: 'opening it was remembered too');
+    });
+
     test('the same message twice is only kept once', () async {
       // The relay can deliver twice, live and again from the mailbox.
       final (chat, sphere, _) = await alicesChat();

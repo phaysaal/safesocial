@@ -109,12 +109,18 @@ class SphereChatService extends ChangeNotifier {
 
   void setOpenThread(String? sphereId) {
     _openThread = sphereId;
-    if (sphereId != null) _unread.remove(sphereId);
+    if (sphereId != null && _unread.remove(sphereId) != null) _persistUnread();
   }
 
+  /// Unread per sphere, kept on disk so a restart does not forget what was
+  /// never opened.
+  static const _unreadKey = 'spheres_sphere_chat_unread_v1';
   final Map<String, int> _unread = {};
 
   int unreadIn(String sphereId) => _unread[sphereId] ?? 0;
+
+  Future<void> _persistUnread() =>
+      SecureStore.instance.setString(_unreadKey, jsonEncode(_unread));
 
   // ── Sending ────────────────────────────────────────────────────────────────
 
@@ -456,6 +462,7 @@ class SphereChatService extends ChangeNotifier {
       _append(sphereId, message);
       if (_openThread != sphereId) {
         _unread[sphereId] = (_unread[sphereId] ?? 0) + 1;
+        await _persistUnread();
       }
       await _persist(sphereId);
       notifyListeners();
@@ -574,6 +581,12 @@ class SphereChatService extends ChangeNotifier {
       if (pins != null) {
         (jsonDecode(pins) as Map<String, dynamic>).forEach((k, v) {
           if (v is String) _pins[k] = v;
+        });
+      }
+      final unread = await store.getString(_unreadKey);
+      if (unread != null) {
+        (jsonDecode(unread) as Map<String, dynamic>).forEach((k, v) {
+          if (v is int && v > 0) _unread[k] = v;
         });
       }
     } catch (_) {}

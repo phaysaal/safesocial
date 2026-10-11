@@ -63,6 +63,7 @@ class BackupService extends ChangeNotifier {
     'spheres_starred_v1',
     'spheres_sphere_chat_settings_v1',
     'spheres_sphere_chat_pins_v1',
+    'spheres_sphere_chat_unread_v1',
     'spheres_pinned_posts_v1',
     'spheres_archived_spheres_v1',
     'spheres_sphere_chats_v1',

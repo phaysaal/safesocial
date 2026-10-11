@@ -84,6 +84,7 @@ class SecureStore {
     'spheres_blur_media_v1',
     'spheres_sphere_chat_settings_v1',
     'spheres_sphere_chat_pins_v1',
+    'spheres_sphere_chat_unread_v1',
     'spheres_pinned_posts_v1',
     'spheres_invites_v1',
     // Who did what in which sphere, and who has been offered ownership of one.
