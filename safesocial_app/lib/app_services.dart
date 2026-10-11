@@ -90,6 +90,7 @@ class AppServices {
     // Must precede any relay traffic, or the first requests go to the default
     // host.
     await relayConfig.load();
+    await RelayHub.instance.adoptStoredId();
     await callConfig.load();
     await libraryService.load();
     await notificationService.load();

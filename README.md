@@ -22,10 +22,11 @@ not an email address or phone number.
 >   addresses. There is no peer-to-peer path. Each person uses the relay they choose
 >   and contacts send there, so no single operator is structural, but today there is
 >   one default.
-> - **Calls need the relay operator to run a TURN server.** The relay issues short-lived
->   credentials for it; until one is configured, calls fall back to public STUN and only
->   connect over a direct path. Settings says which applies. The old public TURN default
->   is gone.
+> - **Calls use the operator's TURN server when a direct path fails.** The relay issues
+>   short-lived credentials for it; a relay without one falls back to public STUN and
+>   only connects over a direct path, and Settings says which applies. The project's
+>   coturn runs on a Scaleway instance in Amsterdam and has carried one forced call
+>   between a phone and a tablet. The old public TURN default is gone.
 > - **Push is content-free and self-hosted.** Android wakes through UnifiedPush (bring a
 >   distributor such as ntfy; no Google SDK in the build), iOS through APNs. Proven once on
 >   a phone with the app process gone: a message woke it through ntfy and produced a
@@ -65,7 +66,7 @@ platform-side data mining.
 | Albums: sealed per sphere, synced like everything else | Working |
 | Media: per-blob keys, 48 KB encrypted chunks, inline thumbnails, EXIF/GPS stripped | Working; video transcoded on-device to 720p (60 s feed, 3 min chat, 64 MB), poster frames, in-app playback, save to gallery |
 | Media origin score: a 0–10 trust badge on every picture, from the file's own data on the sender's device (camera EXIF, editing tags, Content Credentials and generator marks, name, size); in-app camera capture scores 10; blur-until-tapped per chat or sphere | Working; a reading of the file's claims with a disclaimer, not a detector; untested on hardware |
-| Voice/video calls over WebRTC, signalling encrypted | 1:1 and group (mesh) working on emulators; TURN credentials issued by the relay |
+| Voice/video calls over WebRTC, signalling encrypted | 1:1 working on hardware, direct and through the project's TURN; group (mesh) on emulators only |
 | Local search over messages, posts, comments, spheres, contacts | Working |
 | Edit own posts, pin posts in a sphere (admins), archive chats and spheres, mute a member within a sphere, per-sphere media gallery | Working |
 | Key verification: safety number and QR comparison per contact, with a banner when keys change | Working |
@@ -128,7 +129,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 624 tests in 51 files
+flutter test                       # 626 tests in 51 files
 flutter run
 ```
 

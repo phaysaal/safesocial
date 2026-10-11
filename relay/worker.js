@@ -579,7 +579,16 @@ export class RelayRoom {
       let subs = (await txn.get("subs")) || [];
       const cutoff = Date.now() - SUBSCRIPTION_TTL_MS;
       subs = subs.filter((s) => s.at > cutoff && s.hub !== hub);
-      if (subs.length >= MAX_SUBSCRIBERS) return;
+      // A full mailbox is full of hubs that died without closing: a phone
+      // killed mid-session, a headless wake frozen by the OS before its
+      // socket went. The newcomer is the one certainly alive, so the oldest
+      // slot goes to it. A live hub evicted this way learns on its next
+      // publish (401 → "unsubscribed") and proves its key again; until then
+      // its client's idle check drains the mailbox over HTTP.
+      if (subs.length >= MAX_SUBSCRIBERS) {
+        subs.sort((a, b) => a.at - b.at);
+        subs = subs.slice(subs.length - MAX_SUBSCRIBERS + 1);
+      }
       token = crypto.randomUUID();
       subs.push({ hub, token, at: Date.now() });
       await txn.put("subs", subs);

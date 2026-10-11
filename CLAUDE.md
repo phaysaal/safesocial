@@ -52,7 +52,14 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   wakes are content-free through `wake_service.dart` (UnifiedPush on Android, APNs via the
   iOS runner). `main()` has a `--unifiedpush-bg` entry that runs `BackgroundSync` with no UI.
 - **Calls** get STUN/TURN from the relay (`CallConfig.resolve`); without an operator TURN
-  they fall back to public STUN and say so.
+  they fall back to public STUN and say so. The operator's coturn runs on the Scaleway
+  instance beside ntfy (`turn:51.158.179.30:3478`, secrets `TURN_SECRET`/`TURN_URLS` on
+  the Worker). A "relay every call through TURN" switch under Call Servers sets the ICE
+  policy to relay only; that is how the TURN path was proven on 11 October 2026.
+- **Hub identity.** The hub id in the socket URL is minted once per install and kept in
+  plain `SharedPreferences`, because a mailbox holds one subscriber slot per hub and a
+  fresh id per process filled the slots with dead hubs within a day. The relay evicts
+  the oldest subscriber when a mailbox is full rather than refusing the newcomer.
 - **Key verification** (`crypto/safety_number.dart`) covers both identity keys and every
   device key; a contact's verified number is stored and a changed key shows a banner.
 - **Local organisation** lives in `LibraryService`: saves, stars, pins, mutes, archives,
@@ -72,12 +79,12 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
   classifier (nudity or AI-image detection; the origin score reads metadata only),
   communities as spheres of spheres, pending-post approval queues, story drawing.
-- **Still open:** a call between phones on different networks that cannot reach each
-  other directly (needs the operator TURN), an operator-run coturn/ntfy/APNs,
-  reproducible-build proof, external audit. See the plan's §13. Background wakes through
-  ntfy and restoring an encrypted backup from Settings both passed on hardware on
-  11 October 2026 (the phones used the public ntfy.sh server; the project server is
-  still to run).
+- **Still open:** DNS names and TLS for the project's coturn and ntfy (both run on the
+  Scaleway instance; the phones still register with the public ntfy.sh until
+  `ntfy.spheres.dev` resolves), APNs, reproducible-build proof, external audit. See the
+  plan's §13. Every M1 item has now run on hardware: background wakes through ntfy,
+  restoring an encrypted backup from Settings and a call forced through TURN all passed
+  on 11 October 2026.
 - Directory names: the app is `safesocial_app/`, the Dart package `spheres_app`, the
   product Spheres.
 
@@ -106,7 +113,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 624 tests in 51 files under test/{crypto,models,screens,services}
+flutter test                       # 626 tests in 51 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug
@@ -167,7 +174,7 @@ relay/worker.js — Cloudflare Worker + Durable Objects, EU jurisdiction
 |---|---|
 | `flutter_secure_storage` | `spheres_identity_secret`, the `SecureStore` wrapping key |
 | `SharedPreferences` via `SecureStore` (sealed) | sessions, keyring, spheres, sphere chats, messages, contacts, posts, outboxes, albums, archive, invites, audit log, votes |
-| `SharedPreferences` plaintext | `theme_mode`, relay host, call config — nothing secret |
+| `SharedPreferences` plaintext | `theme_mode`, relay host, call config, the hub id — nothing secret |
 | App documents dir | `backups/*.spheres`, decoded media, voice notes |
 
 New sensitive keys must be added to `SecureStore`'s sensitive-key list or they are written

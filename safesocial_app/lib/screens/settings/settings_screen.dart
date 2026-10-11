@@ -935,6 +935,24 @@ class SettingsScreen extends StatelessWidget {
                     setDialogState(() {});
                   },
                 ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: config.relayOnlyEnabled,
+                  title: const Text('Relay every call through TURN',
+                      style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    'A test setting: the call takes the TURN path even when a '
+                    'direct one exists, which is how to check that TURN works. '
+                    'Costs the relay operator bandwidth; needs TURN allowed.',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                  onChanged: config.turnEnabled
+                      ? (v) async {
+                          await config.setRelayOnly(v);
+                          setDialogState(() {});
+                        }
+                      : null,
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: controller,

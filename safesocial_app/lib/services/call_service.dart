@@ -437,9 +437,11 @@ class CallService extends ChangeNotifier {
     DebugLogService().info('Call', '_setupPeer: creating PeerConnection for $peerKey (initiator=$isInitiator)');
 
     final iceServers = await _iceServersFor(peerKey);
+    final pcConfig = CallConfig.peerConnectionConfig(iceServers);
     DebugLogService().info('Call',
-        'ICE: ${iceServers.length} server(s), TURN ${iceServers.any((s) => s['urls']!.startsWith('turn')) ? 'available' : 'absent'}');
-    final pc = await createPeerConnection({'iceServers': iceServers, 'sdpSemantics': 'unified-plan'});
+        'ICE: ${iceServers.length} server(s), TURN ${iceServers.any((s) => s['urls']!.startsWith('turn')) ? 'available' : 'absent'}'
+        '${pcConfig.containsKey('iceTransportPolicy') ? ', relay only' : ''}');
+    final pc = await createPeerConnection(pcConfig);
     _peerConnections[peerKey] = pc;
 
     pc.onConnectionState = (state) {

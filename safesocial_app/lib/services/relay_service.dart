@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart' show sha256;
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../crypto/mailbox.dart';
@@ -156,7 +157,29 @@ class RelayHub {
   final _log = DebugLogService();
   final Random _random = Random.secure();
 
-  late final String _hubId = _mintHubId();
+  /// This install's name on the relay, part of the socket URL. Stable across
+  /// restarts on purpose: a mailbox holds a slot per hub, so a fresh id on
+  /// every process (and every headless wake) filled the Fai–Al mailboxes
+  /// with dead subscribers inside a day and the relay began refusing live
+  /// ones. The relay could already link one install's sessions by the set of
+  /// mailboxes it opens, so a stable id tells it nothing new.
+  late String _hubId = _mintHubId();
+  static const _hubIdKey = 'spheres_hub_id';
+
+  /// Use the id stored for this install, or store the one just minted.
+  /// Called once at boot, before any socket is opened.
+  Future<void> adoptStoredId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_hubIdKey);
+    if (stored != null && stored.isNotEmpty) {
+      _hubId = stored;
+    } else {
+      await prefs.setString(_hubIdKey, _hubId);
+    }
+  }
+
+  @visibleForTesting
+  String get hubId => _hubId;
 
   final Map<String, RelaySubscription> _subs = {};
 
@@ -647,7 +670,8 @@ class RelayHub {
         // was taken.
         _settlePendingSends(address: address, ok: false);
         if (why == 'unsubscribed') {
-          // The mailbox forgot us; prove the key again.
+          // The mailbox forgot us, or gave our slot to a newer hub; prove
+          // the key again.
           sub.subscribed = false;
           _sendSubscribe(sub);
         } else if (why == 'unauthorized') {
@@ -866,6 +890,7 @@ class RelayHub {
     _seenOrder.clear();
     _closeIdle();
     _subs.clear();
+    _hubId = _mintHubId();
     _attempt = 0;
     _usingFallback = false;
     syncOverride = null;

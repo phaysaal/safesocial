@@ -88,6 +88,27 @@ void main() {
     expect(config.summary, contains('no TURN relay'));
   });
 
+  test('relay-only is off by default and forces the ICE transport policy',
+      () async {
+    final servers = await CallConfig.resolve(() async => issued());
+    expect(CallConfig.peerConnectionConfig(servers).containsKey('iceTransportPolicy'),
+        isFalse);
+
+    await config.setRelayOnly(true);
+    expect(CallConfig.peerConnectionConfig(servers)['iceTransportPolicy'], 'relay');
+    expect(CallConfig.peerConnectionConfig(servers)['iceServers'], servers);
+    expect(config.summary, contains('relayed through TURN'));
+
+    // Without TURN there is nothing to relay through: the policy must not
+    // turn every call into a guaranteed failure.
+    await config.setTurnEnabled(false);
+    expect(CallConfig.peerConnectionConfig(servers).containsKey('iceTransportPolicy'),
+        isFalse);
+
+    await config.resetToDefault();
+    expect(config.relayOnlyEnabled, isFalse);
+  });
+
   test('custom servers win and the relay is not asked', () async {
     var asked = false;
     expect(await config.setCustom('turn:my.turn:3478,u,p\nstun:my.turn:3478'),

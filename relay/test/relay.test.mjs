@@ -428,6 +428,40 @@ test("the worker routes four-digit chunk indices", async () => {
   assert.equal(await five.text(), "Not found.");
 });
 
+test("a mailbox full of hubs that never closed gives the oldest slot to a newcomer", async () => {
+  const env = makeEnv();
+  const mb = await mailbox();
+  const box = mailboxFor(env, mb.address);
+  const dead = [];
+  for (let i = 0; i < 16; i++) {
+    const id = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    const hub = hubFor(env, id);
+    const ws = attachHubSocket(hub, id);
+    await hub.webSocketMessage(ws, JSON.stringify(await mb.subFrame()));
+    assert.equal(last(ws).t, "ok");
+    dead.push({ id, hub, ws });
+  }
+  assert.equal((await box.state.storage.get("subs")).length, 16);
+
+  const hub = hubFor(env, HUB_B);
+  const ws = attachHubSocket(hub, HUB_B);
+  await hub.webSocketMessage(ws, JSON.stringify(await mb.subFrame()));
+  assert.equal(last(ws).t, "ok", "the newcomer is admitted, not refused");
+
+  const subs = await box.state.storage.get("subs");
+  assert.equal(subs.length, 16, "the cap holds");
+  assert.ok(subs.some((s) => s.hub === `hub_${HUB_B}`));
+  assert.ok(!subs.some((s) => s.hub === `hub_${dead[0].id}`), "the oldest slot went");
+  assert.ok(subs.some((s) => s.hub === `hub_${dead[1].id}`), "the second-oldest stayed");
+
+  // The evicted hub finds out on its next publish and is told to re-prove.
+  await dead[0].hub.webSocketMessage(
+    dead[0].ws,
+    JSON.stringify({ t: "pub", a: mb.address, d: "late", id: 7 }),
+  );
+  assert.equal(last(dead[0].ws).e, "unsubscribed");
+});
+
 test("a direct v2 socket frame still fans out to hub subscribers", async () => {
   const env = makeEnv();
   const mb = await mailbox();

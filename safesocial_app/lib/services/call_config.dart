@@ -23,6 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class CallConfig extends ChangeNotifier {
   static const _serversKey = 'spheres_ice_servers';
   static const _turnEnabledKey = 'spheres_turn_enabled';
+  static const _relayOnlyKey = 'spheres_call_relay_only';
 
   /// Used only when the relay offers no TURN of its own. A STUN lookup
   /// reveals your IP to Google; that is stated in Settings when it applies.
@@ -35,6 +36,12 @@ class CallConfig extends ChangeNotifier {
   /// instance state, kept in sync by every setter.
   static List<Map<String, String>>? _custom;
   static bool _turnEnabled = true;
+
+  /// Every call goes through TURN, even when a direct path exists. This is
+  /// how the TURN path gets exercised on purpose; it costs the operator
+  /// bandwidth, so it is off unless someone switches it on.
+  static bool _relayOnly = false;
+  static bool get relayOnly => _relayOnly;
 
   /// Credentials the relay issued, and when they stop being trusted.
   static List<Map<String, String>>? _issued;
@@ -49,13 +56,26 @@ class CallConfig extends ChangeNotifier {
   static DateTime Function() now = DateTime.now;
 
   bool get turnEnabled => _turnEnabled;
+  bool get relayOnlyEnabled => _relayOnly;
   bool get isCustom => _custom != null;
+
+  /// The configuration for a new peer connection: the servers, and the
+  /// transport policy that forces the relay path when asked to.
+  static Map<String, dynamic> peerConnectionConfig(
+      List<Map<String, String>> iceServers) {
+    return {
+      'iceServers': iceServers,
+      'sdpSemantics': 'unified-plan',
+      if (_relayOnly && _turnEnabled) 'iceTransportPolicy': 'relay',
+    };
+  }
 
   /// A human-readable summary for the settings screen.
   String get summary {
     final custom = _custom;
     if (custom != null) return 'Custom (${custom.length} server(s))';
     if (!_turnEnabled) return 'Direct connections only — no TURN relay';
+    if (_relayOnly) return 'Every call relayed through TURN (test setting)';
     switch (relayOffersTurn) {
       case true:
         return 'STUN + TURN issued by your relay';
@@ -70,6 +90,7 @@ class CallConfig extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     _turnEnabled = prefs.getBool(_turnEnabledKey) ?? true;
+    _relayOnly = prefs.getBool(_relayOnlyKey) ?? false;
 
     final raw = prefs.getString(_serversKey);
     if (raw != null && raw.isNotEmpty) {
@@ -105,12 +126,21 @@ class CallConfig extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setRelayOnly(bool on) async {
+    _relayOnly = on;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_relayOnlyKey, on);
+    notifyListeners();
+  }
+
   Future<void> resetToDefault() async {
     _custom = null;
     _turnEnabled = true;
+    _relayOnly = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_serversKey);
     await prefs.remove(_turnEnabledKey);
+    await prefs.remove(_relayOnlyKey);
     notifyListeners();
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spheres_app/crypto/mailbox.dart';
 import 'package:spheres_app/services/relay_config.dart';
 import 'package:spheres_app/services/relay_service.dart';
@@ -46,10 +47,12 @@ class FakeSocket implements RelaySocket {
 /// One socket at a time, handed out in order so a test can see reconnects.
 class SocketFactory {
   final List<FakeSocket> created = [];
+  final List<Uri> createdUris = [];
   final List<bool> failures;
   SocketFactory({this.failures = const []});
 
   RelaySocket call(Uri uri) {
+    createdUris.add(uri);
     final fail = created.length < failures.length && failures[created.length];
     final s = FakeSocket(failHandshake: fail);
     created.add(s);
@@ -254,6 +257,24 @@ void main() {
     sockets.current.dropConnection();
     await settle();
     expect(RelayHub.instance.debugRetryPending, isTrue);
+  });
+
+  test('the hub id is stable across restarts once stored', () async {
+    SharedPreferences.setMockInitialValues({});
+    final first = RelayHub.instance.hubId;
+    await RelayHub.instance.adoptStoredId();
+    expect(RelayHub.instance.hubId, first, reason: 'nothing stored: keep the minted one');
+
+    // A restart mints a new id, then finds the stored one.
+    RelayHub.instance.debugReset();
+    expect(RelayHub.instance.hubId, isNot(first));
+    await RelayHub.instance.adoptStoredId();
+    expect(RelayHub.instance.hubId, first);
+
+    final chat = RelayService();
+    await chat.connectMailbox('alice', await mailbox('a'));
+    await settle();
+    expect(sockets.createdUris.single.path, '/hub/$first');
   });
 
   test('a mailbox that forgot us is re-proven, not abandoned', () async {
