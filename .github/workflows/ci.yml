@@ -116,7 +116,7 @@ jobs:
           exit 1
 
   relay:
-    name: Relay — syntax check
+    name: Relay — tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -127,10 +127,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Check worker parses
         run: node --check worker.js
+
+      # In-process against a fake Durable Object runtime with real Ed25519
+      # signatures: hub subscribe/publish/deliver, wake, TURN, blob caps.
+      - name: Test
+        run: node --test test/relay.test.mjs
 
 # The Rust crate (safesocial_core) is intentionally not built here. It is
 # dormant: nothing loads it at runtime, no .so is bundled, and per

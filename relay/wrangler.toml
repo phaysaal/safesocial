@@ -20,6 +20,28 @@ routes = [
   { pattern = "relay.spheres.dev", custom_domain = true }
 ]
 
+# Where Durable Object storage lives. Cloudflare runs the Worker at the edge
+# nearest the user, but the mailbox, blob and prekey objects are pinned to one
+# region. Changing this renames every object, so queued mail does not carry
+# across — deploy it together with a client build and expect a clean slate.
+# Remove the line entirely to let Cloudflare choose.
+[vars]
+DO_JURISDICTION = "eu"
+
+# Secrets, set with `npx wrangler secret put <NAME>` — never in this file.
+#
+#   TURN_SECRET       coturn `static-auth-secret`; enables /turn credentials
+#   TURN_URLS         comma-separated, e.g. "turn:turn.spheres.dev:3478,turns:turn.spheres.dev:5349"
+#   APNS_PRIVATE_KEY  the .p8 provider key (PEM); enables apns: wake targets
+#   APNS_KEY_ID       10-character key id
+#   APNS_TEAM_ID      Apple developer team id
+#   APNS_TOPIC        the iOS bundle id
+#   APNS_HOST         optional; api.sandbox.push.apple.com for development builds
+#
+# With none of these set the relay still works: /turn answers 501 and apns:
+# registrations are refused, and the client says so rather than pretending.
+
+
 # Durable Objects for mailbox state. Also provides the alarm API, used to
 # expire old mail on a timer rather than only when something is written.
 [durable_objects]

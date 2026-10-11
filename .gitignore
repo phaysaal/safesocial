@@ -43,3 +43,7 @@ relay/node_modules/
 # Release signing (keep secret)
 safesocial_app/android/key.properties
 safesocial_app/android/app/*.jks
+
+# Gradle writes here when GRADLE_USER_HOME is overridden
+safesocial_app/android/build/
+safesocial_app/android/app/build/

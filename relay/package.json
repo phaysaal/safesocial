@@ -2,12 +2,15 @@
   "name": "spheres-relay",
   "version": "1.0.0",
   "private": true,
-  "description": "Spheres P2P relay — zero-knowledge WebSocket message relay",
+  "description": "Spheres blind relay — one hub socket per client, secret-derived mailboxes",
   "scripts": {
     "dev": "npx wrangler dev",
-    "deploy": "npx wrangler deploy"
+    "deploy": "npx wrangler deploy",
+    "test": "node --test test/relay.test.mjs",
+    "check": "node --check worker.js",
+    "smoke": "node test/smoke.mjs relay.spheres.dev"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "wrangler": "^4.149.0"
   }
 }
