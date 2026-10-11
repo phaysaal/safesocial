@@ -1,14 +1,20 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:convert/convert.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spheres_app/crypto/envelope.dart';
 import 'package:spheres_app/crypto/session_manager.dart';
 import 'package:spheres_app/models/sphere.dart';
 import 'package:spheres_app/services/album_service.dart';
+import 'package:spheres_app/services/blob_service.dart';
+import 'package:spheres_app/services/media_service.dart';
 import 'package:spheres_app/services/secure_store.dart';
 import 'package:spheres_app/services/sphere_service.dart';
 
@@ -20,19 +26,53 @@ import 'package:spheres_app/services/sphere_service.dart';
 /// They now travel the per-member feed channels like everything else addressed
 /// to a sphere: same durable queue, same archive, so one is not lost because
 /// somebody was briefly away and a peer can hand it over later.
+/// The relay's blob store, in memory, so an album item really is uploaded.
+class _FakeBlobRelay {
+  final Map<String, String> chunks = {};
+  Future<http.Response> handle(
+      String method, Uri url, Map<String, String> headers, List<int>? body) async {
+    final key = '${url.pathSegments[1]}/${url.pathSegments[2]}';
+    if (method == 'PUT') {
+      if (chunks.containsKey(key)) return http.Response('exists', 409);
+      chunks[key] = utf8.decode(body!);
+      return http.Response('OK', 200);
+    }
+    final chunk = chunks[key];
+    return chunk == null ? http.Response('', 404) : http.Response(chunk, 200);
+  }
+}
+
 void main() {
   late String alice, aliceSecret, bob, carol;
+  late Directory tmp;
+
+  /// A real, tiny JPEG on disk. The media pipeline refuses paths that do not
+  /// exist rather than sending them along as dead references.
+  Future<String> realImage() async {
+    final image = img.Image(width: 8, height: 8);
+    img.fill(image, color: img.ColorRgb8(0, 100, 200));
+    final f = File('${tmp.path}/${DateTime.now().microsecondsSinceEpoch}.jpg');
+    await f.writeAsBytes(Uint8List.fromList(img.encodeJpg(image)));
+    return f.path;
+  }
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
     await SecureStore.instance.init();
+    BlobService.transportOverride = _FakeBlobRelay().handle;
+    tmp = await Directory.systemTemp.createTemp('spheres_album_');
 
     final a = ed.generateKey();
     alice = hex.encode(a.publicKey.bytes);
     aliceSecret = hex.encode(a.privateKey.bytes);
     bob = hex.encode(ed.generateKey().publicKey.bytes);
     carol = hex.encode(ed.generateKey().publicKey.bytes);
+  });
+
+  tearDown(() async {
+    BlobService.transportOverride = null;
+    await tmp.delete(recursive: true);
   });
 
   Future<(AlbumService, SphereService, Sphere, List<String>)> setUpAlbum({
@@ -71,7 +111,7 @@ void main() {
     await albums.createAlbum('Holiday', '', sphere.id);
     final album = albums.albums.single;
 
-    await albums.addMediaToAlbum(album.dhtKey, 'not-a-real-path', 'image');
+    await albums.addMediaToAlbum(album.dhtKey, await realImage(), 'image');
 
     // Previously nobody: the send addressed a connection that never existed.
     expect(sentTo.toSet(), {bob, carol});
@@ -82,7 +122,7 @@ void main() {
     await albums.createAlbum('Holiday', '', sphere.id);
 
     await albums.addMediaToAlbum(
-        albums.albums.single.dhtKey, 'not-a-real-path', 'image');
+        albums.albums.single.dhtKey, await realImage(), 'image');
 
     expect(sentTo, isNot(contains(alice)));
   });
@@ -113,7 +153,7 @@ void main() {
 
     await albums.createAlbum('Holiday', '', sphere.id);
     await albums.addMediaToAlbum(
-        albums.albums.single.dhtKey, 'not-a-real-path', 'image');
+        albums.albums.single.dhtKey, await realImage(), 'image');
 
     final envelope = Envelope.decode(payloads.single);
     expect(envelope.sphereId, sphere.id);
@@ -129,7 +169,7 @@ void main() {
     await albums.createAlbum('Holiday', '', sphere.id);
     final album = albums.albums.single;
 
-    await albums.addMediaToAlbum(album.dhtKey, 'not-a-real-path', 'image');
+    await albums.addMediaToAlbum(album.dhtKey, await realImage(), 'image');
 
     // It is ours either way; what failed is telling anyone else.
     expect(albums.albums.single.items, hasLength(1));
@@ -141,8 +181,23 @@ void main() {
     await spheres.leave(sphere.id);
 
     await albums.addMediaToAlbum(
-        albums.albums.single.dhtKey, 'not-a-real-path', 'image');
+        albums.albums.single.dhtKey, await realImage(), 'image');
 
+    expect(sentTo, isEmpty);
+  });
+
+  test('media that cannot be sent is taken back out and reported', () async {
+    final (albums, _, sphere, sentTo) = await setUpAlbum();
+    await albums.createAlbum('Holiday', '', sphere.id);
+    final album = albums.albums.single;
+
+    await expectLater(
+      albums.addMediaToAlbum(album.dhtKey, '${tmp.path}/missing.jpg', 'image'),
+      throwsA(isA<MediaRejectedException>()),
+    );
+
+    expect(albums.albums.single.items, isEmpty,
+        reason: 'nothing only this device could ever see is kept');
     expect(sentTo, isEmpty);
   });
 }

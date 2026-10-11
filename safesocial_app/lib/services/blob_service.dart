@@ -53,6 +53,10 @@ class BlobService {
     return http.get(url, headers: headers);
   }
 
+  /// The relay refuses chunk indices at or above this. 48 KB chunks make it
+  /// a little over 64 MB, the post-transcode video cap.
+  static const int maxChunks = 1400;
+
   /// Encrypt [bytes], upload every chunk, and return the reference to embed.
   ///
   /// Returns null if any chunk fails — a partially uploaded blob is worse than
@@ -69,7 +73,7 @@ class BlobService {
     );
 
     final chunks = BlobCrypto.split(bytes);
-    if (chunks.length > 512) {
+    if (chunks.length > maxChunks) {
       _log.error('Blob', 'Media too large: ${chunks.length} chunks');
       return null;
     }
@@ -201,6 +205,18 @@ class BlobService {
     if (bytes == null) return null;
 
     await file.writeAsBytes(bytes);
+
+    // A video's inline thumbnail becomes its poster on disk, so lists can show
+    // a frame once the reference has been replaced by the local path.
+    final thumb = ref.thumbnail;
+    if (ref.isVideo && thumb != null) {
+      try {
+        await File('${file.path}.jpg')
+            .writeAsBytes(base64Decode(thumb.split(',').last));
+      } catch (_) {
+        // Optional; the clip still plays.
+      }
+    }
     return file.path;
   }
 }

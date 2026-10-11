@@ -116,11 +116,31 @@ class AlbumService extends ChangeNotifier {
       return;
     }
 
-    // Send the image itself, not a path. Album items used to carry a local
+    // Send the media itself, not a path. Album items used to carry a local
     // filesystem path, which is a dead reference on anyone else's device — so
     // "shared" albums never actually shared anything.
-    final encoded = await MediaService.encodeImageForRelay(mediaRef);
-    final shared = encoded == null ? item : item.copyWith(mediaRef: encoded);
+    final String? encoded;
+    try {
+      encoded = await MediaService.prepareForRelay(mediaRef,
+          videoLimit: MediaService.chatVideoLimit);
+    } on MediaRejectedException {
+      // Not sendable at all: take it back out of the album rather than keep
+      // something only this device can ever see, and let the UI say why.
+      _albums[index] = album.copyWith(
+        items: album.items.where((i) => i.id != item.id).toList(),
+      );
+      await _persist();
+      notifyListeners();
+      rethrow;
+    }
+    if (encoded == null) {
+      // Upload failed. The item stays here; sending the local path instead
+      // would only produce a broken reference on every other device.
+      DebugLogService().error(
+          'Media', 'Could not upload album item; kept locally, not shared');
+      return;
+    }
+    final shared = item.copyWith(mediaRef: encoded);
 
     final String sealed;
     try {

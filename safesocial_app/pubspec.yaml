@@ -32,7 +32,6 @@ dependencies:
   record: ^6.0.0
   audioplayers: ^5.2.1
   audio_waveforms: ^1.0.5
-  ffi: ^2.1.2
   http: ^1.6.0
   cryptography: ^2.9.0
   ed25519_edwards: ^0.3.1
@@ -40,6 +39,17 @@ dependencies:
   # Used directly by identity_service/relay_service for hex codecs; was
   # previously relied on transitively, which is fragile.
   convert: ^3.1.1
+  gal: ^2.3.3
+  video_compress: ^3.1.4
+  video_player: ^2.11.1
+  unifiedpush: ^6.2.0
+  flutter_local_notifications: ^22.3.1
+  # Pinned: 3.5.0 builds only with the Kotlin support built into AGP 9, and
+  # the toolchain is pinned to AGP 8.11 (FLUTTER_TOOLCHAIN). Lift when AGP moves.
+  unifiedpush_android: 3.4.1
+  local_auth: ^3.0.2
+  geolocator: ^14.1.1
+  url_launcher: ^6.3.3
 
 dev_dependencies:
   flutter_test:

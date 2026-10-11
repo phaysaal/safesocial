@@ -1,10 +1,11 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../services/album_service.dart';
 import '../../services/media_service.dart';
+import '../../services/video_transcoder.dart';
+import '../../widgets/media_thumb.dart';
 import '../../services/contact_service.dart';
 import '../../widgets/avatar.dart';
 
@@ -55,7 +56,7 @@ class AlbumDetailScreen extends StatelessWidget {
                   onTap: () => context.push('/media/view?ref=${Uri.encodeComponent(item.mediaRef)}'),
                   child: Hero(
                     tag: item.mediaRef,
-                    child: Image.file(File(item.mediaRef), fit: BoxFit.cover),
+                    child: MediaThumb(ref: item.mediaRef, fit: BoxFit.cover),
                   ),
                 );
               },
@@ -88,10 +89,43 @@ class AlbumDetailScreen extends StatelessWidget {
   Future<void> _addPhoto(BuildContext context) async {
     final mediaService = context.read<MediaService>();
     final albumService = context.read<AlbumService>();
-    
-    final path = await mediaService.pickAndStoreImage();
-    if (path != null) {
-      await albumService.addMediaToAlbum(albumId, path, 'image');
+    final messenger = ScaffoldMessenger.of(context);
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photo'),
+              onTap: () => Navigator.pop(ctx, 'photo'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Video'),
+              subtitle: const Text('Up to 3 minutes'),
+              onTap: () => Navigator.pop(ctx, 'video'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+
+    try {
+      final path = choice == 'video'
+          ? await mediaService.pickVideo(limit: MediaService.chatVideoLimit)
+          : await mediaService.pickAndStoreImage();
+      if (path != null) {
+        await albumService.addMediaToAlbum(
+            albumId, path, choice == 'video' ? 'video' : 'image');
+      }
+    } on MediaRejectedException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } on UnsupportedVideoException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
