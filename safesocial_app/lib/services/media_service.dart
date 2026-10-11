@@ -358,6 +358,35 @@ class MediaService extends ChangeNotifier {
     return ref.encode();
   }
 
+  /// Upload a recorded voice note as an encrypted blob and return its
+  /// reference. Audio is sent as recorded; there is no re-encoding step.
+  /// Throws [MediaRejectedException] when the file is missing or too large,
+  /// returns null when the upload failed and should be retried.
+  static Future<String?> prepareAudioForRelay(String filePath) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw const MediaRejectedException('That voice note is no longer available.');
+    }
+    final bytes = await file.readAsBytes();
+    if (bytes.length > maxMediaBytes) {
+      throw MediaRejectedException(
+          'That voice note is ${bytes.length ~/ (1024 * 1024)} MB; the limit is '
+          '${maxMediaBytes ~/ (1024 * 1024)} MB.');
+    }
+    final ref = await BlobService().upload(bytes: bytes, mimeType: audioMimeFor(filePath));
+    if (ref == null) return null;
+    DebugLogService().info('Media', 'Prepared ${bytes.length ~/ 1024}KB voice note');
+    return ref.encode();
+  }
+
+  static String audioMimeFor(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.ogg') || lower.endsWith('.opus')) return 'audio/ogg';
+    if (lower.endsWith('.mp3')) return 'audio/mpeg';
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    return 'audio/mp4';
+  }
+
   static img.Image _fit(img.Image image, int longest) {
     if (image.width >= image.height) {
       return image.width > longest ? img.copyResize(image, width: longest) : image;

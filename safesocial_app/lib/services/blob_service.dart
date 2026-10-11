@@ -189,12 +189,31 @@ class BlobService {
   ///
   /// Cached under the blob address, so the same media is only fetched once even
   /// if it appears in several posts.
+  /// The file extension a downloaded blob is written with, so players and
+  /// decoders recognise it. Voice notes used to land as `.jpg` and the audio
+  /// player refused them.
+  static String extensionFor(String mimeType) {
+    switch (mimeType) {
+      case 'audio/mp4':
+      case 'audio/aac':
+        return 'm4a';
+      case 'audio/ogg':
+        return 'ogg';
+      case 'audio/mpeg':
+        return 'mp3';
+      case 'audio/wav':
+        return 'wav';
+    }
+    if (mimeType.startsWith('video/')) return 'mp4';
+    return 'jpg';
+  }
+
   Future<String?> materialise(BlobRef ref) async {
     final dir = await getApplicationDocumentsDirectory();
     final cache = Directory('${dir.path}/media');
     if (!cache.existsSync()) await cache.create(recursive: true);
 
-    final extension = ref.isVideo ? 'mp4' : 'jpg';
+    final extension = extensionFor(ref.mimeType);
     // The address is base64url, which can contain characters that are awkward
     // in filenames; hex-ish sanitising keeps it filesystem-safe.
     final safeName = ref.address.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');

@@ -524,6 +524,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _stopRecording() async {
+    if (!_isRecording) return;
     try {
       final path = await _recorderController.stop();
       setState(() {
@@ -1090,42 +1091,35 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           ),
                   ),
 
-                  // Send, like or Mic button
-                  if (_isRecording)
-                    IconButton(
-                      icon: const Icon(Icons.send_rounded, color: Colors.green, size: 24),
-                      onPressed: _stopRecording,
-                    )
-                  else if (_hasText)
-                    IconButton(
-                      icon: Icon(Icons.send_rounded,
-                          color: cs.primary, size: 24),
-                      onPressed: _sendMessage,
+                  // Send or mic. One widget for every state, so the long
+                  // press that started a recording still gets its release:
+                  // swapping the button out mid-gesture meant letting go did
+                  // nothing and the recording ran until "send" was tapped.
+                  GestureDetector(
+                    onLongPressStart: _hasText ? null : (_) => _startRecording(),
+                    onLongPressEnd: _hasText ? null : (_) => _stopRecording(),
+                    child: IconButton(
+                      icon: _isRecording
+                          ? const Icon(Icons.send_rounded, color: Colors.green, size: 24)
+                          : _hasText
+                              ? Icon(Icons.send_rounded, color: cs.primary, size: 24)
+                              : Icon(Icons.mic_none_rounded, color: cs.primary, size: 26),
+                      onPressed: _isRecording
+                          ? _stopRecording
+                          : _hasText
+                              ? _sendMessage
+                              : () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Hold to record voice note')),
+                                  );
+                                },
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
                         minWidth: 36,
                         minHeight: 36,
                       ),
-                    )
-                  else
-                    GestureDetector(
-                      onLongPressStart: (_) => _startRecording(),
-                      onLongPressEnd: (_) => _stopRecording(),
-                      child: IconButton(
-                        icon: Icon(Icons.mic_none_rounded,
-                            color: cs.primary, size: 26),
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Hold to record voice note')),
-                          );
-                        },
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 36,
-                          minHeight: 36,
-                        ),
-                      ),
                     ),
+                  ),
                     ],
                   ),
                 ],

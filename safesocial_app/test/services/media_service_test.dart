@@ -174,6 +174,31 @@ void main() {
     expect(decoded.width, 1600, reason: 'longest side capped at 1600');
   });
 
+  test('a voice note uploads as audio and comes back with an audio extension',
+      () async {
+    final f = File('${tmp.path}/audio_1.m4a');
+    await f.writeAsBytes(List<int>.generate(5000, (i) => i % 256));
+
+    final encoded = await MediaService.prepareAudioForRelay(f.path);
+    final ref = BlobRef.tryDecode(encoded!)!;
+    expect(ref.mimeType, 'audio/mp4');
+    expect(ref.isAudio, isTrue);
+    expect(ref.thumbnail, isNull);
+    expect(BlobService.extensionFor(ref.mimeType), 'm4a');
+    expect(BlobService.extensionFor('video/mp4'), 'mp4');
+    expect(BlobService.extensionFor('image/jpeg'), 'jpg');
+
+    final bytes = await BlobService().download(ref);
+    expect(bytes, await f.readAsBytes());
+  });
+
+  test('a missing voice note is a rejection', () async {
+    await expectLater(
+      MediaService.prepareAudioForRelay('${tmp.path}/gone.m4a'),
+      throwsA(isA<MediaRejectedException>()),
+    );
+  });
+
   test('a missing file is a rejection, not a silent null', () async {
     await expectLater(
       MediaService.prepareForRelay('${tmp.path}/nope.jpg'),

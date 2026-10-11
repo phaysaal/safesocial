@@ -52,6 +52,7 @@ class BlobRef {
   });
 
   bool get isVideo => mimeType.startsWith('video/');
+  bool get isAudio => mimeType.startsWith('audio/');
 
   String encode() => '$scheme${base64Url.encode(utf8.encode(jsonEncode({
         'v': version,

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
 
+import '../crypto/blob.dart';
 import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/media_provenance.dart';
@@ -774,7 +775,20 @@ class ChatService extends ChangeNotifier {
 
   /// Swap local media paths for transferable data before sending.
   Future<Message> _encodeMedia(Message message) async {
-    if (message.mediaRefs.isEmpty) return message;
+    // A voice note is a local recording until it is uploaded; sending the
+    // path meant the other side got a reference into our sandbox and a
+    // player that could do nothing with it.
+    String? audio = message.audioRef;
+    if (audio != null && BlobRef.tryDecode(audio) == null) {
+      audio = await MediaService.prepareAudioForRelay(audio);
+      if (audio == null) {
+        throw const MediaRejectedException(
+            'The voice note could not be uploaded. Try again.');
+      }
+    }
+    if (message.mediaRefs.isEmpty) {
+      return audio == message.audioRef ? message : message.copyWith(audioRef: audio);
+    }
 
     final encoded = <String>[];
     final provenance = <MediaProvenance?>[];
@@ -787,19 +801,26 @@ class ChatService extends ChangeNotifier {
         provenance.add(MediaProvenance.at(message.provenance, i));
       }
     }
-    return message.copyWith(mediaRefs: encoded, provenance: provenance);
+    return message.copyWith(mediaRefs: encoded, provenance: provenance, audioRef: audio);
   }
 
   /// Turn received media back into files on this device.
   Future<Message> _decodeMedia(Message message) async {
-    if (message.mediaRefs.isEmpty) return message;
+    String? audio = message.audioRef;
+    if (audio != null && BlobRef.tryDecode(audio) != null) {
+      // Kept as the reference when the fetch fails now; the player retries.
+      audio = await MediaService.decodeAndSaveImage(audio) ?? audio;
+    }
+    if (message.mediaRefs.isEmpty) {
+      return audio == message.audioRef ? message : message.copyWith(audioRef: audio);
+    }
 
     final saved = <String>[];
     for (final ref in message.mediaRefs) {
       final path = await MediaService.decodeAndSaveImage(ref);
       saved.add(path ?? ref);
     }
-    return message.copyWith(mediaRefs: saved);
+    return message.copyWith(mediaRefs: saved, audioRef: audio);
   }
 
   /// React to a message, or remove an existing reaction by sending the same
