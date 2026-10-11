@@ -166,6 +166,7 @@ safesocial/
     architecture_weaknesses.md  The 2026-07 findings that motivated the rebuild (historical)
     feature_landscape.md        What mainstream platforms have and what Spheres cannot build
     feature_review.md           What to build from that landscape
+    facebook_feature_list.md    The Facebook app item by item against Spheres, and the parity plan
     architecture.md, protocol.md, analysis_review.md   Original Veilid-era design (historical)
 ```
 
