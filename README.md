@@ -75,6 +75,7 @@ platform-side data mining.
 | Comments: reply threads, seven reactions on posts and comments, edit with history, delete, hide and pin by the post's author or an admin, comments off per post, follow or mute a post, newest-first | Working; comment, reaction, reply, hide and edit checked between a phone and a tablet |
 | Spheres: invite links with admin approval, private member notes, birthdays and avatars shared with contacts | Working; untested on hardware |
 | Composer: coloured backgrounds for short text, feeling or activity, life events, asking for recommendations, resharing into another sphere with the author's signed words, pin to profile, delete with a thirty-day trash, archive, bulk manage, picture editing (rotate, flip, crop, filters, text, stickers, drawing), 360° photos panned in the viewer, video trim and cover frame | Working; signature, reshare, delete and trim rules covered by tests, untested on hardware |
+| Contacts and feed: mute, unfollow, snooze for 30 days, take a break (quiet and restricted until ended), restrict (they get only your name and picture), favourites and a favourites-only feed, birthday and anniversary cards, data saver | Working; local only, nothing is told to the other person; covered by tests, untested on hardware |
 | Profile: cover and featured photos, pronouns, nickname, pronunciation, work, education, places, relationship and family, languages, websites, hobbies, quotes, life events, a temporary picture that reverts, a legacy contact, an audience per field and a "view as" that shows exactly what each contact gets | Working; the per-contact cut is covered by tests, untested on hardware |
 | Calls: history, missed-call notifications, screen sharing, join a sphere call from its chat | Working; screen share needs platform support, large calls still mesh |
 | Local sticker packs, app lock and locked chats with biometrics, security notices on key changes, inbox rate limiting | Working |
@@ -132,7 +133,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 691 tests in 59 files
+flutter test                       # 700 tests in 60 files
 flutter run
 ```
 

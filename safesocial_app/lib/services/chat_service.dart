@@ -1346,6 +1346,7 @@ class ChatService extends ChangeNotifier {
           body: describeMessage(msg),
           route: '/chat/$contactKey',
           thread: 'chat:$contactKey',
+          from: msg.senderId,
         ));
       }
     }

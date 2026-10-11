@@ -134,9 +134,18 @@ class NotificationService extends ChangeNotifier {
   @visibleForTesting
   Future<bool> handle(InboundEvent event) => _onEvent(event);
 
+  /// Whether a contact is muted, snoozed or on a break. Set by the app.
+  bool Function(String identityKey)? isQuiet;
+
   Future<bool> _onEvent(InboundEvent event) async {
     if (!_enabled) return false;
     if (!_kinds.contains(event.kind)) return false;
+    // A quiet contact's words stay quiet; a call still rings, because a
+    // missed call is a different kind of harm from a missed post.
+    final from = event.from;
+    if (from != null && event.kind != InboundKind.call && (isQuiet?.call(from) ?? false)) {
+      return false;
+    }
     // Calls ring regardless of whether the app is on screen; everything else
     // is already visible when it is.
     if (AppLifecycle.foreground && event.kind != InboundKind.call) return false;

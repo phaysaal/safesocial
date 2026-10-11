@@ -105,7 +105,16 @@ class _ContactListTile extends StatelessWidget {
           // approve, which the old label never did.
           ? Text('Waiting for them to approve',
               style: TextStyle(color: cs.secondary, fontSize: 12))
-          : null,
+          : (contact.onBreak || contact.isSnoozed || contact.muted || contact.restricted)
+              ? Text(
+                  [
+                    if (contact.onBreak) 'on a break',
+                    if (contact.isSnoozed && !contact.onBreak) 'snoozed',
+                    if (contact.muted) 'muted',
+                    if (contact.restricted && !contact.onBreak) 'restricted',
+                  ].join(' · '),
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12))
+              : null,
       trailing: PopupMenuButton<String>(
         onSelected: (value) => _handleMenuAction(context, value, contactService),
         itemBuilder: (context) => [
@@ -122,6 +131,45 @@ class _ContactListTile extends StatelessWidget {
             child: ListTile(
               leading: Icon(Icons.edit_outlined),
               title: Text('Rename'),
+              dense: true,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'favourite',
+            child: ListTile(
+              leading: Icon(contact.favourite ? Icons.star : Icons.star_outline),
+              title: Text(contact.favourite ? 'Remove from favourites' : 'Add to favourites'),
+              dense: true,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'snooze',
+            child: ListTile(
+              leading: const Icon(Icons.snooze_outlined),
+              title: Text(contact.isSnoozed ? 'End snooze' : 'Snooze for 30 days'),
+              subtitle: contact.isSnoozed
+                  ? Text('Back on ${contact.snoozedUntil!.toLocal().toString().substring(0, 10)}')
+                  : null,
+              dense: true,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'restrict',
+            child: ListTile(
+              leading: Icon(contact.restricted ? Icons.lock_open_outlined : Icons.lock_outline),
+              title: Text(contact.restricted ? 'Stop restricting' : 'Restrict'),
+              subtitle: const Text('They get only your name and picture', style: TextStyle(fontSize: 11)),
+              dense: true,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'break',
+            child: ListTile(
+              leading: Icon(contact.onBreak ? Icons.play_arrow_outlined : Icons.pause_circle_outline),
+              title: Text(contact.onBreak ? 'End the break' : 'Take a break'),
+              subtitle: contact.onBreak
+                  ? null
+                  : const Text('Quiet and restricted until you end it', style: TextStyle(fontSize: 11)),
               dense: true,
             ),
           ),
@@ -163,6 +211,32 @@ class _ContactListTile extends StatelessWidget {
         break;
       case 'rename':
         _showRenameDialog(context, service);
+        break;
+      case 'favourite':
+        service.setFavourite(contact.publicKey, !contact.favourite);
+        break;
+      case 'snooze':
+        if (contact.isSnoozed) {
+          service.unsnooze(contact.publicKey);
+        } else {
+          service.snooze(contact.publicKey);
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Quiet for 30 days, then back by themselves')));
+        }
+        break;
+      case 'restrict':
+        service.setRestricted(contact.publicKey, !contact.restricted);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(contact.restricted
+                ? 'They get your full profile again'
+                : 'They now get only your name and picture')));
+        break;
+      case 'break':
+        service.setOnBreak(contact.publicKey, !contact.onBreak);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(contact.onBreak
+                ? 'Break ended'
+                : 'On a break: their posts leave your feed, they will not notify you, and they get only your name and picture')));
         break;
       case 'block':
         service.toggleBlock(contact.publicKey);

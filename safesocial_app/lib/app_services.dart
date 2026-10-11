@@ -94,6 +94,7 @@ class AppServices {
     await callConfig.load();
     await libraryService.load();
     await notificationService.load();
+    notificationService.isQuiet = contactService.isQuiet;
     await wakeService.load();
 
     syncService.attachServices(identityService);

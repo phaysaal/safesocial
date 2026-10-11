@@ -226,8 +226,27 @@ class _PostCardState extends State<PostCard> {
                             : 'Pin in sphere'),
                       ),
                     if (post.authorId != myKey) ...[
-                      const PopupMenuItem(value: 'mute', child: Text('Mute this person')),
-                      const PopupMenuItem(value: 'unfollow', child: Text('Unfollow')),
+                      PopupMenuItem(
+                        value: 'mute',
+                        child: Text(
+                            (context.read<ContactService>().getContact(post.authorId)?.muted ?? false)
+                                ? 'Unmute this person'
+                                : 'Mute this person (posts and notifications)'),
+                      ),
+                      PopupMenuItem(
+                        value: 'snooze',
+                        child: Text(
+                            (context.read<ContactService>().getContact(post.authorId)?.isSnoozed ?? false)
+                                ? 'End the 30-day snooze'
+                                : 'Snooze for 30 days'),
+                      ),
+                      PopupMenuItem(
+                        value: 'unfollow',
+                        child: Text(
+                            (context.read<ContactService>().getContact(post.authorId)?.following ?? true)
+                                ? 'Unfollow'
+                                : 'Follow again'),
+                      ),
                       const PopupMenuItem(value: 'report', child: Text('Report to the sphere')),
                     ],
                   ],
@@ -657,15 +676,35 @@ class _PostCardState extends State<PostCard> {
           }
         });
       case 'mute':
-        context.read<ContactService>().toggleMute(post.authorId);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contact muted')),
-        );
+        final contacts = context.read<ContactService>();
+        final wasMuted = contacts.getContact(post.authorId)?.muted ?? false;
+        contacts.toggleMute(post.authorId);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(wasMuted
+              ? 'Their posts and notifications are back'
+              : 'Their posts leave your feed and they will not notify you'),
+        ));
+      case 'snooze':
+        final contacts = context.read<ContactService>();
+        final c = contacts.getContact(post.authorId);
+        if (c?.isSnoozed ?? false) {
+          contacts.unsnooze(post.authorId);
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Snooze ended')));
+        } else {
+          contacts.snooze(post.authorId);
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Quiet for 30 days, then back by themselves')));
+        }
       case 'unfollow':
-        context.read<ContactService>().toggleFollow(post.authorId);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unfollowed')),
-        );
+        final contacts = context.read<ContactService>();
+        final wasFollowing = contacts.getContact(post.authorId)?.following ?? true;
+        contacts.toggleFollow(post.authorId);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(wasFollowing
+              ? 'Unfollowed; their posts leave your feed'
+              : 'Following again'),
+        ));
     }
   }
 

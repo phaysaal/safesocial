@@ -67,9 +67,14 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   the oldest subscriber when a mailbox is full rather than refusing the newcomer.
 - **Key verification** (`crypto/safety_number.dart`) covers both identity keys and every
   device key; a contact's verified number is stored and a changed key shows a banner.
-- **Local organisation** lives in `LibraryService`: saves, stars, pins, mutes, archives,
-  locked chats, blurred media, hidden words, member notes, stickers. Everything in it stays
-  on the device.
+- **Local organisation** lives in `LibraryService`: saves, stars, pins, mutes, sphere
+  snoozes, archives, locked chats, blurred media, hidden words, member notes, stickers,
+  data saver, the favourites-only feed. Everything in it stays on the device. Per-contact
+  choices live on `Contact`: muted, following, snoozed-until, on a break, restricted,
+  favourite. The feed reads `quietAuthors`/`unfollowedAuthors` and the notification
+  service `isQuiet`, both from `ContactService`; a restricted contact's profile copy is
+  name and picture only (`ProfileSharing.payloadFor(restricted:)`). A quiet contact's
+  call still rings. Nothing of this is told to the other person.
 - **Message kinds.** `Message.kind` is text, poll, location, contact, video_note, sticker,
   call or system, with structured content in `payload`; `Post.kind` is post, event, poll,
   life_event, recommend (one suggestion per member, via `post_suggest`) or reshare. Any
@@ -148,7 +153,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 691 tests in 59 files under test/{crypto,models,screens,services}
+flutter test                       # 700 tests in 60 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

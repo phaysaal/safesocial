@@ -46,10 +46,12 @@ archive ✓ · trash with 30-day restore ○ · story archive ○ · download yo
 Send, accept, decline and cancel friend requests ✓ · who may send requests ~ (inbox rate
 limiting) · people you may know ✗ · contact upload and sync ✗ · mutual friends ✗ (would
 leak graphs) · friend lists: close friends, acquaintances, family, custom ~ (spheres are
-the lists) · restricted list ○ · followers and public following ✗ · unfollow but stay
-friends ✓ (mute) · snooze for 30 days ○ · take a break from someone ○ · unfriend ✓ ·
-block ✓ · birthdays list ✓ · friend anniversaries and "friendversary" videos ○ · invite
-friends by link ✓ · 5,000-friend cap, not applicable.
+the lists) · favourites ✓ (and a favourites-only feed) · restricted ✓ (they get only your
+name and picture) · followers and public following ✗ · unfollow but stay friends ✓ · mute
+✓ (posts and notifications) · snooze for 30 days ✓ · take a break from someone ✓ (quiet
+and restricted until ended) · unfriend ✓ · block ✓ · birthdays list ✓ · friend
+anniversaries ✓ (a card, not a video) · invite friends by link ✓ · 5,000-friend cap, not
+applicable.
 
 ## 3. Composing a post
 
@@ -98,12 +100,13 @@ notifications ✓, and mute one ✓ · reaction notifications ✓ · hidden word
 ## 6. Feed
 
 Home feed ranked by engagement ✗ · "Feeds" tab with Favourites, Friends, Groups, Pages,
-Most recent ~ (chronological only, filters by sphere ✓, favourites ○) · reels feed ✗ ·
+Most recent ~ (chronological only, filters by sphere ✓, favourites ✓) · reels feed ✗ ·
 video tab ✗ · marketplace tab ✗ · memories and "on this day" ✓ · suggested for you ✗ · ads
-and sponsored ✗ · birthday cards in feed ○ · hide a post ○ · snooze a person or sphere ✓ ·
-"why am I seeing this" ✗ (nothing is ranked) · feed preferences and defaults ~ · reconnect
-prompts ✗ · people you may know cards ✗ · sound on and off for video ✓ · autoplay
-setting ○ · data saver ○.
+and sponsored ✗ · birthday cards in feed ✓ · hide a post ✓ · snooze a person or sphere ✓
+(30 days, back by itself) · "why am I seeing this" ✗ (nothing is ranked) · feed
+preferences and defaults ~ · reconnect prompts ✗ · people you may know cards ✗ · sound on
+and off for video ✓ · autoplay setting, not needed (videos never play by themselves) ·
+data saver ✓.
 
 ## 7. Messaging (Messenger inside the app)
 
@@ -229,7 +232,7 @@ same commit.
 | P5 | **Messaging comforts** | Files of any type, chat themes and nicknames (local), chat emoji, ignore, scheduled messages, original-quality media toggle, chat bubbles on Android, profile notes, a vanish-mode preset over disappearing messages, avatar stickers once avatars exist | Files are blobs with a name and type; the rest is local or reuses existing kinds | 5 |
 | P6 | **Sphere governance** | Membership questions answered in the join request, rules shown on join, units and guides, files, badges and expert marks, keyword alerts for admins (local), suspend for a period, welcome posts, post topics, admin automation for the rules already built (auto-mute on N reports, auto-expire invites) | `sphere_join` carries answers; rules, units and topics are signed sphere items | 6 |
 | P7 | **Events** | Co-hosts, recurring events, ticket links, "interested" alongside going, event photos, reminders, ICS export, a map link that opens the user's own map app | `event_rsvp` gains a state; the rest rides existing post kinds | 3 |
-| P8 | **Friends and feed** | Restricted contacts (see only named spheres), snooze for 30 days, take a break, friendversary from local history, favourites feed, hide a post, birthday cards, autoplay and data-saver settings | Local, except restricted contacts, which is an audience list on the sender | 3 |
+| P8 ✓ 11 Oct 2026 | **Friends and feed** | Restricted contacts (see only named spheres), snooze for 30 days, take a break, friendversary from local history, favourites feed, hide a post, birthday cards, autoplay and data-saver settings | Local, except restricted contacts, which is an audience list on the sender | 3 |
 | P9 | **Settings, safety, accessibility** | Privacy checkup walkthrough, tag review before a mention shows on your profile, pause (deactivate) that keeps keys, language, quiet hours, time dashboard, daily reminder, restrict a contact (their comments visible only to them), crisis resources, text size, reduced motion, high contrast, a screen-reader pass over every screen, search history, notification dots, year in review, poke | Restrict is `comment_hide` applied automatically; the rest is local | 5 |
 | P10 | **Avatars and on-device extras** | A cartoon avatar editor with stickers; on-device translation of posts and comments with a downloadable model (opt-in, never bundled, following the nudity-model decision) | Avatar is a blob in `profile`; translation stays on the device | 6 |
 

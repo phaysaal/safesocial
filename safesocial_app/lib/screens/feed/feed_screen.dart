@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/sphere.dart';
 import '../../services/feed_service.dart';
+import '../../services/library_service.dart';
+import '../../services/contact_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/identity_service.dart';
@@ -110,7 +112,15 @@ class _FeedScreenState extends State<FeedScreen> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final feedService = context.watch<FeedService>();
-    final posts = feedService.posts;
+    final library = context.watch<LibraryService>();
+    final contacts = context.watch<ContactService>();
+    final myKey = context.read<IdentityService>().publicKey;
+    final favourites = contacts.favouriteKeys();
+    final posts = library.favouritesFeed
+        ? feedService.posts
+            .where((p) => p.authorId == myKey || favourites.contains(p.authorId))
+            .toList()
+        : feedService.posts;
     final memories = feedService.memories;
 
     return Scaffold(
@@ -148,6 +158,10 @@ class _FeedScreenState extends State<FeedScreen> {
                   SliverToBoxAdapter(child: _StoriesRow()),
                   // Quick-access icon row
                   const SliverToBoxAdapter(child: _QuickAccessRow()),
+                  // Birthdays and anniversaries today
+                  const SliverToBoxAdapter(child: _CelebrationsBanner()),
+                  // All posts, or favourites only
+                  const SliverToBoxAdapter(child: _FeedFilterRow()),
                   // Memories Banner
                   if (memories.isNotEmpty)
                     SliverToBoxAdapter(child: _MemoriesBanner(count: memories.length)),
@@ -187,6 +201,8 @@ class _FeedScreenState extends State<FeedScreen> {
       slivers: [
         SliverToBoxAdapter(child: _StoriesRow()),
         const SliverToBoxAdapter(child: _QuickAccessRow()),
+        const SliverToBoxAdapter(child: _CelebrationsBanner()),
+        const SliverToBoxAdapter(child: _FeedFilterRow()),
         SliverToBoxAdapter(child: _CreatePostBar()),
         SliverToBoxAdapter(
           child: Container(height: 8, color: theme.scaffoldBackgroundColor),
@@ -624,6 +640,117 @@ class _NetworkDot extends StatelessWidget {
         width: 10,
         height: 10,
         decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+      ),
+    );
+  }
+}
+
+// ─── All posts, or favourites only ───────────────────────────────────────────
+
+class _FeedFilterRow extends StatelessWidget {
+  const _FeedFilterRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final library = context.watch<LibraryService>();
+    final hasFavourites = context.watch<ContactService>().favouriteKeys().isNotEmpty;
+    if (!hasFavourites && !library.favouritesFeed) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Row(
+        children: [
+          ChoiceChip(
+            label: const Text('All'),
+            selected: !library.favouritesFeed,
+            onSelected: (_) => library.setFavouritesFeed(false),
+          ),
+          const SizedBox(width: 8),
+          ChoiceChip(
+            avatar: const Icon(Icons.star, size: 16),
+            label: const Text('Favourites'),
+            selected: library.favouritesFeed,
+            onSelected: (_) => library.setFavouritesFeed(true),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Birthdays and anniversaries today ───────────────────────────────────────
+
+/// Who has a birthday today, and who we connected with on this day in an
+/// earlier year. Both come from what this device already knows; nothing is
+/// fetched and nobody is told we looked.
+class _CelebrationsBanner extends StatelessWidget {
+  const _CelebrationsBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final contacts = context.watch<ContactService>();
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final birthdays = contacts.birthdaysToday();
+    final anniversaries = contacts.anniversariesToday();
+    if (birthdays.isEmpty && anniversaries.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Column(
+        children: [
+          for (final c in birthdays)
+            _CelebrationCard(
+              icon: Icons.cake_outlined,
+              colour: cs.tertiaryContainer,
+              onColour: cs.onTertiaryContainer,
+              text: "It's ${c.displayName}'s birthday today",
+              action: 'Send wishes',
+              onTap: () => context.push('/chat/${c.publicKey}'),
+            ),
+          for (final (c, years) in anniversaries)
+            _CelebrationCard(
+              icon: Icons.celebration_outlined,
+              colour: cs.secondaryContainer,
+              onColour: cs.onSecondaryContainer,
+              text: '$years year${years == 1 ? '' : 's'} since you and ${c.displayName} connected',
+              action: 'Say hi',
+              onTap: () => context.push('/chat/${c.publicKey}'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CelebrationCard extends StatelessWidget {
+  final IconData icon;
+  final Color colour;
+  final Color onColour;
+  final String text;
+  final String action;
+  final VoidCallback onTap;
+
+  const _CelebrationCard({
+    required this.icon,
+    required this.colour,
+    required this.onColour,
+    required this.text,
+    required this.action,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(color: colour, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        children: [
+          Icon(icon, color: onColour),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: TextStyle(color: onColour))),
+          TextButton(onPressed: onTap, child: Text(action)),
+        ],
       ),
     );
   }

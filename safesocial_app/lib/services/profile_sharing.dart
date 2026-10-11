@@ -12,10 +12,14 @@ class ProfileSharing {
   ProfileSharing._();
 
   /// The fields a contact sharing [sharedSpheres] with us may see.
-  static Set<String> visibleFields(UserProfile profile, Set<String> sharedSpheres) => {
-        for (final f in ProfileField.all)
-          if ((profile.audience[f] ?? FieldAudience.contacts).allows(sharedSpheres)) f,
-      };
+  static Set<String> visibleFields(UserProfile profile, Set<String> sharedSpheres,
+          {bool restricted = false}) =>
+      restricted
+          ? const {}
+          : {
+              for (final f in ProfileField.all)
+                if ((profile.audience[f] ?? FieldAudience.contacts).allows(sharedSpheres)) f,
+            };
 
   /// [avatarRef], [coverRef] and [featuredRefs] are relay references, already
   /// uploaded once for the whole broadcast.
@@ -26,8 +30,11 @@ class ProfileSharing {
     String? avatarRef,
     String? coverRef,
     List<String> featuredRefs = const [],
+    bool restricted = false,
   }) {
-    final fields = visibleFields(profile, sharedSpheres);
+    // A restricted contact gets the name and the picture and nothing else,
+    // whatever the audiences say.
+    final fields = visibleFields(profile, sharedSpheres, restricted: restricted);
     bool may(String field) => fields.contains(field);
     final about = profile.about.restrictedTo(fields);
 

@@ -28,6 +28,10 @@ class InboundEvent {
   /// Groups notifications: one per conversation or sphere.
   final String thread;
 
+  /// The identity key of whoever caused it, when there is one, so a muted
+  /// or snoozed contact can be kept quiet.
+  final String? from;
+
   const InboundEvent({
     required this.kind,
     required this.id,
@@ -35,6 +39,7 @@ class InboundEvent {
     required this.body,
     required this.route,
     required this.thread,
+    this.from,
   });
 
   @override

@@ -158,6 +158,7 @@ Future<void> wireIdentity({
         avatarRef: avatar,
         coverRef: cover,
         featuredRefs: featured,
+        restricted: contactService.getContact(peer)?.restricted ?? false,
       ),
       everything: identityService.profileForOwnDevices(
         avatarRef: avatar,
@@ -286,11 +287,11 @@ Future<void> wireIdentity({
     spheres: sphereService,
   );
   albumService.attachSpheres(sphereService);
-  feedService.mutedSpheres = () => {
-        for (final s in sphereService.spheres)
-          if (libraryService.isMuted(s.id)) s.id
-      };
+  feedService.mutedSpheres = () => libraryService.quietSpheres;
   feedService.mutedMembers = libraryService.mutedMembersIn;
+  feedService.quietAuthors = contactService.quietKeys;
+  feedService.unfollowedAuthors = contactService.unfollowedKeys;
+  feedService.dataSaver = () => libraryService.dataSaver;
   sphereChatService.mutedMembers = libraryService.mutedMembersIn;
   sphereChatService.sendReadReceipts = () => chatService.sendReadReceipts;
   Timer.periodic(const Duration(seconds: 30), (_) => sphereChatService.sweepExpired());

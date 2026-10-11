@@ -906,6 +906,52 @@ class ContactService extends ChangeNotifier {
     }
   }
 
+  Future<void> _change(String publicKey, Contact Function(Contact c) f) async {
+    final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
+    if (index == -1) return;
+    _contacts[index] = f(_contacts[index]);
+    await _persistContacts();
+    notifyListeners();
+  }
+
+  /// They get only our name and picture from the profile.
+  Future<void> setRestricted(String publicKey, bool on) =>
+      _change(publicKey, (c) => c.copyWith(restricted: on));
+
+  Future<void> setFavourite(String publicKey, bool on) =>
+      _change(publicKey, (c) => c.copyWith(favourite: on));
+
+  /// Quiet for a while, then back by themselves.
+  Future<void> snooze(String publicKey, {Duration duration = const Duration(days: 30)}) =>
+      _change(publicKey, (c) => c.copyWith(snoozedUntil: DateTime.now().add(duration)));
+
+  Future<void> unsnooze(String publicKey) =>
+      _change(publicKey, (c) => c.copyWith(clearSnooze: true));
+
+  /// Quiet and restricted until we end it; ending clears both.
+  Future<void> setOnBreak(String publicKey, bool on) =>
+      _change(publicKey, (c) => c.copyWith(onBreak: on, restricted: on));
+
+  bool isQuiet(String publicKey) => getContact(publicKey)?.isQuiet ?? false;
+
+  Set<String> quietKeys() => {for (final c in _contacts) if (c.isQuiet) c.publicKey};
+  Set<String> unfollowedKeys() => {for (final c in _contacts) if (!c.following) c.publicKey};
+  Set<String> favouriteKeys() => {for (final c in _contacts) if (c.favourite) c.publicKey};
+
+  /// Contacts we connected with on this day in an earlier year, with how
+  /// many years ago. Local history, nothing sent.
+  List<(Contact, int)> anniversariesToday() {
+    final now = DateTime.now();
+    return [
+      for (final c in _contacts)
+        if (!c.blocked &&
+            c.addedAt.month == now.month &&
+            c.addedAt.day == now.day &&
+            now.year - c.addedAt.year >= 1)
+          (c, now.year - c.addedAt.year),
+    ];
+  }
+
   Future<void> toggleFollow(String publicKey) async {
     final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
     if (index != -1) {

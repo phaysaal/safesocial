@@ -210,6 +210,18 @@ class SettingsScreen extends StatelessWidget {
             );
           }),
           const Divider(indent: 56),
+          Builder(builder: (context) {
+            final library = context.watch<LibraryService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.data_saver_on_outlined, color: cs.primary),
+              title: const Text('Data saver'),
+              subtitle: const Text(
+                  'Pictures in arriving posts are not fetched until you tap them. Videos never play by themselves.'),
+              value: library.dataSaver,
+              onChanged: (v) => library.setDataSaver(v),
+            );
+          }),
+          const Divider(indent: 56),
 
           // ── Notifications ──────────────────────────────
           _SectionHeader(title: 'Notifications'),

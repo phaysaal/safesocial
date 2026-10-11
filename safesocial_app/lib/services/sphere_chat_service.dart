@@ -476,6 +476,7 @@ class SphereChatService extends ChangeNotifier {
           body: '$who: ${ChatService.describeMessage(message)}',
           route: '/sphere/$sphereId/chat',
           thread: 'sphere:$sphereId',
+          from: authorId,
         ));
       }
     } catch (e) {

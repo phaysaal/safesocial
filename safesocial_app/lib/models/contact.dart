@@ -60,6 +60,15 @@ class Contact with EquatableMixin {
   /// They named us their legacy contact.
   final bool namedMeLegacy;
 
+  /// Local choices about this person. Restricted: they get only our name and
+  /// picture from the profile. Favourite: their posts make the favourites
+  /// feed. On a break: quiet and restricted until we end it. Snoozed: quiet
+  /// until the date. None of these is ever told to them.
+  final bool restricted;
+  final bool favourite;
+  final bool onBreak;
+  final DateTime? snoozedUntil;
+
   /// Posts they pinned to their profile, by id; shown if we have them.
   final List<String> pinnedPostIds;
 
@@ -86,7 +95,17 @@ class Contact with EquatableMixin {
     this.featuredRefs = const [],
     this.namedMeLegacy = false,
     this.pinnedPostIds = const [],
+    this.restricted = false,
+    this.favourite = false,
+    this.onBreak = false,
+    this.snoozedUntil,
   });
+
+  bool get isSnoozed =>
+      snoozedUntil != null && DateTime.now().isBefore(snoozedUntil!);
+
+  /// Their posts stay out of our feed and they do not notify us.
+  bool get isQuiet => muted || onBreak || isSnoozed;
 
   /// Every device key to seal to.
   List<String> get allDeviceKeys => deviceKeys.isNotEmpty
@@ -120,6 +139,12 @@ class Contact with EquatableMixin {
           (json['featuredRefs'] as List<dynamic>?)?.whereType<String>().toList() ??
               const [],
       namedMeLegacy: json['namedMeLegacy'] == true,
+      restricted: json['restricted'] == true,
+      favourite: json['favourite'] == true,
+      onBreak: json['onBreak'] == true,
+      snoozedUntil: json['snoozedUntil'] is String
+          ? DateTime.tryParse(json['snoozedUntil'] as String)
+          : null,
       pinnedPostIds:
           (json['pinnedPostIds'] as List<dynamic>?)?.whereType<String>().toList() ??
               const [],
@@ -149,6 +174,10 @@ class Contact with EquatableMixin {
       if (coverRef != null) 'coverRef': coverRef,
       if (featuredRefs.isNotEmpty) 'featuredRefs': featuredRefs,
       if (namedMeLegacy) 'namedMeLegacy': true,
+      if (restricted) 'restricted': true,
+      if (favourite) 'favourite': true,
+      if (onBreak) 'onBreak': true,
+      if (snoozedUntil != null) 'snoozedUntil': snoozedUntil!.toIso8601String(),
       if (pinnedPostIds.isNotEmpty) 'pinnedPostIds': pinnedPostIds,
     };
   }
@@ -179,6 +208,11 @@ class Contact with EquatableMixin {
     List<String>? featuredRefs,
     bool? namedMeLegacy,
     List<String>? pinnedPostIds,
+    bool? restricted,
+    bool? favourite,
+    bool? onBreak,
+    DateTime? snoozedUntil,
+    bool clearSnooze = false,
   }) {
     return Contact(
       publicKey: publicKey ?? this.publicKey,
@@ -204,6 +238,10 @@ class Contact with EquatableMixin {
       featuredRefs: featuredRefs ?? this.featuredRefs,
       namedMeLegacy: namedMeLegacy ?? this.namedMeLegacy,
       pinnedPostIds: pinnedPostIds ?? this.pinnedPostIds,
+      restricted: restricted ?? this.restricted,
+      favourite: favourite ?? this.favourite,
+      onBreak: onBreak ?? this.onBreak,
+      snoozedUntil: clearSnooze ? null : (snoozedUntil ?? this.snoozedUntil),
     );
   }
 
@@ -231,5 +269,9 @@ class Contact with EquatableMixin {
         featuredRefs,
         namedMeLegacy,
         pinnedPostIds,
+        restricted,
+        favourite,
+        onBreak,
+        snoozedUntil,
       ];
 }

@@ -289,6 +289,62 @@ class LibraryService extends ChangeNotifier {
 
   // ── Persistence ───────────────────────────────────────────────────────────
 
+  // ── Data saver, favourites feed, sphere snooze ────────────────────────
+
+  static const _dataSaverKey = 'spheres_data_saver_v1';
+  static const _favouritesFeedKey = 'spheres_feed_favourites_v1';
+  static const _snoozedSpheresKey = 'spheres_snoozed_spheres_v1';
+  bool _dataSaver = false;
+  bool _favouritesFeed = false;
+  final Map<String, DateTime> _snoozedSpheres = {};
+
+  /// Pictures in arriving posts are not fetched until tapped.
+  bool get dataSaver => _dataSaver;
+  Future<void> setDataSaver(bool on) async {
+    _dataSaver = on;
+    await SecureStore.instance.setString(_dataSaverKey, on ? '1' : '0');
+    notifyListeners();
+  }
+
+  /// The feed shows favourite contacts' posts only.
+  bool get favouritesFeed => _favouritesFeed;
+  Future<void> setFavouritesFeed(bool on) async {
+    _favouritesFeed = on;
+    await SecureStore.instance.setString(_favouritesFeedKey, on ? '1' : '0');
+    notifyListeners();
+  }
+
+  DateTime? sphereSnoozedUntil(String sphereId) {
+    final until = _snoozedSpheres[sphereId];
+    return until != null && DateTime.now().isBefore(until) ? until : null;
+  }
+
+  bool isSphereSnoozed(String sphereId) => sphereSnoozedUntil(sphereId) != null;
+
+  Future<void> snoozeSphere(String sphereId,
+      {Duration duration = const Duration(days: 30)}) async {
+    _snoozedSpheres[sphereId] = DateTime.now().add(duration);
+    await _persistSnoozedSpheres();
+    notifyListeners();
+  }
+
+  Future<void> unsnoozeSphere(String sphereId) async {
+    _snoozedSpheres.remove(sphereId);
+    await _persistSnoozedSpheres();
+    notifyListeners();
+  }
+
+  /// Muted for good, or snoozed and not yet back: the spheres the feed skips.
+  Set<String> get quietSpheres => {
+        ..._mutedSpheres,
+        for (final e in _snoozedSpheres.entries)
+          if (DateTime.now().isBefore(e.value)) e.key,
+      };
+
+  Future<void> _persistSnoozedSpheres() => SecureStore.instance.setString(
+      _snoozedSpheresKey,
+      jsonEncode({for (final e in _snoozedSpheres.entries) e.key: e.value.toIso8601String()}));
+
   // ── Comment order ─────────────────────────────────────────────────────
 
   static const _commentOrderKey = 'spheres_comments_newest_v1';
@@ -306,6 +362,20 @@ class LibraryService extends ChangeNotifier {
   Future<void> load() async {
     final store = SecureStore.instance;
     _commentsNewestFirst = (await store.getString(_commentOrderKey)) == '1';
+    _dataSaver = (await store.getString(_dataSaverKey)) == '1';
+    _favouritesFeed = (await store.getString(_favouritesFeedKey)) == '1';
+    _snoozedSpheres.clear();
+    final snoozedRaw = await store.getString(_snoozedSpheresKey);
+    if (snoozedRaw != null) {
+      try {
+        (jsonDecode(snoozedRaw) as Map).forEach((k, v) {
+          final until = v is String ? DateTime.tryParse(v) : null;
+          if (until != null && DateTime.now().isBefore(until)) {
+            _snoozedSpheres[k.toString()] = until;
+          }
+        });
+      } catch (_) {}
+    }
 
     final savedRaw = await store.getString(_savedKey);
     if (savedRaw != null) {

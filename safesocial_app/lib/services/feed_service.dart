@@ -91,6 +91,16 @@ class FeedService extends ChangeNotifier {
   /// stored and stay readable to everyone else; they just do not show here.
   Set<String> Function(String sphereId)? mutedMembers;
 
+  /// Contacts who are muted, snoozed or on a break, and contacts unfollowed:
+  /// their posts stay stored and leave the feed. Supplied by the app. "Mute
+  /// this person" and "Unfollow" on a post set flags nothing read before.
+  Set<String> Function()? quietAuthors;
+  Set<String> Function()? unfollowedAuthors;
+
+  /// With data saver on, a post's pictures are not fetched when it arrives;
+  /// the inline thumbnail shows and the full picture loads when tapped.
+  bool Function()? dataSaver;
+
   /// The user's hidden-words filter. Local; a hidden post is still stored.
   bool Function(String text)? hidesText;
 
@@ -100,7 +110,11 @@ class FeedService extends ChangeNotifier {
     return source.where((p) {
       if (_hiddenPostIds.contains(p.id)) return false;
       if (spheres == null) return false;
-      if (p.authorId != _myPublicKey && (hidesText?.call(p.content) ?? false)) return false;
+      if (p.authorId != _myPublicKey) {
+        if (hidesText?.call(p.content) ?? false) return false;
+        if (quietAuthors?.call().contains(p.authorId) ?? false) return false;
+        if (unfollowedAuthors?.call().contains(p.authorId) ?? false) return false;
+      }
       // Visible through any sphere we are still in and have not muted.
       final through = p.sphereIds
           .where((id) => !muted.contains(id))
@@ -1226,6 +1240,7 @@ class FeedService extends ChangeNotifier {
   /// Decode base64 data URIs received from relay into local file paths.
   Future<Post> _decodePostMedia(Post post) async {
     if (post.mediaRefs.isEmpty) return post;
+    if (dataSaver?.call() ?? false) return post;
     final decoded = <String>[];
     for (final ref in post.mediaRefs) {
       if (BlobRef.looksLikeRef(ref)) {
@@ -1291,6 +1306,7 @@ class FeedService extends ChangeNotifier {
         body: body,
         route: post.isStory ? '/' : '/post/${post.id}',
         thread: 'feed',
+        from: post.authorId,
       ));
     }
   }
@@ -1472,6 +1488,7 @@ class FeedService extends ChangeNotifier {
         body: comment.text,
         route: '/post/$postId',
         thread: 'post:$postId',
+        from: comment.authorId,
       ));
     }
   }
@@ -1941,6 +1958,7 @@ class FeedService extends ChangeNotifier {
       body: '$emoji ${onComment ? 'on your comment' : 'on your post'}',
       route: '/post/$postId',
       thread: 'post:$postId',
+      from: reactor,
     ));
   }
 
