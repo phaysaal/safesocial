@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'post_kinds.dart';
+
 import '../models/post.dart';
 import 'media_thumb.dart';
 import '../models/event_time.dart';
@@ -531,14 +533,26 @@ Future<String?> showReportDialog(BuildContext context) {
   );
 }
 
-/// Caption and an optional sticker for a story.
-Future<Map<String, dynamic>?> showStoryComposer(BuildContext context) {
+/// Caption and an optional sticker for a story, and who in the sphere must
+/// not get it. The result's `hideFrom` is a list of identity keys for the
+/// sender; it never goes on the wire.
+Future<Map<String, dynamic>?> showStoryComposer(
+  BuildContext context, {
+  List<(String key, String name)> members = const [],
+}) {
   final caption = TextEditingController();
   final question = TextEditingController();
   final optionA = TextEditingController(text: 'Yes');
   final optionB = TextEditingController(text: 'No');
+  final optionC = TextEditingController();
   final countdownLabel = TextEditingController();
+  final linkUrl = TextEditingController();
+  final linkLabel = TextEditingController();
   String sticker = 'none';
+  int quizAnswer = 0;
+  String sliderEmoji = '😍';
+  (String, String) feeling = Feelings.all.first;
+  final hideFrom = <String>{};
   DateTime countdown = DateTime.now().add(const Duration(days: 1));
   return showModalBottomSheet<Map<String, dynamic>>(
     context: context,
@@ -565,6 +579,10 @@ Future<Map<String, dynamic>?> showStoryComposer(BuildContext context) {
                     ('none', 'No sticker'),
                     ('poll', 'Poll'),
                     ('question', 'Question'),
+                    ('quiz', 'Quiz'),
+                    ('slider', 'Slider'),
+                    ('feeling', 'Feeling'),
+                    ('link', 'Link'),
                     ('countdown', 'Countdown')
                   ])
                     ChoiceChip(
@@ -581,6 +599,42 @@ Future<Map<String, dynamic>?> showStoryComposer(BuildContext context) {
               ],
               if (sticker == 'question')
                 TextField(controller: question, decoration: const InputDecoration(labelText: 'Ask me anything…')),
+              if (sticker == 'quiz') ...[
+                TextField(controller: question, decoration: const InputDecoration(labelText: 'Quiz question')),
+                for (final (i, c) in [optionA, optionB, optionC].indexed)
+                  Row(children: [
+                    Radio<int>(value: i, groupValue: quizAnswer, onChanged: (v) => setState(() => quizAnswer = v ?? 0)),
+                    Expanded(
+                        child: TextField(
+                            controller: c,
+                            decoration: InputDecoration(labelText: 'Answer ${i + 1}${i == 2 ? ' (optional)' : ''}'))),
+                  ]),
+                Text('The dot marks the right answer.', style: Theme.of(ctx).textTheme.bodySmall),
+              ],
+              if (sticker == 'slider') ...[
+                TextField(controller: question, decoration: const InputDecoration(labelText: 'How much…?')),
+                Wrap(spacing: 6, children: [
+                  for (final e in const ['😍', '😂', '🔥', '😢', '👏', '🤯'])
+                    ChoiceChip(label: Text(e), selected: sliderEmoji == e, onSelected: (_) => setState(() => sliderEmoji = e)),
+                ]),
+              ],
+              if (sticker == 'feeling')
+                Wrap(spacing: 6, runSpacing: 4, children: [
+                  for (final f in Feelings.all)
+                    ChoiceChip(
+                        label: Text('${f.$1} ${f.$2}'),
+                        selected: feeling == f,
+                        onSelected: (_) => setState(() => feeling = f)),
+                ]),
+              if (sticker == 'link') ...[
+                TextField(
+                    controller: linkUrl,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(labelText: 'https://…')),
+                TextField(controller: linkLabel, decoration: const InputDecoration(labelText: 'Label (optional)')),
+                Text('Shown as a plain link. Nothing is fetched to make a preview.',
+                    style: Theme.of(ctx).textTheme.bodySmall),
+              ],
               if (sticker == 'countdown') ...[
                 TextField(controller: countdownLabel, decoration: const InputDecoration(labelText: 'Counting down to')),
                 ListTile(
@@ -595,15 +649,58 @@ Future<Map<String, dynamic>?> showStoryComposer(BuildContext context) {
               ],
               const SizedBox(height: 8),
               Text(
-                'Answers to a poll or a question come to you as private replies. Nobody else in the sphere sees them.',
+                'Answers to a poll, a question, a quiz or a slider come to you as private replies. Nobody else in the sphere sees them.',
                 style: Theme.of(ctx).textTheme.bodySmall,
               ),
+              if (members.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text('Hide this story from', style: Theme.of(ctx).textTheme.labelLarge),
+                Wrap(spacing: 6, runSpacing: 4, children: [
+                  for (final (key, name) in members)
+                    FilterChip(
+                      label: Text(name),
+                      selected: hideFrom.contains(key),
+                      onSelected: (on) => setState(() => on ? hideFrom.add(key) : hideFrom.remove(key)),
+                    ),
+                ]),
+                Text('They are simply not sent it; nobody is told.', style: Theme.of(ctx).textTheme.bodySmall),
+              ],
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton(
-                  onPressed: () => Navigator.pop(ctx, {
+                  onPressed: () {
+                    if (sticker == 'link') {
+                      final u = Uri.tryParse(linkUrl.text.trim());
+                      if (u == null || !(u.scheme == 'https' || u.scheme == 'http') || u.host.isEmpty) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(content: Text('The link needs to start with https://')));
+                        return;
+                      }
+                    }
+                    Navigator.pop(ctx, {
+                    if (hideFrom.isNotEmpty) 'hideFrom': hideFrom.toList(),
                     if (caption.text.trim().isNotEmpty) 'overlay': caption.text.trim(),
+                    if (sticker == 'quiz')
+                      'sticker': {
+                        'type': 'quiz',
+                        'question': question.text.trim(),
+                        'options': [
+                          for (final c in [optionA, optionB, optionC])
+                            if (c.text.trim().isNotEmpty) c.text.trim()
+                        ],
+                        'answer': quizAnswer,
+                      },
+                    if (sticker == 'slider')
+                      'sticker': {'type': 'slider', 'prompt': question.text.trim(), 'emoji': sliderEmoji},
+                    if (sticker == 'feeling')
+                      'sticker': {'type': 'feeling', 'emoji': feeling.$1, 'label': feeling.$2},
+                    if (sticker == 'link')
+                      'sticker': {
+                        'type': 'link',
+                        'url': linkUrl.text.trim(),
+                        if (linkLabel.text.trim().isNotEmpty) 'label': linkLabel.text.trim(),
+                      },
                     if (sticker == 'poll')
                       'sticker': {
                         'type': 'poll',
@@ -617,7 +714,8 @@ Future<Map<String, dynamic>?> showStoryComposer(BuildContext context) {
                         'label': countdownLabel.text.trim(),
                         'until': countdown.toIso8601String(),
                       },
-                  }),
+                  });
+                  },
                   child: const Text('Share story'),
                 ),
               ),
@@ -629,16 +727,136 @@ Future<Map<String, dynamic>?> showStoryComposer(BuildContext context) {
   );
 }
 
-/// Stickers drawn over a story.
-class StorySticker extends StatelessWidget {
+/// Stickers drawn over a story. Answers go to [onAnswer] as one line of text
+/// for a private reply; a link goes to [onOpenLink] and is never fetched here.
+class StorySticker extends StatefulWidget {
   final Map<String, dynamic> sticker;
   final void Function(String answer)? onAnswer;
-  const StorySticker({super.key, required this.sticker, this.onAnswer});
+  final void Function(Uri url)? onOpenLink;
+  const StorySticker({super.key, required this.sticker, this.onAnswer, this.onOpenLink});
+
+  /// The one line a slider answer becomes.
+  static String sliderAnswer(int percent, String emoji) => 'Slider: $percent% $emoji';
+
+  /// The one line a quiz answer becomes; the author knows which was right.
+  static String quizAnswer(String option, bool right) =>
+      'Quiz: chose "$option" (${right ? 'right' : 'wrong'})';
+
+  /// Only web links open; anything else is shown as text and goes nowhere.
+  static Uri? safeLink(Object? url) {
+    final u = Uri.tryParse(url is String ? url : '');
+    if (u == null || u.host.isEmpty) return null;
+    return (u.scheme == 'https' || u.scheme == 'http') ? u : null;
+  }
+
+  @override
+  State<StorySticker> createState() => _StoryStickerState();
+}
+
+class _StoryStickerState extends State<StorySticker> {
+  int? _chosen;
+  double _slider = 50;
+  bool _sent = false;
+
+  Map<String, dynamic> get sticker => widget.sticker;
+  void Function(String)? get onAnswer => widget.onAnswer;
 
   @override
   Widget build(BuildContext context) {
     final type = sticker['type'];
     final box = BoxDecoration(color: Colors.white.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(16));
+    if (type == 'quiz') {
+      final options = (sticker['options'] as List?)?.whereType<String>().toList() ?? const [];
+      final answer = sticker['answer'] is int ? sticker['answer'] as int : 0;
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: box,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(sticker['question'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black)),
+          const SizedBox(height: 8),
+          for (final (i, o) in options.indexed)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: FilledButton.tonal(
+                style: _chosen == null
+                    ? null
+                    : FilledButton.styleFrom(
+                        backgroundColor: i == answer
+                            ? Colors.green.shade200
+                            : (i == _chosen ? Colors.red.shade200 : null)),
+                onPressed: onAnswer == null || _chosen != null
+                    ? null
+                    : () {
+                        setState(() => _chosen = i);
+                        onAnswer!(StorySticker.quizAnswer(o, i == answer));
+                      },
+                child: Text(o),
+              ),
+            ),
+          if (_chosen != null)
+            Text(_chosen == answer ? 'Right!' : 'Not quite', style: const TextStyle(color: Colors.black54, fontSize: 12)),
+        ]),
+      );
+    }
+    if (type == 'slider') {
+      final emoji = sticker['emoji'] as String? ?? '😍';
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: box,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(sticker['prompt'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black)),
+          Row(children: [
+            Text(emoji, style: TextStyle(fontSize: 18 + _slider / 5)),
+            Expanded(
+              child: Slider(
+                value: _slider,
+                min: 0,
+                max: 100,
+                onChanged: onAnswer == null || _sent ? null : (v) => setState(() => _slider = v),
+              ),
+            ),
+          ]),
+          if (onAnswer != null)
+            TextButton(
+              onPressed: _sent
+                  ? null
+                  : () {
+                      setState(() => _sent = true);
+                      onAnswer!(StorySticker.sliderAnswer(_slider.round(), emoji));
+                    },
+              child: Text(_sent ? 'Sent' : 'Send'),
+            ),
+        ]),
+      );
+    }
+    if (type == 'feeling') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: box,
+        child: Text('${sticker['emoji'] ?? ''} feeling ${sticker['label'] ?? ''}',
+            style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black)),
+      );
+    }
+    if (type == 'link') {
+      final url = StorySticker.safeLink(sticker['url']);
+      final label = sticker['label'] as String? ?? url?.host ?? 'link';
+      return InkWell(
+        onTap: url == null || widget.onOpenLink == null ? null : () => widget.onOpenLink!(url),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: box,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.link, color: Colors.black, size: 18),
+            const SizedBox(width: 6),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black)),
+            if (url != null) ...[
+              const SizedBox(width: 6),
+              Text(url.host, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+            ],
+          ]),
+        ),
+      );
+    }
     if (type == 'poll') {
       final options = (sticker['options'] as List?)?.cast<String>() ?? const [];
       return Container(

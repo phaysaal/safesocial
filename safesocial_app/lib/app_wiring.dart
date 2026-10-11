@@ -144,6 +144,15 @@ Future<void> wireIdentity({
       final up = await upload(ref);
       if (up != null) featured.add(up);
     }
+    final highlightRefs = <String, List<String>>{};
+    for (final h in profile.highlights) {
+      final ups = <String>[];
+      for (final ref in h.refs) {
+        final up = await upload(ref);
+        if (up != null) ups.add(up);
+      }
+      highlightRefs[h.id] = ups;
+    }
     final me = identityService.publicKey;
     // The spheres a contact shares with us decide which fields they get.
     Set<String> sharedWith(String peer) => {
@@ -159,11 +168,13 @@ Future<void> wireIdentity({
         coverRef: cover,
         featuredRefs: featured,
         restricted: contactService.getContact(peer)?.restricted ?? false,
+        highlightRefs: highlightRefs,
       ),
       everything: identityService.profileForOwnDevices(
         avatarRef: avatar,
         coverRef: cover,
         featuredRefs: featured,
+        highlightRefs: highlightRefs,
       ),
     );
   };

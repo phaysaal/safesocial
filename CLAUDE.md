@@ -109,6 +109,19 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   as the sender's whole view and drops any field it no longer carries, while a malformed
   field is ignored. Only the legacy contact is told they are one. "View as" on the
   profile screen renders exactly that cut. Photos travel as encrypted blobs.
+- **Stories** are posts with `isStory` and a day's expiry. A story may carry a sticker
+  (`poll`, `question`, `countdown`, `quiz`, `slider`, `feeling`, `link`) in its payload;
+  answers to the first four travel as private replies to the author, a link opens only
+  when it is `http(s)` and nothing is fetched to preview it. The source sheet offers the
+  rear or front camera, a three-second *loop clip* (`payload['loop']`; it plays forward
+  round and round, and is not called a boomerang because it cannot play backwards), and
+  a collage of two to four pictures composed on the device (`MediaService.composeCollage`,
+  origin score the weakest input's, marked edited). Hiding a story from named members is
+  an exclusion at send time (`createStory(hideFrom:)`): they are never sent it, and
+  nobody is told. Our own stories are kept in a local archive (`storyArchive`, sealed key
+  `spheres_story_archive_v1`) past their day; from there or from the viewer a picture goes
+  into a *highlight*, a `UserProfile.highlights` entry with its own `ProfileField`
+  audience, whose pictures travel as blobs in the `profile` envelope like featured photos.
 - **Events** are posts of kind `event`; `EventTime` (pure) decides the next occurrence
   of a repeating one, whether it is over, and writes the `.ics`. Reminders are local:
   the choice lives in `LibraryService`, the alarms in the device's notification
@@ -161,7 +174,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 711 tests in 61 files under test/{crypto,models,screens,services}
+flutter test                       # 724 tests in 62 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

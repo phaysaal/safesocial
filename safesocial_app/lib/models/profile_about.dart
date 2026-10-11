@@ -326,6 +326,7 @@ class ProfileField {
   static const quotes = 'quotes';
   static const lifeEvents = 'lifeEvents';
   static const pinned = 'pinned';
+  static const highlights = 'highlights';
 
   /// Every field that can carry an audience, in display order. The name and
   /// picture are not here: a contact who cannot see your name is not a
@@ -350,6 +351,7 @@ class ProfileField {
     quotes,
     lifeEvents,
     pinned,
+    highlights,
   ];
 
   /// The ones that live inside [ProfileAbout].
@@ -391,6 +393,7 @@ class ProfileField {
         quotes => 'Favourite quotes',
         lifeEvents => 'Life events',
         pinned => 'Pinned posts',
+        highlights => 'Story highlights',
         _ => field,
       };
 }

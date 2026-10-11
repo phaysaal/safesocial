@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -82,9 +83,13 @@ class MediaService extends ChangeNotifier {
   /// [ProvenanceScanner]); the result is written beside the stored copy and
   /// travels with the message. The copy itself is re-encoded without any
   /// metadata, so EXIF and GPS never reach disk or the wire.
-  Future<String?> pickAndStoreImage({ImageSource source = ImageSource.gallery}) async {
+  Future<String?> pickAndStoreImage(
+      {ImageSource source = ImageSource.gallery, bool front = false}) async {
     try {
-      final image = await _picker.pickImage(source: source);
+      final image = await _picker.pickImage(
+        source: source,
+        preferredCameraDevice: front ? CameraDevice.front : CameraDevice.rear,
+      );
       if (image == null) return null;
 
       final bytes = await image.readAsBytes();
@@ -106,6 +111,32 @@ class MediaService extends ChangeNotifier {
     }
   }
 
+  /// Up to [max] pictures from the library, each stored like a single pick.
+  Future<List<String>> pickAndStoreImages({int max = 4}) async {
+    final List<XFile> files;
+    try {
+      files = await _picker.pickMultiImage(limit: max);
+    } catch (e) {
+      DebugLogService().error('Media', 'Error picking images: $e');
+      return const [];
+    }
+    final out = <String>[];
+    for (final f in files.take(max)) {
+      try {
+        final bytes = await f.readAsBytes();
+        final provenance =
+            ProvenanceScanner.assessImage(bytes, source: 'gallery', fileName: f.name);
+        out.add(await storePickedImage(bytes, provenance: provenance));
+        try {
+          await File(f.path).delete();
+        } catch (_) {}
+      } catch (e) {
+        DebugLogService().error('Media', 'Skipping a picked file: $e');
+      }
+    }
+    return out;
+  }
+
   /// Replace a picked picture with an edited version of it. The origin score
   /// keeps what the original said and adds that it was edited here, so a
   /// camera shot cropped in Spheres is no longer presented as untouched.
@@ -120,7 +151,64 @@ class MediaService extends ChangeNotifier {
 
   /// Take a photo with the camera. Its provenance is the strongest the app
   /// can claim: captured live, from inside Spheres.
-  Future<String?> captureImage() => pickAndStoreImage(source: ImageSource.camera);
+  Future<String?> captureImage({bool front = false}) =>
+      pickAndStoreImage(source: ImageSource.camera, front: front);
+
+  /// A clip of a few seconds for a story that plays round and round. It
+  /// loops forward only; nothing here can play a clip backwards, so it is
+  /// called a loop rather than something it is not.
+  Future<String?> recordShortClip({bool front = true}) =>
+      recordVideoNote(limit: const Duration(seconds: 3), front: front);
+
+  /// Several pictures laid out as one, for a story: two side by side, three
+  /// as one tall and two stacked, four in a grid. The result's origin score
+  /// is the lowest of the inputs', marked as edited here.
+  static Future<String> composeCollage(List<String> paths, {Directory? into}) async {
+    if (paths.isEmpty) throw const MediaRejectedException('Choose at least one picture.');
+    if (paths.length == 1) return paths.first;
+    final images = <img.Image>[];
+    for (final p in paths.take(4)) {
+      final decoded = img.decodeImage(await File(p).readAsBytes());
+      if (decoded == null) throw const MediaRejectedException('One of the files is not an image.');
+      images.add(decoded);
+    }
+    const side = 1080;
+    final canvas = img.Image(width: side, height: side);
+    img.fill(canvas, color: img.ColorRgb8(20, 20, 20));
+    List<(int, int, int, int)> cells;
+    switch (images.length) {
+      case 2:
+        cells = [(0, 0, side ~/ 2, side), (side ~/ 2, 0, side ~/ 2, side)];
+      case 3:
+        cells = [(0, 0, side ~/ 2, side), (side ~/ 2, 0, side ~/ 2, side ~/ 2), (side ~/ 2, side ~/ 2, side ~/ 2, side ~/ 2)];
+      default:
+        cells = [(0, 0, side ~/ 2, side ~/ 2), (side ~/ 2, 0, side ~/ 2, side ~/ 2), (0, side ~/ 2, side ~/ 2, side ~/ 2), (side ~/ 2, side ~/ 2, side ~/ 2, side ~/ 2)];
+    }
+    for (var i = 0; i < images.length; i++) {
+      final (x, y, w, h) = cells[i];
+      img.compositeImage(canvas, _cover(images[i], w, h), dstX: x, dstY: y);
+    }
+    var score = 10;
+    for (final p in paths) {
+      score = min(score, provenanceFor(p)?.score ?? 5);
+    }
+    final provenance = MediaProvenance(
+      score: score,
+      source: 'gallery',
+      signals: const [],
+    ).editedInApp();
+    return storePickedImage(Uint8List.fromList(img.encodeJpg(canvas, quality: 88)),
+        provenance: provenance, into: into);
+  }
+
+  /// Scale and crop to fill [w]×[h], keeping the middle.
+  static img.Image _cover(img.Image source, int w, int h) {
+    final scale = max(w / source.width, h / source.height);
+    final scaled = img.copyResize(source,
+        width: (source.width * scale).ceil(), height: (source.height * scale).ceil());
+    return img.copyCrop(scaled,
+        x: (scaled.width - w) ~/ 2, y: (scaled.height - h) ~/ 2, width: w, height: h);
+  }
 
   /// Re-encode picked image bytes without metadata, write them to the temp
   /// directory with [provenance] in a sidecar, and return the path.
@@ -269,12 +357,13 @@ class MediaService extends ChangeNotifier {
   }
 
   /// Record a short clip with the camera, for a video note.
-  Future<String?> recordVideoNote({Duration limit = const Duration(seconds: 60)}) async {
+  Future<String?> recordVideoNote(
+      {Duration limit = const Duration(seconds: 60), bool front = true}) async {
     final XFile? video;
     try {
       video = await _picker.pickVideo(
         source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
+        preferredCameraDevice: front ? CameraDevice.front : CameraDevice.rear,
         maxDuration: limit,
       );
     } catch (e) {

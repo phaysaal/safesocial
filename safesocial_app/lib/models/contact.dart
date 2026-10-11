@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 
 import 'profile_about.dart';
+import 'user_profile.dart';
 
 /// A contact in the user's address book, identified by public key.
 class Contact with EquatableMixin {
@@ -72,6 +73,9 @@ class Contact with EquatableMixin {
   /// Posts they pinned to their profile, by id; shown if we have them.
   final List<String> pinnedPostIds;
 
+  /// Their story highlights, pictures as local paths once fetched.
+  final List<StoryHighlight> highlights;
+
   const Contact({
     required this.publicKey,
     this.keyExchangePublicKey,
@@ -95,6 +99,7 @@ class Contact with EquatableMixin {
     this.featuredRefs = const [],
     this.namedMeLegacy = false,
     this.pinnedPostIds = const [],
+    this.highlights = const [],
     this.restricted = false,
     this.favourite = false,
     this.onBreak = false,
@@ -148,6 +153,7 @@ class Contact with EquatableMixin {
       pinnedPostIds:
           (json['pinnedPostIds'] as List<dynamic>?)?.whereType<String>().toList() ??
               const [],
+      highlights: StoryHighlight.listFromJson(json['highlights']),
     );
   }
 
@@ -179,6 +185,7 @@ class Contact with EquatableMixin {
       if (onBreak) 'onBreak': true,
       if (snoozedUntil != null) 'snoozedUntil': snoozedUntil!.toIso8601String(),
       if (pinnedPostIds.isNotEmpty) 'pinnedPostIds': pinnedPostIds,
+      if (highlights.isNotEmpty) 'highlights': [for (final h in highlights) h.toJson()],
     };
   }
 
@@ -208,6 +215,7 @@ class Contact with EquatableMixin {
     List<String>? featuredRefs,
     bool? namedMeLegacy,
     List<String>? pinnedPostIds,
+    List<StoryHighlight>? highlights,
     bool? restricted,
     bool? favourite,
     bool? onBreak,
@@ -238,6 +246,7 @@ class Contact with EquatableMixin {
       featuredRefs: featuredRefs ?? this.featuredRefs,
       namedMeLegacy: namedMeLegacy ?? this.namedMeLegacy,
       pinnedPostIds: pinnedPostIds ?? this.pinnedPostIds,
+      highlights: highlights ?? this.highlights,
       restricted: restricted ?? this.restricted,
       favourite: favourite ?? this.favourite,
       onBreak: onBreak ?? this.onBreak,
@@ -269,6 +278,7 @@ class Contact with EquatableMixin {
         featuredRefs,
         namedMeLegacy,
         pinnedPostIds,
+        highlights,
         restricted,
         favourite,
         onBreak,

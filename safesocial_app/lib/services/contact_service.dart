@@ -9,6 +9,7 @@ import 'secure_store.dart';
 
 import '../models/contact.dart';
 import '../models/profile_about.dart';
+import '../models/user_profile.dart';
 import '../crypto/device.dart';
 import '../models/contact_request.dart';
 import 'debug_log_service.dart';
@@ -813,6 +814,15 @@ class ContactService extends ChangeNotifier {
     final about = profile['about'] is Map
         ? ProfileAbout.fromJson((profile['about'] as Map).cast<String, dynamic>())
         : ProfileAbout.empty;
+    final highlights = <StoryHighlight>[];
+    for (final h in StoryHighlight.listFromJson(profile['highlights'])) {
+      final locals = <String>[];
+      for (final ref in h.refs.take(30)) {
+        final local = await materialiseMedia?.call(ref);
+        if (local != null) locals.add(local);
+      }
+      if (locals.isNotEmpty) highlights.add(h.copyWith(refs: locals));
+    }
     final validBirthday =
         birthday is String && RegExp(r'^\d\d-\d\d$').hasMatch(birthday);
     final bio = profile['bio'];
@@ -828,6 +838,7 @@ class ContactService extends ChangeNotifier {
       clearCover: !profile.containsKey('cover'),
       featuredRefs: featured,
       namedMeLegacy: profile['legacy'] == true,
+      highlights: highlights,
       pinnedPostIds: (profile['pinned'] as List?)?.whereType<String>().take(10).toList() ?? const [],
     );
     await _persistContacts();

@@ -9,12 +9,12 @@ import '../../services/contact_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/identity_service.dart';
-import '../../services/media_service.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_extras.dart';
 import '../../widgets/post_card.dart';
 import 'compose_screen.dart';
+import 'story_compose.dart';
 import 'story_viewer_screen.dart';
 
 /// Open the composer.
@@ -406,39 +406,28 @@ class _StoriesRow extends StatelessWidget {
                     context, sphereService, null);
                 if (sphere == null || !context.mounted) return;
 
-                final fromCamera = await showModalBottomSheet<bool>(
-                  context: context,
-                  builder: (ctx) => SafeArea(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      ListTile(
-                        leading: const Icon(Icons.photo_camera_outlined),
-                        title: const Text('Take a photo'),
-                        onTap: () => Navigator.pop(ctx, true),
-                      ),
-                      ListTile(
-                        leading: const Icon(Icons.photo_library_outlined),
-                        title: const Text('Choose from library'),
-                        onTap: () => Navigator.pop(ctx, false),
-                      ),
-                    ]),
-                  ),
-                );
-                if (fromCamera == null || !context.mounted) return;
-                final media = context.read<MediaService>();
-                final path = fromCamera
-                    ? await media.captureImage()
-                    : await media.pickAndStoreImage();
-                if (path != null && context.mounted) {
-                  final extras = await showStoryComposer(context);
+                final source = await pickStorySource(context);
+                if (source != null && context.mounted) {
+                  final me = context.read<IdentityService>().publicKey;
+                  final contacts = context.read<ContactService>();
+                  final members = <(String, String)>[
+                    for (final m in sphere.members)
+                      if (m.identityKey != me)
+                        (m.identityKey, contacts.getContact(m.identityKey)?.displayName ?? 'Member ${m.identityKey.substring(0, 6)}'),
+                  ];
+                  final extras = await showStoryComposer(context, members: members);
                   if (extras == null || !context.mounted) return;
+                  final hideFrom = ((extras.remove('hideFrom') as List?) ?? const []).whereType<String>().toSet();
+                  if (source.loop) extras['loop'] = true;
                   await context.read<FeedService>().createStory(
                         extras['overlay'] as String? ?? '',
                         sphereId: sphere.id,
                         audienceMembers:
                             sphere.members.map((m) => m.identityKey).toList(),
-                        mediaRefs: [path],
+                        mediaRefs: [source.path],
                         authorName: myName,
                         payload: extras.isEmpty ? null : extras,
+                        hideFrom: hideFrom,
                       );
                   ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Story added')));

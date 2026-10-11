@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/post.dart';
@@ -15,6 +16,7 @@ import '../../services/media_service.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/media_thumb.dart';
 import '../../widgets/post_extras.dart';
+import 'story_archive_screen.dart';
 
 /// Full-screen viewer for 24-hour ephemeral stories.
 class StoryViewerScreen extends StatefulWidget {
@@ -167,6 +169,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
           _StoryMedia(
             ref: story.mediaRefs.first,
             active: index == _currentIndex,
+            loop: story.payload?['loop'] == true,
             onVideoDuration: (d) => _useVideoDuration(index, d),
           )
         else
@@ -182,6 +185,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: StorySticker(
                 sticker: (story.payload!['sticker'] as Map).cast<String, dynamic>(),
+                onOpenLink: (url) async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
+                  if (!ok) messenger.showSnackBar(const SnackBar(content: Text('Nothing on this device opens that link')));
+                },
                 onAnswer: story.authorId == context.read<IdentityService>().publicKey
                     ? null
                     : (answer) async {
@@ -316,6 +324,12 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
   ///
   /// Sphere members do not learn who else watched — a receipt goes to the
   /// author alone.
+  Post get _current => widget.stories[_currentIndex];
+  bool get _isMine {
+    final me = context.read<IdentityService>().publicKey;
+    return me != null && _current.authorId == me;
+  }
+
   Widget _buildViewerBar() {
     final me = context.watch<IdentityService>().publicKey;
     final story = widget.stories[_currentIndex];
@@ -434,6 +448,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
                 const Spacer(),
           _buildViewerBar(),
           _buildReplyBar(),
+                if (_isMine && _current.mediaRefs.isNotEmpty && !MediaService.looksLikeVideo(_current.mediaRefs.first))
+                  IconButton(
+                    tooltip: 'Add to a highlight',
+                    icon: const Icon(Icons.auto_awesome_outlined,
+                        color: Colors.white, shadows: [Shadow(color: Colors.black54, blurRadius: 4)]),
+                    onPressed: () => showHighlightPicker(context, _current.mediaRefs.first),
+                  ),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white, shadows: [Shadow(color: Colors.black54, blurRadius: 4)]),
                   onPressed: () => context.pop(),
@@ -455,11 +476,15 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
 class _StoryMedia extends StatefulWidget {
   final String ref;
   final bool active;
+
+  /// A loop clip plays round and round for the story's whole time.
+  final bool loop;
   final void Function(Duration) onVideoDuration;
 
   const _StoryMedia({
     required this.ref,
     required this.active,
+    this.loop = false,
     required this.onVideoDuration,
   });
 
@@ -492,7 +517,13 @@ class _StoryMediaState extends State<_StoryMedia> {
       return;
     }
     setState(() => _video = controller);
-    widget.onVideoDuration(controller.value.duration);
+    if (widget.loop) {
+      await controller.setLooping(true);
+      // A loop is a story of the usual length, not of the clip's.
+      widget.onVideoDuration(const Duration(seconds: 6));
+    } else {
+      widget.onVideoDuration(controller.value.duration);
+    }
     if (widget.active) await controller.play();
   }
 
@@ -504,7 +535,7 @@ class _StoryMediaState extends State<_StoryMedia> {
     if (widget.active && !old.active) {
       v.seekTo(Duration.zero);
       v.play();
-      widget.onVideoDuration(v.value.duration);
+      widget.onVideoDuration(widget.loop ? const Duration(seconds: 6) : v.value.duration);
     } else if (!widget.active && old.active) {
       v.pause();
     }

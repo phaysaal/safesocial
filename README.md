@@ -62,7 +62,7 @@ platform-side data mining.
 | Direct chat: ratcheted sessions per device pair, durable outbox, receipts, session repair | Working |
 | Sphere chat: group conversation owned by a sphere | Working |
 | Feed: posts to one or several spheres, comments, replies, reactions, saves | Working |
-| Stories: sphere-scoped expiry, author-only view receipts, private replies | Working |
+| Stories: sphere-scoped expiry, author-only view receipts, private replies, selfie and loop clips, collages, quiz, slider, feeling and link stickers, hide from named members, a local archive, highlights on the profile | Working; stickers and hide-from untested on hardware |
 | Albums: sealed per sphere, synced like everything else | Working |
 | Media: per-blob keys, 48 KB encrypted chunks, inline thumbnails, EXIF/GPS stripped | Working; video transcoded on-device to 720p (60 s feed, 3 min chat, 64 MB), poster frames, in-app playback, save to gallery |
 | Media origin score: a 0–10 trust badge on every picture, from the file's own data on the sender's device (camera EXIF, editing tags, Content Credentials and generator marks, name, size); in-app camera capture scores 10; blur-until-tapped per chat or sphere | Working; a reading of the file's claims with a disclaimer, not a detector; untested on hardware |
@@ -134,7 +134,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 711 tests in 61 files
+flutter test                       # 724 tests in 62 files
 flutter run
 ```
 

@@ -31,6 +31,7 @@ class ProfileSharing {
     String? coverRef,
     List<String> featuredRefs = const [],
     bool restricted = false,
+    Map<String, List<String>> highlightRefs = const {},
   }) {
     // A restricted contact gets the name and the picture and nothing else,
     // whatever the audiences say.
@@ -50,6 +51,12 @@ class ProfileSharing {
       if (!about.isEmpty) 'about': about.toJson(),
       if (profile.pinnedPostIds.isNotEmpty && may(ProfileField.pinned))
         'pinned': profile.pinnedPostIds,
+      if (profile.highlights.isNotEmpty && may(ProfileField.highlights))
+        'highlights': [
+          for (final h in profile.highlights)
+            if ((highlightRefs[h.id] ?? const []).isNotEmpty)
+              {'id': h.id, 'title': h.title, 'refs': highlightRefs[h.id]},
+        ],
       // The legacy contact learns it from us, and only they do.
       if (profile.legacyContact == peer) 'legacy': true,
     };

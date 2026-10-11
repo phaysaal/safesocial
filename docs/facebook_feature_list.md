@@ -38,7 +38,7 @@ identities, one per device set) · legacy contact ✓ (told, and suggested as a 
 guardian) · memorialisation ○ · Meta Verified ✗.
 
 **Activity log and history.** Activity log ✓ (audit log) · manage posts in bulk ○ ·
-archive ✓ · trash with 30-day restore ○ · story archive ○ · download your information ✓
+archive ✓ · trash with 30-day restore ✓ · story archive ✓ · download your information ✓
 (backup) · transfer your information ✗.
 
 ## 2. Friends and the social graph
@@ -75,13 +75,17 @@ author can forbid it; to a story ○; external ✗).
 
 ## 4. Stories
 
-Photo, video, text story ✓ · boomerang ○ · music ✗ · layout and collage ○ · selfie mode ○
-· poll sticker ✓ · question sticker ✓ · countdown ✓ · quiz and slider ○ · GIF stickers ✗ ·
-mention sticker ✓ · location sticker ✗ · feeling sticker ○ · donation sticker ✗ · link
-sticker ○ · drawing tools ○ (by decision) · text caption ✓ · audience: public ✗, friends
-✓, custom ~ · hide story from specific people ○ · who viewed ✓ · reply in chat ✓ ·
-reactions ✓ · mute someone's stories ✓ · archive ○ · highlights ○ · cross-posting from
-Instagram ✗.
+Photo, video, text story ✓ · boomerang ~ (a three-second loop clip; it plays forward
+round and round, never backwards) · music ✗ · layout and collage ✓ (two, three or four
+pictures as one square) · selfie mode ✓ · poll sticker ✓ · question sticker ✓ ·
+countdown ✓ · quiz and slider ✓ (answers arrive as private replies) · GIF stickers ✗ ·
+mention sticker ✓ · location sticker ✗ · feeling sticker ✓ · donation sticker ✗ · link
+sticker ✓ (web links only, shown plain, nothing fetched for a preview) · drawing tools ○
+(by decision) · text caption ✓ · audience: public ✗, friends ✓, custom ~ · hide story
+from specific people ✓ (they are simply not sent it) · who viewed ✓ · reply in chat ✓ ·
+reactions ✓ · mute someone's stories ✓ · archive ✓ (own stories, on the device) ·
+highlights ✓ (a profile field with its own audience; pictures travel as blobs) ·
+cross-posting from Instagram ✗.
 
 ## 5. Reactions and comments
 
@@ -230,7 +234,7 @@ same commit.
 | P1 ✓ 11 Oct 2026 | **Comments and reactions, the daily loop** | The seven reaction kinds on posts, reactions on comments, edit a comment with history, delete and hide comments, pin a comment, comments off or members-only per post, subscribe to a post, reaction and reply notifications, newest-first and threaded views polished | `post_react` carries a kind; `comment_edit`, `comment_hide`, `comment_pin`, `post_settings` sealed to the sphere and checked against roles on receipt | 5 |
 | P2 ✓ 11 Oct 2026 | **Profile** | Bio, pronouns, nickname, name pronunciation, cover photo, featured photos, the about fields (work, education, city, hometown, relationship with partner mention, family, languages, websites, hobbies, quotes, life events), temporary profile picture, "updated their picture" post into chosen spheres, per-field audience (all contacts or named spheres), view-as, legacy contact tied to social recovery | `profile` envelope grows typed fields and per-field audience; cover and featured photos ride as blobs | 6 |
 | P3 ✓ 11 Oct 2026 | **Composer and media** | Coloured text backgrounds, feeling and activity, crop, rotate, filters, text and stickers on photos, video trim and thumbnail choice, life events, "ask for recommendations" as a poll variant, reshare a post into another sphere with attribution (author's signature travels; the author can forbid resharing), pin to profile, trash with 30-day restore, bulk archive and trash | `post_reshare` with the original envelope embedded; `post.allowReshare` | 7 |
-| P4 | **Stories** | Boomerang, layouts, selfie mode, quiz and slider stickers, feeling sticker, link sticker (no preview), hide from named contacts, archive, highlights on the profile | Story payload gains sticker kinds; highlights are a local list plus a `profile` field | 4 |
+| P4 ✓ 11 Oct 2026 | **Stories** | Loop clip (forward only, called a loop and not a boomerang), collage layouts, selfie mode, quiz and slider stickers, feeling sticker, link sticker (no preview), hide from named contacts, archive, highlights on the profile | Story payload gains sticker kinds and `loop`; hiding is an exclusion at send time; highlights are a `profile` field under their own audience | 4 |
 | P5 | **Messaging comforts** | Files of any type, chat themes and nicknames (local), chat emoji, ignore, scheduled messages, original-quality media toggle, chat bubbles on Android, profile notes, a vanish-mode preset over disappearing messages, avatar stickers once avatars exist | Files are blobs with a name and type; the rest is local or reuses existing kinds | 5 |
 | P6 | **Sphere governance** | Membership questions answered in the join request, rules shown on join, units and guides, files, badges and expert marks, keyword alerts for admins (local), suspend for a period, welcome posts, post topics, admin automation for the rules already built (auto-mute on N reports, auto-expire invites) | `sphere_join` carries answers; rules, units and topics are signed sphere items | 6 |
 | P7 ✓ 11 Oct 2026 | **Events** | Co-hosts, recurring events, ticket links, "interested" alongside going, event photos, reminders, ICS export, a map link that opens the user's own map app | `event_rsvp` gains a state; the rest rides existing post kinds | 3 |

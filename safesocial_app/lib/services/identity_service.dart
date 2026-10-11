@@ -480,6 +480,7 @@ class IdentityService extends ChangeNotifier {
     String? avatarRef,
     String? coverRef,
     List<String> featuredRefs = const [],
+    Map<String, List<String>> highlightRefs = const {},
   }) {
     final p = _currentIdentity;
     if (p == null) return {};
@@ -487,13 +488,53 @@ class IdentityService extends ChangeNotifier {
       ..remove('avatarRef')
       ..remove('coverRef')
       ..remove('featuredRefs')
-      ..remove('avatarBefore');
+      ..remove('avatarBefore')
+      ..remove('highlights');
     return {
       'own': own,
       if (avatarRef != null) 'avatar': avatarRef,
       if (coverRef != null) 'cover': coverRef,
       if (featuredRefs.isNotEmpty) 'featured': featuredRefs,
+      if (p.highlights.isNotEmpty)
+        'highlights': [
+          for (final h in p.highlights)
+            {'id': h.id, 'title': h.title, 'refs': highlightRefs[h.id] ?? const []},
+        ],
     };
+  }
+
+  /// Put a story's picture into a highlight, new or existing. Local paths;
+  /// they are uploaded when the profile goes out.
+  Future<void> addToHighlight({String? highlightId, String? title, required String ref}) async {
+    final p = _currentIdentity;
+    if (p == null) return;
+    final list = List<StoryHighlight>.from(p.highlights);
+    final i = list.indexWhere((h) => h.id == highlightId);
+    if (i == -1) {
+      if (title == null || title.trim().isEmpty) return;
+      list.add(StoryHighlight(
+          id: DateTime.now().microsecondsSinceEpoch.toRadixString(36),
+          title: title.trim(),
+          refs: [ref]));
+    } else if (!list[i].refs.contains(ref)) {
+      list[i] = list[i].copyWith(refs: [...list[i].refs, ref]);
+    }
+    _currentIdentity =
+        p.copyWith(highlights: list.take(20).toList(), updatedAt: DateTime.now());
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  Future<void> removeHighlight(String highlightId) async {
+    final p = _currentIdentity;
+    if (p == null) return;
+    _currentIdentity = p.copyWith(
+        highlights: p.highlights.where((h) => h.id != highlightId).toList(),
+        updatedAt: DateTime.now());
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
   }
 
   /// Our profile as another of our devices has it. Taken when it is newer
@@ -530,11 +571,21 @@ class IdentityService extends ChangeNotifier {
       final local = await fetch(ref);
       if (local != null) featured.add(local);
     }
+    final highlights = <StoryHighlight>[];
+    for (final h in StoryHighlight.listFromJson(json['highlights'])) {
+      final locals = <String>[];
+      for (final ref in h.refs) {
+        final local = await fetch(ref);
+        if (local != null) locals.add(local);
+      }
+      highlights.add(h.copyWith(refs: locals));
+    }
     _currentIdentity = incoming.copyWith(
       avatarRef: avatar ?? current.avatarRef,
       coverRef: cover,
       clearCover: cover == null,
       featuredRefs: featured,
+      highlights: highlights,
       // The timer's "before" picture is a path on the other device; a
       // temporary picture adopted here simply becomes the picture.
       clearTemporaryAvatar: true,

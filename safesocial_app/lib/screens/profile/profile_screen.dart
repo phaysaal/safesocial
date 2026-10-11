@@ -102,6 +102,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: ProfileView(
               data: data,
               resolveName: resolve,
+              onRemoveHighlight: viewAs != null
+                  ? null
+                  : (id) => context.read<IdentityService>().removeHighlight(id),
               pinnedPosts: viewAs != null &&
                       !ProfileSharing.visibleFields(profile, viewAs).contains(ProfileField.pinned)
                   ? const []
@@ -139,6 +142,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onPressed: () => context.push('/posts/manage'),
                           icon: const Icon(Icons.inventory_2_outlined, size: 18),
                           label: const Text('Manage posts: archive, trash, delete in bulk'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => context.push('/stories/archive'),
+                          icon: const Icon(Icons.history_outlined, size: 18),
+                          label: const Text('Story archive and highlights'),
                         ),
                         const SizedBox(height: 12),
                         Text(

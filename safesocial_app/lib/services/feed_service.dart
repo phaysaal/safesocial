@@ -556,10 +556,16 @@ class FeedService extends ChangeNotifier {
   /// Feed traffic used to go out as plain `jsonEncode`, so the relay operator
   /// could read every post, like and reaction — including the base64 photos
   /// inlined in posts.
+  /// Who a copy was queued for; tests watch the audience of a story that
+  /// hides from someone.
+  @visibleForTesting
+  void Function(String member)? onMemberQueued;
+
   Future<void> _publishToSphere({
     required String sphereId,
     required String type,
     required String payloadJson,
+    Set<String> exclude = const {},
   }) async {
     final spheres = _spheres;
     if (spheres == null) return;
@@ -587,6 +593,9 @@ class FeedService extends ChangeNotifier {
     final stamp = DateTime.now().microsecondsSinceEpoch;
     for (final member in sphere.members.map((m) => m.identityKey)) {
       if (blocked.contains(member)) continue;
+      // A story hidden from someone is simply never sent to them.
+      if (exclude.contains(member)) continue;
+      onMemberQueued?.call(member);
       // Our own entry in the member list stands for our other devices; with
       // one device there is nothing to send and queueForMember says so.
       await queueForMember(
@@ -773,6 +782,7 @@ class FeedService extends ChangeNotifier {
     await _loadPins();
     await _loadPostNotificationPrefs();
     await _loadTrashAndArchive();
+    await _loadStoryArchive();
     try {
       final draftsRaw = await SecureStore.instance.getString(_draftsKey);
       if (draftsRaw != null) {
@@ -849,6 +859,7 @@ class FeedService extends ChangeNotifier {
     List<String> coAuthors = const [],
     List<MediaProvenance?>? provenance,
     bool allowReshare = true,
+    Set<String> hideFrom = const {},
   }) async {
     final targets = {...?sphereIds, if (sphereId != null) sphereId};
     if (targets.isEmpty) {
@@ -891,6 +902,7 @@ class FeedService extends ChangeNotifier {
         sphereId: target,
         type: 'post',
         payloadJson: jsonEncode({'type': 'post', 'post': copy.toJson()}),
+        exclude: hideFrom,
       );
     }
   }
@@ -903,6 +915,7 @@ class FeedService extends ChangeNotifier {
     List<String>? mediaRefs,
     String authorName = 'You',
     Map<String, dynamic>? payload,
+    Set<String> hideFrom = const {},
   }) async {
     await createPost(
       content,
@@ -913,7 +926,43 @@ class FeedService extends ChangeNotifier {
       isStory: true,
       expiresAt: DateTime.now().add(const Duration(hours: 24)),
       payload: payload,
+      hideFrom: hideFrom,
     );
+    // Our own story is kept after it expires, so it can go into a highlight.
+    final mine = _posts.where((p) => p.isStory && p.authorId == _myPublicKey).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (mine.isNotEmpty) {
+      _storyArchive.insert(0, mine.first.copyWith(viewedBy: const []).toJson()..remove('expiresAt'));
+      await _persistStoryArchive();
+      notifyListeners();
+    }
+  }
+
+  // ── Story archive ─────────────────────────────────────────────────────
+
+  static const _storyArchiveKey = 'spheres_story_archive_v1';
+  final List<Map<String, dynamic>> _storyArchive = [];
+
+  /// Our own stories, newest first, kept past their day. Local.
+  List<Post> get storyArchive =>
+      [for (final e in _storyArchive) Post.fromJson(e)];
+
+  Future<void> removeFromStoryArchive(String postId) async {
+    _storyArchive.removeWhere((e) => e['id'] == postId);
+    await _persistStoryArchive();
+    notifyListeners();
+  }
+
+  Future<void> _persistStoryArchive() =>
+      SecureStore.instance.setString(_storyArchiveKey, jsonEncode(_storyArchive));
+
+  Future<void> _loadStoryArchive() async {
+    _storyArchive.clear();
+    final raw = await SecureStore.instance.getString(_storyArchiveKey);
+    if (raw == null) return;
+    try {
+      _storyArchive.addAll((jsonDecode(raw) as List).whereType<Map>().map((e) => e.cast<String, dynamic>()));
+    } catch (_) {}
   }
 
   // Returns a future so a recovered item can be awaited; the live path still
@@ -957,6 +1006,7 @@ class FeedService extends ChangeNotifier {
       );
     } catch (e) {
       DebugLogService().warn('Feed', 'Rejected feed item from $contactKey: $e');
+
     }
   }
 

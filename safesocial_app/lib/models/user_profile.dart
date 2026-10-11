@@ -45,6 +45,9 @@ class UserProfile with EquatableMixin {
   /// Posts pinned to the profile, by id. A contact sees the ones they have.
   final List<String> pinnedPostIds;
 
+  /// Named sets of pictures kept from stories, shown on the profile.
+  final List<StoryHighlight> highlights;
+
   UserProfile({
     required this.publicKey,
     this.keyExchangePublicKey,
@@ -61,6 +64,7 @@ class UserProfile with EquatableMixin {
     this.avatarUntil,
     this.legacyContact,
     this.pinnedPostIds = const [],
+    this.highlights = const [],
   });
 
   bool get avatarIsTemporary => avatarUntil != null;
@@ -93,6 +97,7 @@ class UserProfile with EquatableMixin {
       pinnedPostIds:
           (json['pinnedPostIds'] as List<dynamic>?)?.whereType<String>().toList() ??
               const [],
+      highlights: StoryHighlight.listFromJson(json['highlights']),
     );
   }
 
@@ -114,6 +119,7 @@ class UserProfile with EquatableMixin {
       if (avatarUntil != null) 'avatarUntil': avatarUntil!.toIso8601String(),
       if (legacyContact != null) 'legacyContact': legacyContact,
       if (pinnedPostIds.isNotEmpty) 'pinnedPostIds': pinnedPostIds,
+      if (highlights.isNotEmpty) 'highlights': [for (final h in highlights) h.toJson()],
     };
   }
 
@@ -138,6 +144,7 @@ class UserProfile with EquatableMixin {
     String? legacyContact,
     bool clearLegacyContact = false,
     List<String>? pinnedPostIds,
+    List<StoryHighlight>? highlights,
   }) {
     return UserProfile(
       publicKey: publicKey ?? this.publicKey,
@@ -158,6 +165,7 @@ class UserProfile with EquatableMixin {
       legacyContact:
           clearLegacyContact ? null : (legacyContact ?? this.legacyContact),
       pinnedPostIds: pinnedPostIds ?? this.pinnedPostIds,
+      highlights: highlights ?? this.highlights,
     );
   }
 
@@ -178,5 +186,39 @@ class UserProfile with EquatableMixin {
         avatarUntil,
         legacyContact,
         pinnedPostIds,
+        highlights,
       ];
+}
+
+/// A named set of pictures from stories, kept on the profile. Refs are local
+/// paths here and relay references on the wire.
+class StoryHighlight with EquatableMixin {
+  final String id;
+  final String title;
+  final List<String> refs;
+
+  const StoryHighlight({required this.id, required this.title, this.refs = const []});
+
+  factory StoryHighlight.fromJson(Map<String, dynamic> j) => StoryHighlight(
+        id: ProfileAbout.text(j['id'], 64),
+        title: ProfileAbout.text(j['title'], ProfileAbout.shortLimit),
+        refs: (j['refs'] as List?)?.whereType<String>().take(30).toList() ?? const [],
+      );
+
+  static List<StoryHighlight> listFromJson(Object? json) => json is List
+      ? json
+          .whereType<Map>()
+          .map((m) => StoryHighlight.fromJson(m.cast<String, dynamic>()))
+          .where((h) => h.id.isNotEmpty)
+          .take(20)
+          .toList()
+      : const [];
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'refs': refs};
+
+  StoryHighlight copyWith({String? title, List<String>? refs}) =>
+      StoryHighlight(id: id, title: title ?? this.title, refs: refs ?? this.refs);
+
+  @override
+  List<Object?> get props => [id, title, refs];
 }

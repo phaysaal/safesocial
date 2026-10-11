@@ -20,6 +20,7 @@ class ProfileData {
   final String? avatarRef;
   final String? coverRef;
   final List<String> featuredRefs;
+  final List<StoryHighlight> highlights;
   final ProfileAbout about;
   final bool avatarIsTemporary;
 
@@ -30,6 +31,7 @@ class ProfileData {
     this.avatarRef,
     this.coverRef,
     this.featuredRefs = const [],
+    this.highlights = const [],
     this.about = ProfileAbout.empty,
     this.avatarIsTemporary = false,
   });
@@ -42,6 +44,7 @@ class ProfileData {
         avatarRef: p.avatarRef,
         coverRef: p.coverRef,
         featuredRefs: p.featuredRefs,
+        highlights: p.highlights,
         about: p.about,
         avatarIsTemporary: p.avatarIsTemporary,
       );
@@ -57,6 +60,7 @@ class ProfileData {
       coverRef: fields.contains(ProfileField.cover) ? p.coverRef : null,
       featuredRefs:
           fields.contains(ProfileField.featured) ? p.featuredRefs : const [],
+      highlights: fields.contains(ProfileField.highlights) ? p.highlights : const [],
       about: p.about.restrictedTo(fields),
       avatarIsTemporary: p.avatarIsTemporary,
     );
@@ -69,6 +73,7 @@ class ProfileData {
         avatarRef: c.avatarRef,
         coverRef: c.coverRef,
         featuredRefs: c.featuredRefs,
+        highlights: c.highlights,
         about: c.about,
       );
 }
@@ -90,6 +95,9 @@ class ProfileView extends StatelessWidget {
   /// Posts pinned to this profile that the viewer has.
   final List<Post> pinnedPosts;
 
+  /// On our own profile: a long press on a highlight removes it.
+  final Future<void> Function(String highlightId)? onRemoveHighlight;
+
   const ProfileView({
     super.key,
     required this.data,
@@ -97,6 +105,7 @@ class ProfileView extends StatelessWidget {
     this.actions,
     this.note,
     this.pinnedPosts = const [],
+    this.onRemoveHighlight,
   });
 
   @override
@@ -233,6 +242,71 @@ class ProfileView extends StatelessWidget {
                   actions!,
                 ],
 
+                // ── Story highlights ────────────────────────────────
+                if (data.highlights.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  _SectionLabel('Highlights'),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 92,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: data.highlights.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 12),
+                      itemBuilder: (_, i) {
+                        final h = data.highlights[i];
+                        final cover = h.refs.isEmpty ? null : h.refs.last;
+                        return InkWell(
+                          onTap: h.refs.isEmpty
+                              ? null
+                              : () => Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => _HighlightViewer(highlight: h))),
+                          onLongPress: onRemoveHighlight == null
+                              ? null
+                              : () async {
+                                  final ok = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: Text('Remove "${h.title}"?'),
+                                      content: const Text('The pictures stay in your story archive.'),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+                                        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+                                      ],
+                                    ),
+                                  );
+                                  if (ok == true) await onRemoveHighlight!(h.id);
+                                },
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: cs.primary, width: 2),
+                                color: cs.surfaceContainerHighest,
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: cover != null && File(cover).existsSync()
+                                  ? Image.file(File(cover), fit: BoxFit.cover)
+                                  : Icon(Icons.auto_awesome_outlined, color: cs.onSurfaceVariant),
+                            ),
+                            const SizedBox(height: 4),
+                            SizedBox(
+                              width: 72,
+                              child: Text(h.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.labelSmall),
+                            ),
+                          ]),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+
                 // ── Featured photos ─────────────────────────────────
                 if (data.featuredRefs.isNotEmpty) ...[
                   const SizedBox(height: 20),
@@ -326,5 +400,32 @@ class _SectionLabel extends StatelessWidget {
     return Text(text.toUpperCase(),
         style: theme.textTheme.labelMedium
             ?.copyWith(color: theme.colorScheme.primary, letterSpacing: 1.2));
+  }
+}
+
+/// The pictures of one highlight, full screen, swiped through.
+class _HighlightViewer extends StatelessWidget {
+  final StoryHighlight highlight;
+  const _HighlightViewer({required this.highlight});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(highlight.title),
+      ),
+      body: PageView.builder(
+        itemCount: highlight.refs.length,
+        itemBuilder: (_, i) {
+          final f = File(highlight.refs[i]);
+          return f.existsSync()
+              ? InteractiveViewer(child: Center(child: Image.file(f, fit: BoxFit.contain)))
+              : const Center(child: Text('Picture not on this device', style: TextStyle(color: Colors.white54)));
+        },
+      ),
+    );
   }
 }

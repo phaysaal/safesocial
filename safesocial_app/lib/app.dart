@@ -31,6 +31,7 @@ import 'screens/media/album_detail_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/contacts/contact_profile_screen.dart';
 import 'screens/feed/manage_posts_screen.dart';
+import 'screens/feed/story_archive_screen.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
 import 'screens/spheres/sphere_list_screen.dart';
@@ -242,6 +243,10 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
         GoRoute(
           path: '/posts/manage',
           builder: (context, state) => const ManagePostsScreen(),
+        ),
+        GoRoute(
+          path: '/stories/archive',
+          builder: (context, state) => const StoryArchiveScreen(),
         ),
         GoRoute(
           path: '/contact/:key',
