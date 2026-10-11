@@ -7,6 +7,11 @@ import '../../models/sphere.dart';
 import '../../services/call_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/identity_service.dart';
+import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+import '../../services/feed_service.dart';
+import '../../services/library_service.dart';
 import '../../services/sphere_service.dart';
 
 /// Members and settings for one sphere.
@@ -69,6 +74,11 @@ class SphereDetailScreen extends StatelessWidget {
             onPressed: () => context.push('/sphere/$sphereId/chat'),
           ),
           IconButton(
+            icon: const Icon(Icons.photo_library_outlined),
+            tooltip: 'Media',
+            onPressed: () => context.push('/sphere/$sphereId/media'),
+          ),
+          IconButton(
             icon: const Icon(Icons.history),
             tooltip: 'Activity',
             onPressed: () => context.push('/sphere/$sphereId/log'),
@@ -101,6 +111,50 @@ class SphereDetailScreen extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Text(sphere.description, style: theme.textTheme.bodyMedium),
             ),
+          if (iAmAdmin) ...[
+            ...sphereService.joinRequestsFor(sphereId).map((r) => ListTile(
+                  leading: Icon(Icons.person_add_alt_1, color: cs.primary),
+                  title: Text('${r['name'] ?? 'Someone'} asked to join'),
+                  subtitle: const Text('Came through your invite link'),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => sphereService.rejectJoin(sphereId, r['publicKey'] as String),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.check, color: cs.primary),
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await sphereService.approveJoin(sphereId, r['publicKey'] as String);
+                          messenger.showSnackBar(SnackBar(content: Text('${r['name']} added')));
+                        } catch (e) {
+                          messenger.showSnackBar(SnackBar(content: Text('$e')));
+                        }
+                      },
+                    ),
+                  ]),
+                )),
+            ...context.watch<FeedService>().reportsFor(sphereId).map((r) => ListTile(
+                  leading: Icon(Icons.flag_outlined, color: cs.error),
+                  title: Text('Reported: ${r['reason']}'),
+                  subtitle: Text('by ${nameFor(r['by'] as String)}'),
+                  onTap: () => context.push('/post/${r['post_id']}'),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.done),
+                    tooltip: 'Dismiss',
+                    onPressed: () => context
+                        .read<FeedService>()
+                        .dismissReport(sphereId, r['post_id'] as String, r['by'] as String),
+                  ),
+                )),
+            ListTile(
+              leading: Icon(Icons.link, color: cs.primary),
+              title: const Text('Invite link'),
+              subtitle: const Text('Anyone with it can ask to join; you still say yes'),
+              onTap: () => _showInviteLink(context, sphereService, sphereId),
+            ),
+          ],
           if (iAmAdmin)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
@@ -134,7 +188,10 @@ class SphereDetailScreen extends StatelessWidget {
                 child: Text(nameFor(member.identityKey).characters.first.toUpperCase()),
               ),
               title: Text(nameFor(member.identityKey)),
-              subtitle: Text(_roleLabel(member.role)),
+              subtitle: Builder(builder: (context) {
+                final note = context.watch<LibraryService>().memberNote(sphereId, member.identityKey);
+                return Text(note == null ? _roleLabel(member.role) : '${_roleLabel(member.role)} · $note');
+              }),
               trailing: _memberMenu(
                 context: context,
                 sphere: sphere,
@@ -265,18 +322,27 @@ class SphereDetailScreen extends StatelessWidget {
             ) ==
             null;
 
+    final canMute = !isMe;
+    final muted = context.read<LibraryService>().isMemberMuted(sphere.id, member.identityKey);
+
     if (!canPromote &&
         !canDemoteThem &&
         !canStepDown &&
         !canRemove &&
         !canHandOver &&
-        !canPropose) {
+        !canPropose &&
+        !canMute) {
       return null;
     }
 
     return PopupMenuButton<String>(
       onSelected: (action) => _onMemberAction(context, sphere, member, action),
       itemBuilder: (_) => [
+        if (canMute)
+          PopupMenuItem(
+              value: 'mute',
+              child: Text(muted ? 'Unmute in this sphere' : 'Mute in this sphere')),
+        if (!isMe) const PopupMenuItem(value: 'note', child: Text('Private note…')),
         if (canPromote)
           const PopupMenuItem(value: 'promote', child: Text('Make admin')),
         if (canDemoteThem)
@@ -296,12 +362,101 @@ class SphereDetailScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _showInviteLink(BuildContext context, SphereService service, String sphereId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String link;
+    try {
+      link = service.inviteLink(sphereId);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Invite link'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Whoever opens this can ask to join. Their request lands here and you '
+              'approve it, which also makes them a contact. Reset the link to '
+              'retire every copy of it.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              color: Colors.white,
+              child: QrImageView(data: link, size: 180, backgroundColor: Colors.white),
+            ),
+            const SizedBox(height: 8),
+            SelectableText(link, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await service.rotateInviteLink(sphereId);
+              if (ctx.mounted) Navigator.pop(ctx);
+              messenger.showSnackBar(const SnackBar(content: Text('Old links no longer work')));
+            },
+            child: const Text('Reset link'),
+          ),
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: link));
+              messenger.showSnackBar(const SnackBar(content: Text('Link copied')));
+            },
+            child: const Text('Copy'),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _onMemberAction(
     BuildContext context,
     Sphere sphere,
     SphereMember member,
     String action,
   ) async {
+    if (action == 'note') {
+      final library = context.read<LibraryService>();
+      final controller =
+          TextEditingController(text: library.memberNote(sphere.id, member.identityKey) ?? '');
+      final text = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Private note'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: 3,
+            decoration: const InputDecoration(hintText: 'Only you see this'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Save')),
+          ],
+        ),
+      );
+      if (text != null) await library.setMemberNote(sphere.id, member.identityKey, text);
+      return;
+    }
+    if (action == 'mute') {
+      final library = context.read<LibraryService>();
+      final wasMuted = library.isMemberMuted(sphere.id, member.identityKey);
+      await library.toggleMuteMember(sphere.id, member.identityKey);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(wasMuted
+                ? 'Unmuted here'
+                : 'Muted in this sphere. They are not told, and nothing is deleted.')));
+      }
+      return;
+    }
     final service = context.read<SphereService>();
     final messenger = ScaffoldMessenger.of(context);
 

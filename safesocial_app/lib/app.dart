@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import 'package:app_links/app_links.dart';
 
 import 'services/identity_service.dart';
+import 'services/notification_service.dart';
+import 'services/app_lock_service.dart';
+import 'services/library_service.dart';
 import 'services/relay_service.dart';
 import 'services/theme_service.dart';
 import 'services/call_service.dart';
@@ -13,6 +16,10 @@ import 'theme/app_theme.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/chat/chat_list_screen.dart';
 import 'screens/chat/chat_detail_screen.dart';
+import 'screens/chat/starred_screen.dart';
+import 'screens/call/call_history_screen.dart';
+import 'screens/feed/drafts_screen.dart';
+import 'services/contact_service.dart';
 import 'screens/feed/feed_screen.dart';
 import 'screens/feed/memories_screen.dart';
 import 'screens/feed/saved_screen.dart';
@@ -27,6 +34,8 @@ import 'screens/spheres/sphere_list_screen.dart';
 import 'screens/spheres/create_sphere_screen.dart';
 import 'screens/spheres/sphere_detail_screen.dart';
 import 'screens/spheres/sphere_chat_screen.dart';
+import 'screens/spheres/sphere_media_screen.dart';
+import 'screens/contacts/verify_contact_screen.dart';
 import 'screens/spheres/sphere_log_screen.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/settings/settings_screen.dart';
@@ -55,6 +64,11 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _initDeepLinking();
     _initRouter();
+    AppLifecycle.foreground = true;
+    // A tapped notification opens the thing it was about.
+    context.read<NotificationService>().onOpen = (route) {
+      if (mounted) _router.push(route);
+    };
   }
 
   @override
@@ -66,6 +80,13 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Notifications are suppressed while the UI is on screen; a wake with no
+    // UI never gets here and stays "background".
+    AppLifecycle.foreground = state == AppLifecycleState.resumed;
+    // Leaving the screen with the app lock on means unlocking on return.
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      if (context.read<LibraryService>().appLock) context.read<AppLockService>().lock();
+    }
     if (state != AppLifecycleState.resumed) return;
     // Coming back is the moment a socket is most likely to have died without
     // saying so: the phone slept, the network changed, a NAT dropped an idle
@@ -85,6 +106,40 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
   void _handleDeepLink(Uri uri) {
     if (uri.scheme == 'spheres' && uri.host == 'add') {
       // Future: Navigate to add contact with pre-filled info
+    }
+    if (uri.scheme == 'spheres' && uri.host == 'join') {
+      _handleJoinLink(uri);
+    }
+  }
+
+  /// An invite link. Asking is all this does; an admin still approves.
+  Future<void> _handleJoinLink(Uri uri) async {
+    final sphereId = uri.queryParameters['s'];
+    final token = uri.queryParameters['t'];
+    final via = uri.queryParameters['via'];
+    final name = uri.queryParameters['n'] ?? 'a sphere';
+    if (sphereId == null || token == null || via == null) return;
+    final ctx = _router.routerDelegate.navigatorKey.currentContext;
+    if (ctx == null) return;
+    final ok = await showDialog<bool>(
+      context: ctx,
+      builder: (c) => AlertDialog(
+        title: Text('Ask to join $name?'),
+        content: const Text(
+            'Your name and key are sent to the admin who made this link. If they say yes, '
+            'you become a member and a contact of theirs.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Ask')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context.read<ContactService>().sendJoinRequest(adminKey: via, sphereId: sphereId, token: token);
+      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Asked. The admin decides.')));
+    } catch (e) {
+      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -190,6 +245,30 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           ),
         ),
         GoRoute(
+          path: '/drafts',
+          builder: (context, state) => const DraftsScreen(),
+        ),
+        GoRoute(
+          path: '/calls',
+          builder: (context, state) => const CallHistoryScreen(),
+        ),
+        GoRoute(
+          path: '/starred',
+          builder: (context, state) => const StarredScreen(),
+        ),
+        GoRoute(
+          path: '/sphere/:id/media',
+          builder: (context, state) => SphereMediaScreen(
+            sphereId: state.pathParameters['id']!,
+          ),
+        ),
+        GoRoute(
+          path: '/contact/:id/verify',
+          builder: (context, state) => VerifyContactScreen(
+            contactKey: state.pathParameters['id']!,
+          ),
+        ),
+        GoRoute(
           path: '/sphere/:id/chat',
           builder: (context, state) => SphereChatScreen(
             sphereId: state.pathParameters['id']!,
@@ -242,6 +321,7 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
       darkTheme: darkTheme,
       themeMode: themeService.themeMode,
       routerConfig: _router,
+      builder: (context, child) => _LockGate(child: child ?? const SizedBox.shrink()),
     );
   }
 }
@@ -373,6 +453,39 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: cs.surface,
         indicatorColor: cs.primary.withValues(alpha: 0.15),
         destinations: destinations,
+      ),
+    );
+  }
+}
+
+/// Covers the whole app while the lock is engaged. Nothing underneath is
+/// hidden from the widget tree — this is a shutter, not encryption; the
+/// encryption is at rest in SecureStore regardless.
+class _LockGate extends StatelessWidget {
+  final Widget child;
+  const _LockGate({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final lock = context.watch<AppLockService>();
+    if (!lock.locked) return child;
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lock_outline, size: 64, color: cs.primary),
+            const SizedBox(height: 16),
+            const Text('Spheres is locked'),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: lock.unlock,
+              icon: const Icon(Icons.fingerprint),
+              label: const Text('Unlock'),
+            ),
+          ],
+        ),
       ),
     );
   }

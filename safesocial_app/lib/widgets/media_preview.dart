@@ -1,95 +1,43 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../crypto/blob.dart';
+import '../models/media_provenance.dart';
+import 'media_thumb.dart';
+import 'provenance_badge.dart';
 
-/// Thumbnail preview for a media item (image or video).
+/// Thumbnail preview for a media item in a message, tappable to open the
+/// full viewer. Rendering is shared with every other list via [MediaThumb].
 ///
-/// Shows a placeholder icon when the media file is not available locally.
-/// Tappable to open the full MediaViewerScreen.
+/// Shows the sender's trust score when the message carries one, and starts
+/// blurred when the chat asks for that.
 class MediaPreview extends StatelessWidget {
   final String mediaRef;
+  final MediaProvenance? provenance;
+  final bool blurred;
 
-  const MediaPreview({super.key, required this.mediaRef});
+  const MediaPreview({
+    super.key,
+    required this.mediaRef,
+    this.provenance,
+    this.blurred = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    // A reference that has not been fetched yet still has an inline preview,
-    // so the list renders immediately instead of showing a placeholder while
-    // the blob downloads.
-    final pending = BlobRef.tryDecode(mediaRef);
-    final thumbnail = pending?.thumbnail;
-
-    final isLocalFile = pending == null && File(mediaRef).existsSync();
-    final isVideo = pending?.isVideo ??
-        (mediaRef.endsWith('.mp4') ||
-            mediaRef.endsWith('.mov') ||
-            mediaRef.endsWith('.avi'));
-
-    return GestureDetector(
+    final radius = BorderRadius.circular(8);
+    final thumb = GestureDetector(
       onTap: () {
         context.push('/media/view?ref=${Uri.encodeComponent(mediaRef)}');
       },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: SizedBox(
-          width: 120,
-          height: 120,
-          child: (!isLocalFile && thumbnail != null)
-              ? Image.memory(
-                  base64Decode(thumbnail.split(',').last),
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      _buildPlaceholder(colorScheme, isVideo),
-                )
-              : isLocalFile
-              ? Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.file(
-                      File(mediaRef),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _buildPlaceholder(colorScheme, isVideo),
-                    ),
-                    if (isVideo)
-                      Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.5),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.play_arrow,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                        ),
-                      ),
-                  ],
-                )
-              : _buildPlaceholder(colorScheme, isVideo),
-        ),
-      ),
+      child: MediaThumb(ref: mediaRef, width: 120, height: 120, borderRadius: radius),
     );
-  }
-
-  Widget _buildPlaceholder(ColorScheme colorScheme, bool isVideo) {
-    return Container(
-      color: colorScheme.surface,
-      child: Center(
-        child: Icon(
-          isVideo ? Icons.videocam_outlined : Icons.image_outlined,
-          size: 32,
-          color: colorScheme.onSurface.withOpacity(0.3),
-        ),
-      ),
-    );
+    final p = provenance;
+    final withBadge = p == null
+        ? thumb
+        : Stack(children: [
+            thumb,
+            Positioned(right: 4, bottom: 4, child: ProvenanceBadge(provenance: p, compact: true)),
+          ]);
+    return BlurGate(blurred: blurred, borderRadius: radius, child: withBadge);
   }
 }

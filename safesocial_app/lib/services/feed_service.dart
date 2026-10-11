@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -8,9 +9,12 @@ import '../crypto/blob.dart';
 import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/contact.dart';
+import '../models/media_provenance.dart';
 import '../models/post.dart';
 import '../models/sphere.dart';
+import 'chat_service.dart';
 import 'debug_log_service.dart';
+import 'inbound_events.dart';
 import 'outbox_service.dart';
 import 'media_service.dart';
 import 'relay_service.dart';
@@ -66,12 +70,25 @@ class FeedService extends ChangeNotifier {
   List<Post> get posts => _visible(_posts.where((p) => !p.isStory));
 
   /// Posts limited to one sphere.
-  List<Post> postsIn(String sphereId) => _visible(
-      _posts.where((p) => !p.isStory && p.sphereIds.contains(sphereId)));
+  List<Post> postsIn(String sphereId) {
+    final visible = _visible(
+        _posts.where((p) => !p.isStory && p.sphereIds.contains(sphereId)));
+    final pins = _pinned[sphereId];
+    if (pins == null || pins.isEmpty) return visible;
+    final pinned = pins.map((id) => visible.where((p) => p.id == id)).expand((p) => p);
+    return [...pinned, ...visible.where((p) => !pins.contains(p.id))];
+  }
 
   /// Sphere ids the user has muted. Supplied by the app so FeedService need
   /// not depend on LibraryService.
   Set<String> Function()? mutedSpheres;
+
+  /// Members the user has muted within a sphere, by sphere id. Their posts stay
+  /// stored and stay readable to everyone else; they just do not show here.
+  Set<String> Function(String sphereId)? mutedMembers;
+
+  /// The user's hidden-words filter. Local; a hidden post is still stored.
+  bool Function(String text)? hidesText;
 
   List<Post> _visible(Iterable<Post> source) {
     final spheres = _spheres;
@@ -79,6 +96,7 @@ class FeedService extends ChangeNotifier {
     return source.where((p) {
       if (_hiddenPostIds.contains(p.id)) return false;
       if (spheres == null) return false;
+      if (p.authorId != _myPublicKey && (hidesText?.call(p.content) ?? false)) return false;
       // Visible through any sphere we are still in and have not muted.
       final through = p.sphereIds
           .where((id) => !muted.contains(id))
@@ -89,8 +107,340 @@ class FeedService extends ChangeNotifier {
       // Only show authors who are still members. A former member's old posts
       // stay readable to those who were there, but do not keep appearing as if
       // they were still in the sphere.
-      return sphere.contains(p.authorId);
+      if (!sphere.contains(p.authorId)) return false;
+      // Muted in every sphere it reaches us through: hidden. Muted in one of
+      // several: still shown, through the others.
+      return through.any(
+          (sp) => !(mutedMembers?.call(sp.id) ?? const <String>{}).contains(p.authorId));
     }).toList();
+  }
+
+  // ── Events, polls, co-authors ─────────────────────────────────────────────
+
+  /// An event is a post with a time and a place; RSVPs are signed items that
+  /// every device tallies for itself.
+  Future<void> createEvent({
+    required Set<String> sphereIds,
+    required List<String> audienceMembers,
+    required String title,
+    required DateTime startsAt,
+    DateTime? endsAt,
+    String place = '',
+    String details = '',
+    String? authorName,
+  }) =>
+      createPost(
+        details,
+        sphereIds: sphereIds,
+        audienceMembers: audienceMembers,
+        authorName: authorName,
+        kind: 'event',
+        payload: {
+          'title': title,
+          'starts_at': startsAt.toIso8601String(),
+          if (endsAt != null) 'ends_at': endsAt.toIso8601String(),
+          'place': place,
+          'rsvps': <String, dynamic>{},
+        },
+      );
+
+  /// going · maybe · no · (empty to withdraw)
+  Future<void> rsvp(String postId, String status) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1 || !_posts[index].isEvent) return;
+    _applyRsvp(index, me, status);
+    for (final sphereId in _posts[index].sphereIds) {
+      await _publishToSphere(
+        sphereId: sphereId,
+        type: 'event_rsvp',
+        payloadJson: jsonEncode({'type': 'event_rsvp', 'post_id': postId, 'status': status}),
+      );
+    }
+  }
+
+  void _applyRsvp(int index, String who, String status) {
+    final payload = Map<String, dynamic>.from(_posts[index].payload ?? {});
+    final rsvps = Map<String, dynamic>.from(payload['rsvps'] as Map? ?? {});
+    if (status.isEmpty) {
+      rsvps.remove(who);
+    } else if (const {'going', 'maybe', 'no'}.contains(status)) {
+      rsvps[who] = status;
+    } else {
+      return;
+    }
+    payload['rsvps'] = rsvps;
+    _posts[index] = _posts[index].copyWith(payload: payload);
+    _persistPosts();
+    notifyListeners();
+  }
+
+  Future<void> createPollPost({
+    required Set<String> sphereIds,
+    required List<String> audienceMembers,
+    required String question,
+    required List<String> options,
+    bool multiple = false,
+    bool anonymous = false,
+    String? authorName,
+  }) =>
+      createPost(
+        question,
+        sphereIds: sphereIds,
+        audienceMembers: audienceMembers,
+        authorName: authorName,
+        kind: 'poll',
+        payload: {
+          'question': question,
+          'options': options,
+          'multiple': multiple,
+          'anonymous': anonymous,
+          'votes': <String, dynamic>{},
+        },
+      );
+
+  Future<void> votePost(String postId, List<int> choices) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1 || !_posts[index].isPoll) return;
+    _applyPostVote(index, me, choices);
+    for (final sphereId in _posts[index].sphereIds) {
+      await _publishToSphere(
+        sphereId: sphereId,
+        type: 'post_vote',
+        payloadJson: jsonEncode({'type': 'post_vote', 'post_id': postId, 'choices': choices}),
+      );
+    }
+  }
+
+  void _applyPostVote(int index, String voter, List<int> choices) {
+    final post = _posts[index];
+    final payload = Map<String, dynamic>.from(post.payload ?? {});
+    final count = (payload['options'] as List?)?.length ?? 0;
+    var valid = choices.where((c) => c >= 0 && c < count).toSet().toList()..sort();
+    if (payload['multiple'] != true && valid.length > 1) valid = [valid.first];
+    final votes = Map<String, dynamic>.from(payload['votes'] as Map? ?? {});
+    final key = payload['anonymous'] == true ? ChatService.voterHash(voter, post.id) : voter;
+    if (valid.isEmpty) {
+      votes.remove(key);
+    } else {
+      votes[key] = valid;
+    }
+    payload['votes'] = votes;
+    _posts[index] = post.copyWith(payload: payload);
+    _persistPosts();
+    notifyListeners();
+  }
+
+  /// Confirm being a co-author of a post that names us.
+  Future<void> acceptCoAuthorship(String postId) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1 || !_posts[index].coAuthors.contains(me)) return;
+    _applyCoAuthor(index, me);
+    for (final sphereId in _posts[index].sphereIds) {
+      await _publishToSphere(
+        sphereId: sphereId,
+        type: 'coauthor_accept',
+        payloadJson: jsonEncode({'type': 'coauthor_accept', 'post_id': postId}),
+      );
+    }
+  }
+
+  void _applyCoAuthor(int index, String who) {
+    final post = _posts[index];
+    if (!post.coAuthors.contains(who) || post.acceptedCoAuthors.contains(who)) return;
+    _posts[index] = post.copyWith(acceptedCoAuthors: [...post.acceptedCoAuthors, who]);
+    _persistPosts();
+    notifyListeners();
+  }
+
+  // ── Drafts and scheduled posts ────────────────────────────────────────────
+
+  static const _draftsKey = 'spheres_drafts_v1';
+  final List<Map<String, dynamic>> _drafts = [];
+  List<Map<String, dynamic>> get drafts => List.unmodifiable(_drafts);
+
+  /// Members of each sphere, for publishing a draft later. Set by the app.
+  List<String> Function(String sphereId)? membersOf;
+
+  Future<String> saveDraft({
+    String? id,
+    required String content,
+    List<String> mediaRefs = const [],
+    required Set<String> sphereIds,
+    DateTime? scheduledFor,
+    String kind = 'post',
+    Map<String, dynamic>? payload,
+    List<String> altTexts = const [],
+  }) async {
+    final draftId = id ?? const Uuid().v4();
+    _drafts.removeWhere((d) => d['id'] == draftId);
+    _drafts.insert(0, {
+      'id': draftId,
+      'content': content,
+      'mediaRefs': mediaRefs,
+      'sphereIds': sphereIds.toList(),
+      if (scheduledFor != null) 'scheduledFor': scheduledFor.toIso8601String(),
+      'kind': kind,
+      if (payload != null) 'payload': payload,
+      if (altTexts.isNotEmpty) 'altTexts': altTexts,
+      'savedAt': DateTime.now().toIso8601String(),
+    });
+    await _persistDrafts();
+    notifyListeners();
+    return draftId;
+  }
+
+  Future<void> deleteDraft(String id) async {
+    _drafts.removeWhere((d) => d['id'] == id);
+    await _persistDrafts();
+    notifyListeners();
+  }
+
+  /// Post a draft now, whatever its schedule.
+  Future<void> publishDraft(String id) async {
+    final draft = _drafts.firstWhere((d) => d['id'] == id, orElse: () => const {});
+    if (draft.isEmpty) return;
+    final sphereIds = (draft['sphereIds'] as List).cast<String>().toSet();
+    final audience = <String>{};
+    for (final sid in sphereIds) {
+      audience.addAll(membersOf?.call(sid) ?? const []);
+    }
+    if (audience.isEmpty) throw StateError('None of the chosen spheres exist any more');
+    await createPost(
+      draft['content'] as String? ?? '',
+      sphereIds: sphereIds,
+      audienceMembers: audience.toList(),
+      mediaRefs: (draft['mediaRefs'] as List?)?.cast<String>(),
+      kind: draft['kind'] as String? ?? 'post',
+      payload: (draft['payload'] as Map?)?.cast<String, dynamic>(),
+      altTexts: (draft['altTexts'] as List?)?.cast<String>() ?? const [],
+    );
+    await deleteDraft(id);
+  }
+
+  /// Publish anything whose scheduled time has come. Runs on a timer.
+  Future<void> publishDueDrafts() async {
+    final now = DateTime.now();
+    for (final draft in List<Map<String, dynamic>>.from(_drafts)) {
+      final at = DateTime.tryParse(draft['scheduledFor'] as String? ?? '');
+      if (at == null || at.isAfter(now)) continue;
+      try {
+        await publishDraft(draft['id'] as String);
+      } catch (e) {
+        DebugLogService().error('Feed', 'Scheduled post failed: $e');
+      }
+    }
+  }
+
+  Timer? _draftTimer;
+
+  Future<void> _persistDrafts() =>
+      SecureStore.instance.setString(_draftsKey, jsonEncode(_drafts));
+
+  // ── Reports to the sphere ─────────────────────────────────────────────────
+
+  static const _reportsKey = 'spheres_reports_v1';
+
+  /// Sphere id -> reports its admins have received. Only admins keep them.
+  final Map<String, List<Map<String, dynamic>>> _reports = {};
+  List<Map<String, dynamic>> reportsFor(String sphereId) =>
+      List.unmodifiable(_reports[sphereId] ?? const []);
+
+  /// Flag a post to the admins of the sphere it appeared in. There is no outside
+  /// authority to send it to; the sphere is the authority.
+  Future<void> reportPost(String postId, String reason) async {
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return;
+    for (final sphereId in _posts[index].sphereIds) {
+      await _publishToSphere(
+        sphereId: sphereId,
+        type: 'report',
+        payloadJson: jsonEncode({'type': 'report', 'post_id': postId, 'reason': reason}),
+      );
+    }
+  }
+
+  Future<void> dismissReport(String sphereId, String postId, String by) async {
+    _reports[sphereId]?.removeWhere((r) => r['post_id'] == postId && r['by'] == by);
+    await SecureStore.instance.setString(_reportsKey, jsonEncode(_reports));
+    notifyListeners();
+  }
+
+  // ── Editing ───────────────────────────────────────────────────────────────
+
+  /// Change the text of one of our own posts, everywhere it was shared.
+  Future<void> editPost(String postId, String content) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1) return;
+    final post = _posts[index];
+    if (post.authorId != me) {
+      throw StateError('Only the author can edit a post');
+    }
+    final trimmed = content.trim();
+    if (trimmed == post.content) return;
+    final editedAt = DateTime.now();
+    _posts[index] = post.copyWith(content: trimmed, editedAt: editedAt);
+    await _persistPosts();
+    notifyListeners();
+
+    final payload = jsonEncode({
+      'type': 'post_edit',
+      'post_id': postId,
+      'content': trimmed,
+      'edited_at': editedAt.toIso8601String(),
+    });
+    for (final sphereId in post.sphereIds) {
+      await _publishToSphere(sphereId: sphereId, type: 'post_edit', payloadJson: payload);
+    }
+  }
+
+  // ── Pinning posts in a sphere ─────────────────────────────────────────────
+
+  static const _pinnedPostsKey = 'spheres_pinned_posts_v1';
+
+  /// Sphere id -> pinned post ids, newest pin first. Set by that sphere's
+  /// admins; everyone sees the same pins.
+  final Map<String, List<String>> _pinned = {};
+
+  List<String> pinnedIn(String sphereId) =>
+      List.unmodifiable(_pinned[sphereId] ?? const []);
+
+  bool isPinned(String postId) => _pinned.values.any((ids) => ids.contains(postId));
+
+  /// Pin or unpin a post in one sphere. Admins only; the receiving side checks
+  /// the same thing against the signature, so a non-admin's pin goes nowhere.
+  Future<void> setPinned(String sphereId, String postId, bool pinned) async {
+    final me = _myPublicKey;
+    final sphere = _spheres?.sphere(sphereId);
+    if (me == null || sphere == null) return;
+    if (!sphere.isAdmin(me)) throw StateError('Only an admin can pin a post');
+    _applyPin(sphereId, postId, pinned);
+    await _publishToSphere(
+      sphereId: sphereId,
+      type: 'post_pin',
+      payloadJson: jsonEncode({'type': 'post_pin', 'post_id': postId, 'pinned': pinned}),
+    );
+  }
+
+  void _applyPin(String sphereId, String postId, bool pinned) {
+    final list = _pinned.putIfAbsent(sphereId, () => []);
+    list.remove(postId);
+    if (pinned) list.insert(0, postId);
+    if (list.isEmpty) _pinned.remove(sphereId);
+    SecureStore.instance.setString(_pinnedPostsKey, jsonEncode(_pinned));
+    notifyListeners();
+  }
+
+  Future<void> _loadPins() async {
+    final raw = await SecureStore.instance.getString(_pinnedPostsKey);
+    if (raw == null) return;
+    try {
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      decoded.forEach((k, v) => _pinned[k] = (v as List<dynamic>).cast<String>());
+    } catch (_) {}
   }
 
   /// Returns posts from previous years on the same month and day.
@@ -206,10 +556,13 @@ class FeedService extends ChangeNotifier {
     }
 
     final blocked = blockedForSending;
+    final stamp = DateTime.now().microsecondsSinceEpoch;
     for (final member in sphere.members.map((m) => m.identityKey)) {
-      if (member == _myPublicKey || blocked.contains(member)) continue;
+      if (blocked.contains(member)) continue;
+      // Our own entry in the member list stands for our other devices; with
+      // one device there is nothing to send and queueForMember says so.
       await queueForMember(
-        id: '$type:${DateTime.now().microsecondsSinceEpoch}:$member',
+        id: '$type:$stamp:$member',
         member: member,
         sealed: sealed,
       );
@@ -242,16 +595,41 @@ class FeedService extends ChangeNotifier {
       // Keeping a copy is best effort and must never stop a send.
     }
 
-    final queue = outbox;
-    if (queue == null) {
-      final ok = await _feedRelay.sendViaRelay(member, sealed);
-      if (!ok) {
-        DebugLogService().warn(
-            'Feed', 'Could not reach $member and have nowhere to queue it');
+    // Sphere-sealed content is one envelope for everyone who holds the key,
+    // so every device of the member gets the same bytes.
+    final devices = _devicesFor(member);
+    if (devices.isEmpty) {
+      if (member != _myPublicKey) {
+        DebugLogService().warn('Feed', 'No device known for $member; not sent');
       }
       return;
     }
-    await queue.enqueue(id: id, peer: member, payload: sealed);
+
+    final queue = outbox;
+    if (queue == null) {
+      for (final device in devices) {
+        final ok = await _feedRelay.sendViaRelay(member, sealed, deviceKey: device);
+        if (!ok) {
+          DebugLogService().warn(
+              'Feed', 'Could not reach $member and have nowhere to queue it');
+        }
+      }
+      return;
+    }
+    await queue.enqueueAll(
+      id: id,
+      peer: member,
+      payloads: {for (final d in devices) d: sealed},
+    );
+  }
+
+  /// Device keys to address for a member — every device of a contact, or, for
+  /// our own key, every device of ours but this one.
+  List<String> _devicesFor(String member) {
+    final sessions = _sessions;
+    if (sessions == null) return const [];
+    return sessions.devicesOf(member,
+        fallback: member == _myPublicKey ? null : _resolveExchangeKey?.call(member));
   }
 
   /// Apply an envelope a peer sent back because we were missing it.
@@ -269,8 +647,40 @@ class FeedService extends ChangeNotifier {
   /// and group messages alike — because that is where the receiving side opens
   /// sphere-sealed envelopes. Sending one down the direct chat channel instead
   /// puts it in front of a decoder that cannot open it.
-  Future<bool> sendSealedToMember(String peerIdentityKey, String sealed) =>
-      _feedRelay.sendViaRelay(peerIdentityKey, sealed);
+  Future<bool> sendSealedToMember(String peerIdentityKey, String sealed,
+          {String? deviceKey}) =>
+      _feedRelay.sendViaRelay(peerIdentityKey, sealed, deviceKey: deviceKey);
+
+  /// The same sealed content to every device of a member. True if any took it.
+  Future<bool> sendSealedToAllDevices(String peerIdentityKey, String sealed) async {
+    var any = false;
+    for (final device in _devicesFor(peerIdentityKey)) {
+      if (await _feedRelay.sendViaRelay(peerIdentityKey, sealed, deviceKey: device)) {
+        any = true;
+      }
+    }
+    return any;
+  }
+
+  /// Open the feed channel to each of our other devices, so posts we write
+  /// anywhere show up everywhere.
+  Future<void> connectOwnDevices() async {
+    final sessions = _sessions;
+    final me = _myPublicKey;
+    if (sessions == null || me == null) return;
+    for (final device in sessions.devicesOf(me)) {
+      try {
+        final mailbox = await sessions.mailboxFor(
+          peerIdentityKey: me,
+          peerKeyExchangePublicKey: device,
+          purpose: 'feed',
+        );
+        await _feedRelay.connectMailbox(me, mailbox, deviceKey: device);
+      } catch (e) {
+        DebugLogService().warn('Feed', 'Could not open a feed channel to our own device: $e');
+      }
+    }
+  }
 
   /// Open a feed channel for a contact added after startup.
   ///
@@ -287,12 +697,17 @@ class FeedService extends ChangeNotifier {
     final sessions = _sessions;
     if (sessions == null) return;
     try {
-      final mailbox = await sessions.mailboxFor(
-        peerIdentityKey: contactKey,
-        peerKeyExchangePublicKey: _resolveExchangeKey?.call(contactKey),
-        purpose: 'feed',
-      );
-      await _feedRelay.connectMailbox(contactKey, mailbox);
+      final devices = sessions.devicesOf(contactKey,
+          fallback: _resolveExchangeKey?.call(contactKey));
+      if (devices.isEmpty) throw NoSessionException(contactKey);
+      for (final device in devices) {
+        final mailbox = await sessions.mailboxFor(
+          peerIdentityKey: contactKey,
+          peerKeyExchangePublicKey: device,
+          purpose: 'feed',
+        );
+        await _feedRelay.connectMailbox(contactKey, mailbox, deviceKey: device);
+      }
     } on NoSessionException {
       // Nothing to connect to until the contact publishes an encryption key.
     }
@@ -316,6 +731,23 @@ class FeedService extends ChangeNotifier {
   }
 
   Future<void> loadPosts() async {
+    await _loadPins();
+    try {
+      final draftsRaw = await SecureStore.instance.getString(_draftsKey);
+      if (draftsRaw != null) {
+        _drafts
+          ..clear()
+          ..addAll((jsonDecode(draftsRaw) as List).cast<Map<String, dynamic>>());
+      }
+      final reportsRaw = await SecureStore.instance.getString(_reportsKey);
+      if (reportsRaw != null) {
+        (jsonDecode(reportsRaw) as Map<String, dynamic>).forEach((k, v) {
+          _reports[k] = (v as List).cast<Map<String, dynamic>>();
+        });
+      }
+    } catch (_) {}
+    _draftTimer?.cancel();
+    _draftTimer = Timer.periodic(const Duration(minutes: 1), (_) => publishDueDrafts());
     final prefs0 = SecureStore.instance;
     _sendViewReceipts =
         await prefs0.getBool('spheres_story_view_receipts') ?? true;
@@ -370,6 +802,11 @@ class FeedService extends ChangeNotifier {
     String? authorName,
     bool isStory = false,
     DateTime? expiresAt,
+    String kind = 'post',
+    Map<String, dynamic>? payload,
+    List<String> altTexts = const [],
+    List<String> coAuthors = const [],
+    List<MediaProvenance?>? provenance,
   }) async {
     final targets = {...?sphereIds, if (sphereId != null) sphereId};
     if (targets.isEmpty) {
@@ -387,6 +824,13 @@ class FeedService extends ChangeNotifier {
       sphereIds: targets,
       isStory: isStory,
       expiresAt: expiresAt,
+      kind: kind,
+      payload: payload,
+      altTexts: altTexts,
+      // What this device could tell about each picture's origin, recorded
+      // when it was picked. Travels sealed with the post.
+      provenance: provenance ?? MediaService.provenanceListFor(mediaRefs ?? []),
+      coAuthors: coAuthors,
     );
 
     _posts.insert(0, post);
@@ -414,6 +858,7 @@ class FeedService extends ChangeNotifier {
     required List<String> audienceMembers,
     List<String>? mediaRefs,
     String authorName = 'You',
+    Map<String, dynamic>? payload,
   }) async {
     await createPost(
       content,
@@ -423,6 +868,7 @@ class FeedService extends ChangeNotifier {
       authorName: authorName,
       isStory: true,
       expiresAt: DateTime.now().add(const Duration(hours: 24)),
+      payload: payload,
     );
   }
 
@@ -459,7 +905,9 @@ class FeedService extends ChangeNotifier {
         sealed: data,
       );
 
-      if (json['type'] == 'sphere_msg') {
+      if (json['type'] is String && (json['type'] as String).startsWith('sphere_msg')) {
+        // The group conversation and everything about it: messages, edits,
+        // unsends, pins, votes, read receipts, timer changes.
         await onSphereMessage?.call(
             authorId, opened.sphereId, json as Map<String, dynamic>);
         return;
@@ -482,6 +930,69 @@ class FeedService extends ChangeNotifier {
           return;
         }
         _mergePost(post);
+      } else if (json['type'] == 'event_rsvp') {
+        final index = _posts.indexWhere((p) => p.id == json['post_id']);
+        if (index != -1 && _posts[index].isEvent) {
+          _applyRsvp(index, authorId, json['status'] as String? ?? '');
+        }
+      } else if (json['type'] == 'post_vote') {
+        final index = _posts.indexWhere((p) => p.id == json['post_id']);
+        if (index != -1 && _posts[index].isPoll) {
+          _applyPostVote(index, authorId,
+              (json['choices'] as List?)?.whereType<int>().toList() ?? const []);
+        }
+      } else if (json['type'] == 'coauthor_accept') {
+        final index = _posts.indexWhere((p) => p.id == json['post_id']);
+        if (index != -1) _applyCoAuthor(index, authorId);
+      } else if (json['type'] == 'report') {
+        // Only admins of that sphere keep reports; everyone else drops them.
+        final sphere = spheres.sphere(opened.sphereId);
+        final me = _myPublicKey;
+        if (sphere != null && me != null && sphere.isAdmin(me)) {
+          final list = _reports.putIfAbsent(opened.sphereId, () => []);
+          list.add({
+            'post_id': json['post_id'],
+            'reason': json['reason'],
+            'by': authorId,
+            'at': DateTime.now().toIso8601String(),
+          });
+          await SecureStore.instance.setString(_reportsKey, jsonEncode(_reports));
+          notifyListeners();
+          InboundEvents.emit(InboundEvent(
+            kind: InboundKind.post,
+            id: 'report:${json['post_id']}:$authorId',
+            title: sphere.name,
+            body: 'A post was reported to the admins',
+            route: '/sphere/${opened.sphereId}',
+            thread: 'sphere:${opened.sphereId}',
+          ));
+        }
+      } else if (json['type'] == 'post_edit') {
+        final postId = json['post_id'] as String;
+        final index = _posts.indexWhere((p) => p.id == postId);
+        if (index == -1) return;
+        // Only the author, as proven by the signature, may change the text.
+        if (_posts[index].authorId != authorId) {
+          DebugLogService().warn('Feed', 'Dropping edit from a non-author');
+          return;
+        }
+        final editedAt = DateTime.tryParse(json['edited_at'] as String? ?? '');
+        _posts[index] = _posts[index].copyWith(
+          content: json['content'] as String? ?? _posts[index].content,
+          editedAt: editedAt ?? DateTime.now(),
+        );
+        await _persistPosts();
+        notifyListeners();
+      } else if (json['type'] == 'post_pin') {
+        final sphere = spheres.sphere(opened.sphereId);
+        if (sphere == null || !sphere.isAdmin(authorId)) {
+          DebugLogService().warn('Feed', 'Dropping pin from a non-admin');
+          return;
+        }
+        final postId = json['post_id'];
+        if (postId is String) {
+          _applyPin(opened.sphereId, postId, json['pinned'] == true);
+        }
       } else if (json['type'] == 'like') {
         final postId = json['post_id'] as String;
         final liked = json['liked'] as bool;
@@ -545,15 +1056,24 @@ class FeedService extends ChangeNotifier {
   Future<Post> _encodePostMedia(Post post) async {
     if (post.mediaRefs.isEmpty) return post;
     final encoded = <String>[];
-    for (final ref in post.mediaRefs) {
+    final provenance = <MediaProvenance?>[];
+    for (var i = 0; i < post.mediaRefs.length; i++) {
+      final ref = post.mediaRefs[i];
+      final claim = MediaProvenance.at(post.provenance, i);
       if (ref.startsWith('data:')) {
         encoded.add(ref);
+        provenance.add(claim);
       } else {
-        final b64 = await MediaService.encodeImageForRelay(ref);
-        if (b64 != null) encoded.add(b64);
+        final b64 = await MediaService.prepareForRelay(ref,
+            videoLimit: MediaService.feedVideoLimit);
+        if (b64 != null) {
+          encoded.add(b64);
+          // Kept aligned: a dropped item takes its claim with it.
+          provenance.add(claim);
+        }
       }
     }
-    return post.copyWith(mediaRefs: encoded);
+    return post.copyWith(mediaRefs: encoded, provenance: provenance);
   }
 
   /// Decode base64 data URIs received from relay into local file paths.
@@ -606,7 +1126,30 @@ class FeedService extends ChangeNotifier {
     }
     _persistPosts();
     notifyListeners();
+
+    if (post.authorId != _myPublicKey) {
+      final name = post.authorName.trim().isNotEmpty
+          ? post.authorName
+          : (resolveName?.call(post.authorId) ?? 'Someone');
+      final hasVideo = post.mediaRefs.any(MediaService.looksLikeVideo);
+      final body = post.content.trim().isNotEmpty
+          ? post.content
+          : (post.mediaRefs.isEmpty
+              ? 'Posted'
+              : (hasVideo ? 'Shared a video' : 'Shared a photo'));
+      InboundEvents.emit(InboundEvent(
+        kind: InboundKind.post,
+        id: 'post:${post.id}',
+        title: post.isStory ? '$name · story' : name,
+        body: body,
+        route: post.isStory ? '/' : '/post/${post.id}',
+        thread: 'feed',
+      ));
+    }
   }
+
+  /// Display name for an identity key, for notifications. Set by the app.
+  String Function(String identityKey)? resolveName;
 
   void toggleLike(String postId) {
     if (_myPublicKey == null) return;
@@ -754,12 +1297,32 @@ class FeedService extends ChangeNotifier {
     if (index == -1) return;
     if (_posts[index].comments.any((c) => c.id == comment.id)) return;
 
-    _posts[index] = _posts[index].copyWith(
-      comments: [..._posts[index].comments, comment]
+    final post = _posts[index];
+    _posts[index] = post.copyWith(
+      comments: [...post.comments, comment]
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt)),
     );
     _persistPosts();
     notifyListeners();
+
+    // Notify the people in the conversation: the author of the post, and
+    // anyone who has commented on it — not the whole sphere.
+    final me = _myPublicKey;
+    final involved = post.authorId == me ||
+        post.comments.any((c) => c.authorId == me);
+    if (me != null && comment.authorId != me && involved) {
+      final name = comment.authorName.trim().isNotEmpty
+          ? comment.authorName
+          : (resolveName?.call(comment.authorId) ?? 'Someone');
+      InboundEvents.emit(InboundEvent(
+        kind: InboundKind.comment,
+        id: 'comment:${comment.id}',
+        title: name,
+        body: comment.text,
+        route: '/post/$postId',
+        thread: 'post:$postId',
+      ));
+    }
   }
 
   void reactToPost(String postId, String emoji) {

@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'media_provenance.dart';
 
 /// One person's reaction to a message.
 class MessageReaction with EquatableMixin {
@@ -38,6 +39,10 @@ class Message with EquatableMixin {
   final DateTime timestamp;
   final bool delivered;
   final List<String> mediaRefs;
+
+  /// What the sender's device could tell about each media item's origin, one
+  /// entry per [mediaRefs] entry (null where nothing was assessed).
+  final List<MediaProvenance?> provenance;
   final String? audioRef;
 
   /// Set when this message is a reply to a story.
@@ -58,6 +63,35 @@ class Message with EquatableMixin {
   /// Reactions from either participant, keyed by who left them.
   final List<MessageReaction> reactions;
 
+  /// Set when the author changed the text after sending.
+  final DateTime? editedAt;
+
+  /// Set when the author deleted it for everyone. The text is gone; a
+  /// tombstone stays so the conversation does not silently lose a turn.
+  final DateTime? deletedAt;
+
+  /// Disappearing messages: gone from every device after this moment. Carried
+  /// in the message so both sides delete on the same schedule.
+  final DateTime? expiresAt;
+
+  /// Media that may be opened once, then is deleted on the viewer's device.
+  final bool viewOnce;
+
+  /// Re-sent from another conversation.
+  final bool forwarded;
+
+  /// What this message is: 'text' (default), 'poll', 'location', 'contact',
+  /// 'video_note', 'event', 'system'. Structured content lives in [payload].
+  final String kind;
+  final Map<String, dynamic>? payload;
+
+  /// Identity keys of members mentioned with @, so clients can highlight and
+  /// notify them.
+  final List<String> mentions;
+
+  /// Who has read it, by identity key. Filled from read receipts.
+  final List<String> readBy;
+
   const Message({
     required this.id,
     required this.senderId,
@@ -66,11 +100,28 @@ class Message with EquatableMixin {
     required this.timestamp,
     this.delivered = false,
     this.mediaRefs = const [],
+    this.provenance = const [],
     this.audioRef,
     this.replyToStoryId,
     this.replyToMessageId,
     this.reactions = const [],
+    this.editedAt,
+    this.deletedAt,
+    this.expiresAt,
+    this.viewOnce = false,
+    this.forwarded = false,
+    this.kind = 'text',
+    this.payload,
+    this.mentions = const [],
+    this.readBy = const [],
   });
+
+  bool get isDeleted => deletedAt != null;
+  bool get isExpired => expiresAt != null && expiresAt!.isBefore(DateTime.now());
+  bool get isPoll => kind == 'poll';
+  bool get isLocation => kind == 'location';
+  bool get isContactCard => kind == 'contact';
+  bool get isSystem => kind == 'system';
 
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(
@@ -84,6 +135,7 @@ class Message with EquatableMixin {
               ?.map((e) => e as String)
               .toList() ??
           [],
+      provenance: MediaProvenance.listFromJson(json['provenance']),
       audioRef: json['audioRef'] as String?,
       replyToStoryId: json['replyToStoryId'] as String?,
       replyToMessageId: json['replyToMessageId'] as String?,
@@ -91,8 +143,19 @@ class Message with EquatableMixin {
               ?.map((e) => MessageReaction.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
+      editedAt: _date(json['editedAt']),
+      deletedAt: _date(json['deletedAt']),
+      expiresAt: _date(json['expiresAt']),
+      viewOnce: json['viewOnce'] as bool? ?? false,
+      forwarded: json['forwarded'] as bool? ?? false,
+      kind: json['kind'] as String? ?? 'text',
+      payload: (json['payload'] as Map?)?.cast<String, dynamic>(),
+      mentions: (json['mentions'] as List<dynamic>?)?.cast<String>() ?? const [],
+      readBy: (json['readBy'] as List<dynamic>?)?.cast<String>() ?? const [],
     );
   }
+
+  static DateTime? _date(Object? v) => v is String ? DateTime.tryParse(v) : null;
 
   Map<String, dynamic> toJson() {
     return {
@@ -103,6 +166,8 @@ class Message with EquatableMixin {
       'timestamp': timestamp.toIso8601String(),
       'delivered': delivered,
       'mediaRefs': mediaRefs,
+      if (MediaProvenance.listToJson(provenance) != null)
+        'provenance': MediaProvenance.listToJson(provenance),
       'audioRef': audioRef,
       if (replyToStoryId != null) 'replyToStoryId': replyToStoryId,
       if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
@@ -110,6 +175,15 @@ class Message with EquatableMixin {
       // the wire carry none and there is no reason to send an empty list.
       if (reactions.isNotEmpty)
         'reactions': reactions.map((r) => r.toJson()).toList(),
+      if (editedAt != null) 'editedAt': editedAt!.toIso8601String(),
+      if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+      if (expiresAt != null) 'expiresAt': expiresAt!.toIso8601String(),
+      if (viewOnce) 'viewOnce': true,
+      if (forwarded) 'forwarded': true,
+      if (kind != 'text') 'kind': kind,
+      if (payload != null) 'payload': payload,
+      if (mentions.isNotEmpty) 'mentions': mentions,
+      if (readBy.isNotEmpty) 'readBy': readBy,
     };
   }
 
@@ -121,10 +195,20 @@ class Message with EquatableMixin {
     DateTime? timestamp,
     bool? delivered,
     List<String>? mediaRefs,
+    List<MediaProvenance?>? provenance,
     String? audioRef,
     String? replyToStoryId,
     String? replyToMessageId,
     List<MessageReaction>? reactions,
+    DateTime? editedAt,
+    DateTime? deletedAt,
+    DateTime? expiresAt,
+    bool? viewOnce,
+    bool? forwarded,
+    String? kind,
+    Map<String, dynamic>? payload,
+    List<String>? mentions,
+    List<String>? readBy,
   }) {
     return Message(
       id: id ?? this.id,
@@ -134,15 +218,27 @@ class Message with EquatableMixin {
       timestamp: timestamp ?? this.timestamp,
       delivered: delivered ?? this.delivered,
       mediaRefs: mediaRefs ?? this.mediaRefs,
+      provenance: provenance ?? this.provenance,
       audioRef: audioRef ?? this.audioRef,
       replyToStoryId: replyToStoryId ?? this.replyToStoryId,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       reactions: reactions ?? this.reactions,
+      editedAt: editedAt ?? this.editedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      expiresAt: expiresAt ?? this.expiresAt,
+      viewOnce: viewOnce ?? this.viewOnce,
+      forwarded: forwarded ?? this.forwarded,
+      kind: kind ?? this.kind,
+      payload: payload ?? this.payload,
+      mentions: mentions ?? this.mentions,
+      readBy: readBy ?? this.readBy,
     );
   }
 
   @override
-  List<Object?> get props =>
-      [id, senderId, recipientId, content, timestamp, delivered, mediaRefs,
-        audioRef, replyToStoryId, replyToMessageId, reactions];
+  List<Object?> get props => [
+        id, senderId, recipientId, content, timestamp, delivered, mediaRefs,
+        provenance, audioRef, replyToStoryId, replyToMessageId, reactions, editedAt,
+        deletedAt, expiresAt, viewOnce, forwarded, kind, payload, mentions, readBy,
+      ];
 }

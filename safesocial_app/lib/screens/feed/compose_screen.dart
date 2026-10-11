@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,7 +6,14 @@ import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
 import '../../services/sphere_service.dart';
+import '../../services/video_transcoder.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/media_thumb.dart';
+import '../../widgets/provenance_badge.dart';
+import '../../widgets/message_cards.dart';
+import '../../widgets/post_extras.dart';
+import '../../services/contact_service.dart';
+import 'package:go_router/go_router.dart';
 
 /// Writing a post.
 ///
@@ -18,7 +23,13 @@ import '../../widgets/avatar.dart';
 /// photos in particular were not shown at all, so the only evidence a picture
 /// had been chosen was that the picker had closed.
 class ComposeScreen extends StatefulWidget {
-  const ComposeScreen({super.key});
+  /// Media to start with, e.g. when re-sharing from the viewer.
+  final List<String> initialMedia;
+
+  /// A saved draft to continue.
+  final Map<String, dynamic>? draft;
+
+  const ComposeScreen({super.key, this.initialMedia = const [], this.draft});
 
   @override
   State<ComposeScreen> createState() => _ComposeScreenState();
@@ -27,15 +38,174 @@ class ComposeScreen extends StatefulWidget {
 class _ComposeScreenState extends State<ComposeScreen> {
   final _controller = TextEditingController();
   final _media = <String>[];
+  final _altTexts = <String, String>{};
   final _targets = <String>{};
+  final _coAuthors = <String>{};
   bool _posting = false;
+
+  /// 'post' | 'event' | 'poll'
+  String _kind = 'post';
+  Map<String, dynamic>? _payload;
+  String? _draftId;
 
   @override
   void initState() {
     super.initState();
+    _media.addAll(widget.initialMedia);
+    final draft = widget.draft;
+    if (draft != null) {
+      _draftId = draft['id'] as String?;
+      _controller.text = draft['content'] as String? ?? '';
+      _media.addAll((draft['mediaRefs'] as List?)?.cast<String>() ?? const []);
+      _targets.addAll((draft['sphereIds'] as List?)?.cast<String>() ?? const []);
+      _kind = draft['kind'] as String? ?? 'post';
+      _payload = (draft['payload'] as Map?)?.cast<String, dynamic>();
+      final alts = (draft['altTexts'] as List?)?.cast<String>() ?? const [];
+      for (var i = 0; i < alts.length && i < _media.length; i++) {
+        if (alts[i].isNotEmpty) _altTexts[_media[i]] = alts[i];
+      }
+    }
     final writable = context.read<SphereService>().writable;
-    if (writable.isNotEmpty) _targets.add(writable.first.id);
+    if (_targets.isEmpty && writable.isNotEmpty) _targets.add(writable.first.id);
     _controller.addListener(() => setState(() {}));
+  }
+
+  List<String> get _altList => _media.map((m) => _altTexts[m] ?? '').toList();
+
+  Future<void> _saveDraft({DateTime? scheduledFor}) async {
+    final feed = context.read<FeedService>();
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    await feed.saveDraft(
+      id: _draftId,
+      content: _controller.text.trim(),
+      mediaRefs: List.of(_media),
+      sphereIds: _targets,
+      scheduledFor: scheduledFor,
+      kind: _kind,
+      payload: _payload,
+      altTexts: _altList,
+    );
+    messenger.showSnackBar(SnackBar(
+        content: Text(scheduledFor == null
+            ? 'Saved as a draft'
+            : 'Scheduled for ${scheduledFor.toLocal().toString().substring(0, 16)}. Keep the app '
+                'installed; it posts from this device.')));
+    navigator.pop();
+  }
+
+  Future<void> _schedule() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(hours: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+        context: context, initialTime: TimeOfDay.fromDateTime(DateTime.now().add(const Duration(hours: 1))));
+    if (time == null || !mounted) return;
+    await _saveDraft(scheduledFor: DateTime(date.year, date.month, date.day, time.hour, time.minute));
+  }
+
+  Future<void> _makeEvent() async {
+    final event = await showEventDialog(context);
+    if (event == null) return;
+    setState(() {
+      _kind = 'event';
+      _payload = {
+        'title': event.title,
+        'starts_at': event.startsAt.toIso8601String(),
+        if (event.endsAt != null) 'ends_at': event.endsAt!.toIso8601String(),
+        'place': event.place,
+        'rsvps': <String, dynamic>{},
+      };
+    });
+  }
+
+  Future<void> _makePoll() async {
+    final poll = await showCreatePollDialog(context);
+    if (poll == null) return;
+    setState(() {
+      _kind = 'poll';
+      _payload = {
+        'question': poll.question,
+        'options': poll.options,
+        'multiple': poll.multiple,
+        'anonymous': poll.anonymous,
+        'votes': <String, dynamic>{},
+      };
+      if (_controller.text.trim().isEmpty) _controller.text = poll.question;
+    });
+  }
+
+  Future<void> _editAltText(String path) async {
+    final controller = TextEditingController(text: _altTexts[path] ?? '');
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Describe this image'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(hintText: 'For people who cannot see it'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (text == null) return;
+    setState(() {
+      if (text.isEmpty) {
+        _altTexts.remove(path);
+      } else {
+        _altTexts[path] = text;
+      }
+    });
+  }
+
+  Future<void> _pickCoAuthors() async {
+    final spheres = context.read<SphereService>();
+    final contacts = context.read<ContactService>();
+    final me = context.read<IdentityService>().publicKey;
+    final members = <String>{};
+    for (final id in _targets) {
+      members.addAll(spheres.sphere(id)?.members.map((m) => m.identityKey) ?? const []);
+    }
+    members.remove(me);
+    if (members.isEmpty) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Co-authors', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text('They are shown as authors once they confirm.', style: TextStyle(fontSize: 12)),
+              ),
+              for (final key in members)
+                CheckboxListTile(
+                  value: _coAuthors.contains(key),
+                  title: Text(contacts.getContact(key)?.displayName ?? '${key.substring(0, 8)}…'),
+                  onChanged: (v) {
+                    setSheet(() => v == true ? _coAuthors.add(key) : _coAuthors.remove(key));
+                    setState(() {});
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -47,7 +217,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   bool get _canPost =>
       !_posting &&
       _targets.isNotEmpty &&
-      (_controller.text.trim().isNotEmpty || _media.isNotEmpty);
+      (_controller.text.trim().isNotEmpty || _media.isNotEmpty || _payload != null);
 
   Future<void> _addImage() async {
     final path = await context.read<MediaService>().pickAndStoreImage();
@@ -56,9 +226,23 @@ class _ComposeScreenState extends State<ComposeScreen> {
     if (path != null && mounted) setState(() => _media.add(path));
   }
 
-  Future<void> _addVideo() async {
-    final path = await context.read<MediaService>().pickAndStoreVideo();
+  Future<void> _takePhoto() async {
+    final path = await context.read<MediaService>().captureImage();
     if (path != null && mounted) setState(() => _media.add(path));
+  }
+
+  Future<void> _addVideo() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await context
+          .read<MediaService>()
+          .pickVideo(limit: MediaService.feedVideoLimit);
+      if (path != null && mounted) setState(() => _media.add(path));
+    } on MediaRejectedException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } on UnsupportedVideoException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   Future<void> _post() async {
@@ -86,7 +270,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
         audienceMembers: audience.toList(),
         mediaRefs: _media.isEmpty ? null : List.of(_media),
         authorName: identity.currentIdentity?.displayName ?? 'You',
+        kind: _kind,
+        payload: _payload,
+        altTexts: _altList,
+        coAuthors: _coAuthors.toList(),
       );
+      if (_draftId != null) await feed.deleteDraft(_draftId!);
       navigator.pop();
     } catch (e) {
       if (mounted) setState(() => _posting = false);
@@ -107,8 +296,20 @@ class _ComposeScreenState extends State<ComposeScreen> {
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('New post'),
+        title: Text(_kind == 'event' ? 'New event' : (_kind == 'poll' ? 'New poll' : 'New post')),
         actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'draft') _saveDraft();
+              if (v == 'schedule') _schedule();
+              if (v == 'drafts') context.push('/drafts');
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'draft', enabled: _canPost, child: const Text('Save as draft')),
+              PopupMenuItem(value: 'schedule', enabled: _canPost, child: const Text('Schedule…')),
+              const PopupMenuItem(value: 'drafts', child: Text('Drafts and scheduled')),
+            ],
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             child: FilledButton(
@@ -159,9 +360,44 @@ class _ComposeScreenState extends State<ComposeScreen> {
                           hintStyle: TextStyle(color: cs.onSurfaceVariant),
                         ),
                       ),
+                      if (_kind == 'event' && _payload != null)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.event, color: cs.primary),
+                          title: Text(_payload!['title'] as String? ?? 'Event'),
+                          subtitle: Text(
+                              '${_payload!['starts_at']}'.replaceAll('T', ' ').substring(0, 16) +
+                                  ((_payload!['place'] as String?)?.isNotEmpty == true
+                                      ? ' · ${_payload!['place']}'
+                                      : '')),
+                          trailing: IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => setState(() {
+                                    _kind = 'post';
+                                    _payload = null;
+                                  })),
+                        ),
+                      if (_kind == 'poll' && _payload != null)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.poll_outlined, color: cs.primary),
+                          title: Text(_payload!['question'] as String? ?? 'Poll'),
+                          subtitle: Text(((_payload!['options'] as List?) ?? []).join(' · ')),
+                          trailing: IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => setState(() {
+                                    _kind = 'post';
+                                    _payload = null;
+                                  })),
+                        ),
+                      if (_coAuthors.isNotEmpty)
+                        Text('With ${_coAuthors.length} co-author${_coAuthors.length == 1 ? '' : 's'}, pending their confirmation',
+                            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
                       if (_media.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         _attachments(cs),
+                        Text('Long-press a photo to describe it for screen readers',
+                            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
                       ],
                       const SizedBox(height: 24),
                       Text('Who can see this', style: theme.textTheme.titleSmall),
@@ -196,10 +432,31 @@ class _ComposeScreenState extends State<ComposeScreen> {
                         onPressed: _posting ? null : _addImage,
                       ),
                       IconButton(
+                        tooltip: 'Take a photo',
+                        icon: Icon(Icons.photo_camera_outlined,
+                            color: Colors.green[800]),
+                        onPressed: _posting ? null : _takePhoto,
+                      ),
+                      IconButton(
                         tooltip: 'Add a video',
                         icon: Icon(Icons.videocam_outlined,
                             color: Colors.red[400]),
                         onPressed: _posting ? null : _addVideo,
+                      ),
+                      IconButton(
+                        tooltip: 'Event',
+                        icon: Icon(Icons.event_outlined, color: cs.primary),
+                        onPressed: _posting ? null : _makeEvent,
+                      ),
+                      IconButton(
+                        tooltip: 'Poll',
+                        icon: Icon(Icons.poll_outlined, color: cs.primary),
+                        onPressed: _posting ? null : _makePoll,
+                      ),
+                      IconButton(
+                        tooltip: 'Co-authors',
+                        icon: Icon(Icons.group_add_outlined, color: cs.primary),
+                        onPressed: _posting || _targets.isEmpty ? null : _pickCoAuthors,
                       ),
                       const Spacer(),
                       if (_media.isNotEmpty)
@@ -244,22 +501,31 @@ class _ComposeScreenState extends State<ComposeScreen> {
           final path = _media[index];
           return Stack(
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  File(path),
-                  width: 120,
-                  height: 120,
-                  fit: BoxFit.cover,
-                  // A video has no thumbnail here; showing that something is
-                  // attached still beats showing nothing at all.
-                  errorBuilder: (_, __, ___) => Container(
+              GestureDetector(
+                onLongPress: () => _editAltText(path),
+                child: Stack(children: [
+                  MediaThumb(
+                    ref: path,
                     width: 120,
                     height: 120,
-                    color: cs.surfaceContainerHighest,
-                    child: Icon(Icons.movie_outlined, color: cs.onSurfaceVariant),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                ),
+                  if (_altTexts[path]?.isNotEmpty == true)
+                    const Positioned(
+                      left: 4,
+                      bottom: 4,
+                      child: Icon(Icons.closed_caption, color: Colors.white, size: 18),
+                    ),
+                  // The score that will travel with this picture, so the
+                  // sender sees it before anyone else does.
+                  if (MediaService.provenanceFor(path) != null)
+                    Positioned(
+                      right: 4,
+                      bottom: 4,
+                      child: ProvenanceBadge(
+                          provenance: MediaService.provenanceFor(path)!, compact: true),
+                    ),
+                ]),
               ),
               Positioned(
                 top: 4,

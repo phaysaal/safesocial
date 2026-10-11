@@ -1,8 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../models/media_provenance.dart';
 import '../models/post.dart';
 import 'author_name.dart';
 import '../models/sphere.dart';
@@ -12,6 +12,9 @@ import '../services/library_service.dart';
 import '../services/identity_service.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
+import 'media_thumb.dart';
+import 'provenance_badge.dart';
+import 'post_extras.dart';
 
 /// Instagram / Facebook style post card.
 class PostCard extends StatefulWidget {
@@ -86,6 +89,10 @@ class _PostCardState extends State<PostCard> {
                           ),
                           const SizedBox(width: 4),
                           Icon(Icons.public, size: 12, color: cs.onSurfaceVariant),
+                          if (context.watch<FeedService>().isPinned(post.id)) ...[
+                            const SizedBox(width: 6),
+                            Icon(Icons.push_pin, size: 12, color: cs.primary),
+                          ],
                           if (post.editedAt != null) ...[
                             const SizedBox(width: 6),
                             Text(
@@ -144,9 +151,21 @@ class _PostCardState extends State<PostCard> {
                       ),
                     ),
                     const PopupMenuItem(value: 'hide', child: Text('Hide post')),
+                    if (post.authorId == myKey)
+                      const PopupMenuItem(value: 'edit', child: Text('Edit post')),
+                    if (myKey != null &&
+                        (context.read<SphereService>().sphere(post.sphereId)?.isAdmin(myKey) ??
+                            false))
+                      PopupMenuItem(
+                        value: 'pin',
+                        child: Text(context.read<FeedService>().isPinned(post.id)
+                            ? 'Unpin from sphere'
+                            : 'Pin in sphere'),
+                      ),
                     if (post.authorId != myKey) ...[
                       const PopupMenuItem(value: 'mute', child: Text('Mute this person')),
                       const PopupMenuItem(value: 'unfollow', child: Text('Unfollow')),
+                      const PopupMenuItem(value: 'report', child: Text('Report to the sphere')),
                     ],
                   ],
                 ),
@@ -154,11 +173,58 @@ class _PostCardState extends State<PostCard> {
             ),
           ),
 
+          // ── Co-authors ─────────────────────────────────────
+          if (post.acceptedCoAuthors.isNotEmpty ||
+              (post.coAuthors.contains(myKey) && !post.acceptedCoAuthors.contains(myKey)))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Builder(builder: (context) {
+                final contacts = context.read<ContactService>();
+                String name(String k) =>
+                    k == myKey ? 'you' : (contacts.getContact(k)?.displayName ?? '${k.substring(0, 8)}…');
+                final confirmed = post.acceptedCoAuthors.map(name).join(', ');
+                final pendingMe = post.coAuthors.contains(myKey) && !post.acceptedCoAuthors.contains(myKey);
+                return Row(children: [
+                  if (confirmed.isNotEmpty)
+                    Expanded(child: Text('with $confirmed', style: theme.textTheme.bodySmall)),
+                  if (pendingMe)
+                    TextButton(
+                      onPressed: () => context.read<FeedService>().acceptCoAuthorship(post.id),
+                      child: const Text('Confirm you co-wrote this'),
+                    ),
+                ]);
+              }),
+            ),
+
           // ── Content text ───────────────────────────────────
-          if (post.content.isNotEmpty)
+          if (post.content.isNotEmpty && !post.isPoll)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Text(post.content, style: theme.textTheme.bodyMedium),
+            ),
+          if (post.isPoll)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text(post.payload?['question'] as String? ?? post.content,
+                  style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600)),
+            ),
+          if (post.isEvent)
+            EventCard(
+              post: post,
+              myKey: myKey,
+              nameFor: (k) => k == myKey
+                  ? 'You'
+                  : (context.read<ContactService>().getContact(k)?.displayName ?? '${k.substring(0, 8)}…'),
+              onRsvp: (status) => context.read<FeedService>().rsvp(post.id, status),
+            ),
+          if (post.isPoll)
+            FeedPollCard(
+              post: post,
+              myKey: myKey,
+              nameFor: (k) => k == myKey
+                  ? 'You'
+                  : (context.read<ContactService>().getContact(k)?.displayName ?? '${k.substring(0, 8)}…'),
+              onVote: (choices) => context.read<FeedService>().votePost(post.id, choices),
             ),
 
           // ── Media ──────────────────────────────────────────
@@ -368,21 +434,30 @@ class _PostCardState extends State<PostCard> {
   }
 
   Widget _mediaImage(String ref, {double? width, double? height}) {
-    final file = File(ref);
-    if (file.existsSync()) {
-      return Image.file(
-        file,
-        width: width,
-        height: height,
-        fit: BoxFit.cover,
-      );
-    }
-    return Container(
-      width: width,
-      height: height,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Icon(Icons.image, size: 48, color: Theme.of(context).colorScheme.onSurfaceVariant),
+    final post = widget.post;
+    final index = post.mediaRefs.indexOf(ref);
+    final alt = index >= 0 && index < post.altTexts.length ? post.altTexts[index] : '';
+    final provenance = MediaProvenance.at(post.provenance, index);
+    final blurred = context.watch<LibraryService>().blursAnyOf(post.sphereIds);
+    final image = Semantics(
+      label: alt.isEmpty ? null : alt,
+      image: true,
+      child: GestureDetector(
+        onTap: () =>
+            context.push('/media/view?ref=${Uri.encodeComponent(ref)}'),
+        onLongPress: alt.isEmpty
+            ? null
+            : () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(alt))),
+        child: MediaThumb(ref: ref, width: width, height: height),
+      ),
     );
+    final withBadge = provenance == null
+        ? image
+        : Stack(children: [
+            image,
+            Positioned(right: 6, bottom: 6, child: ProvenanceBadge(provenance: provenance)),
+          ]);
+    return BlurGate(blurred: blurred, child: withBadge);
   }
 
   void _handlePostMenu(BuildContext context, String action, Post post) {
@@ -409,6 +484,28 @@ class _PostCardState extends State<PostCard> {
             ),
           ),
         );
+      case 'edit':
+        _editPost(context, post);
+      case 'report':
+        showReportDialog(context).then((reason) {
+          if (reason == null || !context.mounted) return;
+          context.read<FeedService>().reportPost(post.id, reason);
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Reported to the admins of this sphere')));
+        });
+      case 'pin':
+        final feed = context.read<FeedService>();
+        final pinned = feed.isPinned(post.id);
+        feed.setPinned(post.sphereId, post.id, !pinned).then((_) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(pinned ? 'Unpinned' : 'Pinned in the sphere')));
+          }
+        }).catchError((e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+          }
+        });
       case 'mute':
         context.read<ContactService>().toggleMute(post.authorId);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -419,6 +516,39 @@ class _PostCardState extends State<PostCard> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unfollowed')),
         );
+    }
+  }
+
+  Future<void> _editPost(BuildContext context, Post post) async {
+    final controller = TextEditingController(text: post.content);
+    final feed = context.read<FeedService>();
+    final messenger = ScaffoldMessenger.of(context);
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit post'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: null,
+          minLines: 2,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (text == null) return;
+    try {
+      await feed.editPost(post.id, text);
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Edited; everyone in the sphere sees the change')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not edit: $e')));
     }
   }
 

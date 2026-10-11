@@ -11,8 +11,19 @@ import '../../services/sphere_service.dart';
 import '../../widgets/avatar.dart';
 
 /// Screen displaying a list of active chat conversations.
-class ChatListScreen extends StatelessWidget {
+class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
+
+  @override
+  State<ChatListScreen> createState() => _ChatListScreenState();
+}
+
+class _ChatListScreenState extends State<ChatListScreen> {
+  /// Archived chats stay out of the way until asked for.
+  bool _showArchived = false;
+
+  /// all · unread · people · spheres
+  String _filter = 'all';
 
   @override
   Widget build(BuildContext context) {
@@ -22,10 +33,14 @@ class ChatListScreen extends StatelessWidget {
 
     final library = context.watch<LibraryService>();
 
-    final conversations = chatService.conversations;
     // Pinned conversations first; the service keeps the user's pin order.
     final conversationIds =
-        library.sortChats(chatService.getConversationIds());
+        library.sortChats(chatService.getConversationIds()
+            .where((k) => _showArchived || !library.isChatArchived(k))
+            .where((k) => _filter != 'spheres')
+            .where((k) => _filter != 'unread' || chatService.unreadCount(k) > 0)
+            .toList());
+    final archivedCount = library.archivedChatCount;
 
     // Sphere threads sit alongside people. A group conversation is not a
     // separate place in this app — it is addressed to a sphere instead of a
@@ -34,6 +49,8 @@ class ChatListScreen extends StatelessWidget {
     final spheres = context.watch<SphereService>();
     final sphereThreads = sphereChat.activeThreads
         .where((id) => spheres.sphere(id) != null)
+        .where((id) => _filter != 'people')
+        .where((id) => _filter != 'unread' || sphereChat.unreadIn(id) > 0)
         .toList();
 
     return Scaffold(
@@ -49,11 +66,79 @@ class ChatListScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: conversationIds.isEmpty && sphereThreads.isEmpty
+      body: Column(
+        children: [
+          SizedBox(
+            height: 48,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              children: [
+                for (final f in const [('all', 'All'), ('unread', 'Unread'), ('people', 'People'), ('spheres', 'Spheres')])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      label: Text(f.$2),
+                      selected: _filter == f.$1,
+                      onSelected: (_) => setState(() => _filter = f.$1),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ActionChip(
+                    avatar: const Icon(Icons.star_outline, size: 16),
+                    label: const Text('Starred'),
+                    onPressed: () => context.push('/starred'),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ActionChip(
+                    avatar: const Icon(Icons.call_outlined, size: 16),
+                    label: const Text('Calls'),
+                    onPressed: () => context.push('/calls'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(child: _list(context, theme, conversationIds, sphereThreads, archivedCount,
+              chatService, contactService, library, spheres, sphereChat)),
+        ],
+      ),
+    );
+  }
+
+  Widget _list(
+    BuildContext context,
+    ThemeData theme,
+    List<String> conversationIds,
+    List<String> sphereThreads,
+    int archivedCount,
+    ChatService chatService,
+    ContactService contactService,
+    LibraryService library,
+    SphereService spheres,
+    SphereChatService sphereChat,
+  ) {
+    final conversations = chatService.conversations;
+    return conversationIds.isEmpty && sphereThreads.isEmpty
           ? _buildEmptyState(theme)
           : ListView.builder(
-              itemCount: sphereThreads.length + conversationIds.length,
+              itemCount: sphereThreads.length +
+                  conversationIds.length +
+                  (archivedCount > 0 ? 1 : 0),
               itemBuilder: (context, index) {
+                if (index == sphereThreads.length + conversationIds.length) {
+                  return ListTile(
+                    leading: Icon(Icons.archive_outlined,
+                        color: theme.colorScheme.onSurfaceVariant),
+                    title: Text(_showArchived
+                        ? 'Hide archived chats'
+                        : 'Archived ($archivedCount)'),
+                    onTap: () => setState(() => _showArchived = !_showArchived),
+                  );
+                }
                 if (index < sphereThreads.length) {
                   return _sphereTile(
                     context,
@@ -73,6 +158,7 @@ class ChatListScreen extends StatelessWidget {
                 return ListTile(
                   leading: UserAvatar(
                     displayName: displayName,
+                    imageRef: contact?.avatarRef,
                     size: AvatarSize.medium,
                   ),
                   title: Row(
@@ -108,19 +194,40 @@ class ChatListScreen extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                  trailing: lastMessage != null
-                      ? Text(
-                          _formatTime(lastMessage.timestamp),
-                          style: theme.textTheme.bodySmall,
-                        )
-                      : null,
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (lastMessage != null)
+                        Text(_formatTime(lastMessage.timestamp), style: theme.textTheme.bodySmall),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (library.isChatLocked(contactKey))
+                            Icon(Icons.lock_outline, size: 14, color: theme.colorScheme.outline),
+                          if (chatService.unreadCount(contactKey) > 0) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text('${chatService.unreadCount(contactKey)}',
+                                  style: TextStyle(
+                                      color: theme.colorScheme.onPrimary, fontSize: 11)),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
                   onTap: () => context.push('/chat/$contactKey'),
                   onLongPress: () =>
                       _showChatActions(context, library, contactKey, pinned),
                 );
               },
-            ),
-    );
+            );
   }
 
   Widget _sphereTile(
@@ -188,6 +295,19 @@ class ChatListScreen extends StatelessWidget {
               onTap: () {
                 Navigator.pop(sheetContext);
                 library.togglePin(contactKey);
+              },
+            ),
+            ListTile(
+              leading: Icon(library.isChatArchived(contactKey)
+                  ? Icons.unarchive_outlined
+                  : Icons.archive_outlined),
+              title: Text(library.isChatArchived(contactKey)
+                  ? 'Unarchive chat'
+                  : 'Archive chat'),
+              subtitle: const Text('Out of the list; nothing is deleted'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                library.toggleArchiveChat(contactKey);
               },
             ),
           ],

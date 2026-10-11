@@ -7,8 +7,11 @@ import 'services/debug_log_service.dart';
 import 'services/feed_service.dart';
 import 'services/identity_service.dart';
 import 'services/library_service.dart';
+import 'services/media_service.dart';
+import 'services/location_provider.dart';
 import 'services/sphere_migration.dart';
 import 'dart:async';
+import 'dart:convert';
 
 import 'services/sphere_chat_service.dart';
 import 'services/sphere_sync_service.dart';
@@ -54,12 +57,18 @@ Future<void> wireIdentity({
     return;
   }
 
-  sessionManager.configure(
+  await sessionManager.configure(
     keyExchangeKeyPair: exchangeKeyPair,
     identityKey: publicKey,
     identitySecret: secretKey,
   );
   await sessionManager.load();
+
+  // Every device of everyone we seal to: contacts from their signed lists,
+  // ourselves from our own. One session per pair of devices.
+  sessionManager.deviceResolver = (identityKey) => identityKey == publicKey
+      ? identityService.deviceExchangeKeys
+      : contactService.devicesOf(identityKey);
 
   contactService.setMyInfo(
     publicKey,
@@ -67,6 +76,7 @@ Future<void> wireIdentity({
     exchangeKey: identityService.exchangePublicKey,
     secretKey: secretKey,
   );
+  contactService.myDevices = () => identityService.deviceList?.toJson();
 
   // Republish every launch. This was only done at onboarding, so an identity
   // created before prekeys existed — or one whose first publish failed because
@@ -84,6 +94,91 @@ Future<void> wireIdentity({
   );
   outboxService.start();
   await outboxService.pruneCompleted();
+
+  // Names for notifications. A key is never shown to the user.
+  String nameFor(String key) {
+    final contact = contactService.getContact(key);
+    if (contact != null) return contact.displayName;
+    return 'Someone in your spheres';
+  }
+  chatService.resolveName = nameFor;
+  chatService.positionProvider = GeoLocationProvider.current;
+  sphereChatService.resolveName = nameFor;
+  feedService.resolveName = nameFor;
+
+  // Federation: a contact on another relay is sent to there. Channel keys on
+  // the chat, feed and call channels are contact keys; anything else (device
+  // pairing) resolves to null and stays on our relay.
+  RelayHub.instance.peerHostResolver = contactService.relayHostFor;
+
+  // Devices. A new signed list from a contact updates their entry; one from
+  // our own other device updates ours. Changes we make here are published and
+  // announced, and the channels to our own devices follow the list.
+  chatService.onDeviceList = (from, json) async {
+    if (from == publicKey) {
+      await identityService.adoptDeviceList(json);
+    } else {
+      await contactService.applyDeviceList(from, json);
+    }
+  };
+  chatService.onContactSync = contactService.applyContactSync;
+  chatService.onProfile = contactService.applyProfile;
+  contactService.materialiseMedia = MediaService.decodeAndSaveImage;
+  // Our profile goes to contacts as a sealed message, never to the public
+  // bundle. The avatar travels as an encrypted blob like any photo.
+  identityService.onProfileChanged = (profile) async {
+    String? avatar;
+    final local = profile.avatarRef;
+    if (local != null && local.isNotEmpty) {
+      try {
+        avatar = await MediaService.prepareForRelay(local);
+      } catch (_) {}
+    }
+    await chatService.broadcastProfile({
+      'name': profile.displayName,
+      'bio': profile.bio,
+      if (avatar != null) 'avatar': avatar,
+      if (profile.birthday != null) 'birthday': profile.birthday,
+    });
+  };
+  // Invite links: a request lands in our inbox; approving makes them a
+  // contact and a member in one step.
+  contactService.onJoinRequest = ({required sphereId, required token, required requester}) =>
+      sphereService.recordJoinRequest(sphereId: sphereId, token: token, requester: requester);
+  sphereService.onBeforeApproveJoin = (requester) async {
+    final key = requester['publicKey'] as String;
+    await contactService.addContact(
+      key,
+      requester['name'] as String? ?? 'New member',
+      keyExchangePublicKey: requester['keyExchangePublicKey'] as String?,
+      relayHost: requester['relay'] as String?,
+      announce: false,
+    );
+    if (requester['devices'] != null) {
+      await contactService.applyDeviceList(key, requester['devices']);
+    }
+    await contactService.acceptSilently(key);
+  };
+  feedService.hidesText = libraryService.hidesText;
+  sphereChatService.hidesText = libraryService.hidesText;
+  feedService.membersOf = (sphereId) =>
+      sphereService.sphere(sphereId)?.members.map((m) => m.identityKey).toList() ?? const [];
+  callService.onGroupCallStarted = (groupId, members, type) async {
+    try {
+      await sphereChatService.sendMessage(groupId, 'Started a ${type.name} call',
+          kind: 'call', payload: {'group_id': groupId, 'type': type.name});
+    } catch (_) {}
+  };
+  await callService.loadLog();
+  chatService.onUnknownDevice = contactService.refreshBundle;
+  contactService.onContactsChanged =
+      (op) => chatService.sendToOwnDevices('contacts', jsonEncode(op));
+  identityService.onDeviceListChanged = (list) {
+    unawaited(identityService.publishProfileToRelay(relayService));
+    unawaited(chatService.broadcastDeviceList(list.toJson()));
+    unawaited(chatService.connectOwnDevices());
+    unawaited(feedService.connectOwnDevices());
+  };
   callService.setMyInfo(publicKey, secretKey);
   callService.attachCrypto(sessionManager, contactService.exchangeKeyFor);
   await sphereService.load();
@@ -133,7 +228,7 @@ Future<void> wireIdentity({
   // Filling in what was missed. The archive keeps sealed envelopes so a member
   // can be handed content by a peer when the relay no longer has it.
   await sphereSyncService.load();
-  sphereSyncService.sendToPeer = feedService.sendSealedToMember;
+  sphereSyncService.sendToPeer = feedService.sendSealedToAllDevices;
   sphereSyncService.onRecovered = feedService.handleRecovered;
   feedService.archiveEnvelope = sphereSyncService.remember;
   feedService.onSyncDigest = sphereSyncService.handleDigest;
@@ -161,6 +256,10 @@ Future<void> wireIdentity({
         for (final s in sphereService.spheres)
           if (libraryService.isMuted(s.id)) s.id
       };
+  feedService.mutedMembers = libraryService.mutedMembersIn;
+  sphereChatService.mutedMembers = libraryService.mutedMembersIn;
+  sphereChatService.sendReadReceipts = () => chatService.sendReadReceipts;
+  Timer.periodic(const Duration(seconds: 30), (_) => sphereChatService.sweepExpired());
   feedService.onAlbumItem = albumService.handleSealedItem;
   // Album items leave the same way posts and group messages do: the feed's
   // per-member channels, through the durable queue, archived on the way out so
@@ -196,6 +295,8 @@ Future<void> wireIdentity({
   }
 
   contactService.onContactReady = wireContact;
+  await chatService.connectOwnDevices();
+  await feedService.connectOwnDevices();
 
   for (final contact in contactService.contacts) {
     if (contact.blocked) continue;

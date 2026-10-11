@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/sphere.dart';
 import '../../services/contact_service.dart';
+import '../../services/library_service.dart';
 import '../../services/sphere_service.dart';
 
 /// The spheres you belong to, and invitations waiting on you.
@@ -15,7 +16,10 @@ class SphereListScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final sphereService = context.watch<SphereService>();
-    final spheres = sphereService.spheres;
+    final library = context.watch<LibraryService>();
+    final all = sphereService.spheres;
+    final spheres = all.where((s) => !library.isSphereArchived(s.id)).toList();
+    final archived = all.where((s) => library.isSphereArchived(s.id)).toList();
     final invites = sphereService.invites;
 
     return Scaffold(
@@ -59,6 +63,10 @@ class SphereListScreen extends StatelessWidget {
           else ...[
             if (spheres.isNotEmpty) _Header(title: 'Your spheres'),
             ...spheres.map((sphere) => _SphereTile(sphere: sphere)),
+            if (archived.isNotEmpty) ...[
+              _Header(title: 'Archived'),
+              ...archived.map((sphere) => _SphereTile(sphere: sphere)),
+            ],
           ],
         ],
       ),
@@ -110,6 +118,24 @@ class _SphereTile extends StatelessWidget {
       ),
       trailing: canPost ? null : Icon(Icons.hourglass_empty, size: 18, color: cs.outline),
       onTap: () => context.push('/sphere/${sphere.id}'),
+      onLongPress: () {
+        final library = context.read<LibraryService>();
+        final archived = library.isSphereArchived(sphere.id);
+        showModalBottomSheet<void>(
+          context: context,
+          builder: (sheet) => SafeArea(
+            child: ListTile(
+              leading: Icon(archived ? Icons.unarchive_outlined : Icons.archive_outlined),
+              title: Text(archived ? 'Unarchive sphere' : 'Archive sphere'),
+              subtitle: const Text('Hidden from the main list; you stay a member'),
+              onTap: () {
+                Navigator.pop(sheet);
+                library.toggleArchiveSphere(sphere.id);
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 

@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'media_provenance.dart';
 
 /// A social feed post authored by a peer.
 class Post with EquatableMixin {
@@ -39,6 +40,26 @@ class Post with EquatableMixin {
   /// who else is watching.
   final List<String> viewedBy;
 
+  /// 'post' (default), 'event', 'poll'. Structured content in [payload]:
+  /// events carry title, starts_at, ends_at, place and rsvps; polls carry
+  /// question, options, multiple, anonymous and votes; stories may carry an
+  /// overlay caption and a sticker.
+  final String kind;
+  final Map<String, dynamic>? payload;
+
+  /// One description per entry of [mediaRefs], for screen readers. Empty
+  /// strings where none was given.
+  final List<String> altTexts;
+
+  /// What the sender's device could tell about each media item's origin, one
+  /// entry per [mediaRefs] entry (null where nothing was assessed).
+  final List<MediaProvenance?> provenance;
+
+  /// People named as co-authors, and those who have confirmed it. Only the
+  /// confirmed ones are shown as authors.
+  final List<String> coAuthors;
+  final List<String> acceptedCoAuthors;
+
   // Not const: sphereIds defaults to a set built from sphereId.
   Post({
     required this.id,
@@ -56,7 +77,16 @@ class Post with EquatableMixin {
     this.isStory = false,
     this.expiresAt,
     this.viewedBy = const [],
+    this.kind = 'post',
+    this.payload,
+    this.altTexts = const [],
+    this.provenance = const [],
+    this.coAuthors = const [],
+    this.acceptedCoAuthors = const [],
   }) : sphereIds = sphereIds ?? {sphereId};
+
+  bool get isEvent => kind == 'event';
+  bool get isPoll => kind == 'poll';
 
   factory Post.fromJson(Map<String, dynamic> json) {
     return Post(
@@ -96,6 +126,13 @@ class Post with EquatableMixin {
       expiresAt: json['expiresAt'] != null
           ? DateTime.parse(json['expiresAt'] as String)
           : null,
+      kind: json['kind'] as String? ?? 'post',
+      payload: (json['payload'] as Map?)?.cast<String, dynamic>(),
+      altTexts: (json['altTexts'] as List<dynamic>?)?.cast<String>() ?? const [],
+      provenance: MediaProvenance.listFromJson(json['provenance']),
+      coAuthors: (json['coAuthors'] as List<dynamic>?)?.cast<String>() ?? const [],
+      acceptedCoAuthors:
+          (json['acceptedCoAuthors'] as List<dynamic>?)?.cast<String>() ?? const [],
     );
   }
 
@@ -116,6 +153,13 @@ class Post with EquatableMixin {
       'viewedBy': viewedBy,
       'isStory': isStory,
       'expiresAt': expiresAt?.toIso8601String(),
+      if (kind != 'post') 'kind': kind,
+      if (payload != null) 'payload': payload,
+      if (altTexts.isNotEmpty) 'altTexts': altTexts,
+      if (MediaProvenance.listToJson(provenance) != null)
+        'provenance': MediaProvenance.listToJson(provenance),
+      if (coAuthors.isNotEmpty) 'coAuthors': coAuthors,
+      if (acceptedCoAuthors.isNotEmpty) 'acceptedCoAuthors': acceptedCoAuthors,
     };
   }
 
@@ -147,6 +191,12 @@ class Post with EquatableMixin {
     List<String>? viewedBy,
     bool? isStory,
     DateTime? expiresAt,
+    String? kind,
+    Map<String, dynamic>? payload,
+    List<String>? altTexts,
+    List<MediaProvenance?>? provenance,
+    List<String>? coAuthors,
+    List<String>? acceptedCoAuthors,
   }) {
     return Post(
       id: id ?? this.id,
@@ -164,6 +214,12 @@ class Post with EquatableMixin {
       viewedBy: viewedBy ?? this.viewedBy,
       isStory: isStory ?? this.isStory,
       expiresAt: expiresAt ?? this.expiresAt,
+      kind: kind ?? this.kind,
+      payload: payload ?? this.payload,
+      altTexts: altTexts ?? this.altTexts,
+      provenance: provenance ?? this.provenance,
+      coAuthors: coAuthors ?? this.coAuthors,
+      acceptedCoAuthors: acceptedCoAuthors ?? this.acceptedCoAuthors,
     );
   }
 
@@ -184,6 +240,12 @@ class Post with EquatableMixin {
         viewedBy,
         isStory,
         expiresAt,
+        kind,
+        payload,
+        altTexts,
+        provenance,
+        coAuthors,
+        acceptedCoAuthors,
       ];
 }
 

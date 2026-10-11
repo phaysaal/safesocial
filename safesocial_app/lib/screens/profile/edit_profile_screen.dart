@@ -20,10 +20,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final _nameController = TextEditingController();
   final _bioController = TextEditingController();
   bool _isSaving = false;
+  String? _birthday;
 
   @override
   void initState() {
     super.initState();
+    _birthday = context.read<IdentityService>().currentIdentity?.birthday;
     final profile = context.read<IdentityService>().currentIdentity;
     _nameController.text = profile?.displayName ?? '';
     _bioController.text = profile?.bio ?? '';
@@ -46,6 +48,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       await idService.updateProfile(
         displayName: name,
         bio: _bioController.text.trim(),
+        birthday: _birthday,
       );
       
       // Sync to relay
@@ -145,6 +148,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               maxLines: 3,
               textCapitalization: TextCapitalization.sentences,
+            ),
+            const SizedBox(height: 20),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.cake_outlined),
+              title: Text(_birthday == null ? 'Birthday (optional)' : 'Birthday · ${_birthday!}'),
+              subtitle: const Text('Shared with your contacts only, so they get a reminder. Year is not stored.'),
+              trailing: _birthday == null
+                  ? null
+                  : IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => _birthday = null)),
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime(2000, 6, 15),
+                  firstDate: DateTime(1900),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) {
+                  setState(() => _birthday =
+                      '${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}');
+                }
+              },
             ),
           ],
         ),

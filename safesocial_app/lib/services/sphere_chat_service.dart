@@ -3,9 +3,14 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../crypto/blob.dart';
+import '../models/media_provenance.dart';
 import '../models/message.dart';
 import '../models/sphere.dart';
+import 'chat_service.dart';
 import 'debug_log_service.dart';
+import 'media_service.dart';
+import 'inbound_events.dart';
 import 'secure_store.dart';
 import 'sphere_service.dart';
 
@@ -65,12 +70,28 @@ class SphereChatService extends ChangeNotifier {
   /// unread while the user is looking at them.
   String? _openThread;
 
+  /// Display name for an identity key, for notifications. Set by the app.
+  String Function(String identityKey)? resolveName;
+
   void configure({required String identityKey}) {
     _myIdentityKey = identityKey;
   }
 
-  List<Message> messagesIn(String sphereId) =>
-      List.unmodifiable(_threads[sphereId] ?? const <Message>[]);
+  /// Members muted within a sphere, by sphere id. Set by the app.
+  Set<String> Function(String sphereId)? mutedMembers;
+
+  /// The user's hidden-words filter. Set by the app.
+  bool Function(String text)? hidesText;
+
+  List<Message> messagesIn(String sphereId) {
+    final thread = _threads[sphereId] ?? const <Message>[];
+    final muted = mutedMembers?.call(sphereId) ?? const <String>{};
+    final filter = hidesText;
+    if (muted.isEmpty && filter == null) return List.unmodifiable(thread);
+    return List.unmodifiable(thread.where((m) =>
+        !muted.contains(m.senderId) &&
+        (m.senderId == _myIdentityKey || !(filter?.call(m.content) ?? false))));
+  }
 
   /// Spheres with at least one message, most recently active first.
   List<String> get activeThreads {
@@ -107,6 +128,12 @@ class SphereChatService extends ChangeNotifier {
     String sphereId,
     String content, {
     String? replyToMessageId,
+    List<String> mentions = const [],
+    String kind = 'text',
+    Map<String, dynamic>? payload,
+    bool forwarded = false,
+    List<String> mediaRefs = const [],
+    List<MediaProvenance?>? provenance,
   }) async {
     final me = _myIdentityKey;
     if (me == null) throw StateError('No identity yet');
@@ -117,6 +144,24 @@ class SphereChatService extends ChangeNotifier {
       throw StateError('Only admins post in this sphere');
     }
 
+    // Local files become encrypted blobs before the message exists, so a
+    // forwarded photo reaches the sphere as media and not as a path into the
+    // sender's sandbox. A reference that is already a blob passes through.
+    final claims = provenance ?? MediaService.provenanceListFor(mediaRefs);
+    final encodedRefs = <String>[];
+    final encodedClaims = <MediaProvenance?>[];
+    for (var i = 0; i < mediaRefs.length; i++) {
+      final ref = mediaRefs[i];
+      final data = BlobRef.tryDecode(ref) != null
+          ? ref
+          : await MediaService.prepareForRelay(ref,
+              videoLimit: MediaService.chatVideoLimit);
+      if (data == null) continue;
+      encodedRefs.add(data);
+      encodedClaims.add(MediaProvenance.at(claims, i));
+    }
+
+    final ttl = disappearAfter(sphereId);
     final message = Message(
       id: _uuid.v4(),
       senderId: me,
@@ -124,6 +169,13 @@ class SphereChatService extends ChangeNotifier {
       content: content,
       timestamp: DateTime.now(),
       replyToMessageId: replyToMessageId,
+      mentions: mentions.where(sphere.contains).toList(),
+      kind: kind,
+      payload: payload,
+      forwarded: forwarded,
+      mediaRefs: encodedRefs,
+      provenance: encodedClaims,
+      expiresAt: ttl == null ? null : DateTime.now().add(ttl),
     );
 
     // Sealed before it is shown, so a sphere we cannot encrypt for never looks
@@ -140,6 +192,206 @@ class SphereChatService extends ChangeNotifier {
 
     await _fanOut(sphere, sealed, message.id);
     return message;
+  }
+
+  // ── Edits, unsends, pins, timers, votes, reads ────────────────────────────
+
+  static const _settingsKey = 'spheres_sphere_chat_settings_v1';
+  static const _pinsKey = 'spheres_sphere_chat_pins_v1';
+  static const Duration editWindow = Duration(minutes: 15);
+
+  final Map<String, int> _disappear = {};
+  final Map<String, String> _pins = {};
+  final Set<String> _readSent = {};
+
+  /// Read receipts in a group fan out to every member; reuses the direct-chat
+  /// preference so there is one switch for "do I say what I have read".
+  bool Function()? sendReadReceipts;
+
+  Duration? disappearAfter(String sphereId) {
+    final seconds = _disappear[sphereId];
+    return seconds == null || seconds <= 0 ? null : Duration(seconds: seconds);
+  }
+
+  String? pinnedMessageId(String sphereId) => _pins[sphereId];
+
+  Message? _find(String sphereId, String messageId) {
+    for (final m in _threads[sphereId] ?? const <Message>[]) {
+      if (m.id == messageId) return m;
+    }
+    return null;
+  }
+
+  Future<void> _replace(String sphereId, Message updated) async {
+    final list = _threads[sphereId];
+    if (list == null) return;
+    final index = list.indexWhere((m) => m.id == updated.id);
+    if (index == -1) return;
+    list[index] = updated;
+    await _persist(sphereId);
+    notifyListeners();
+  }
+
+  /// Seal and fan out a control payload about this sphere's conversation.
+  Future<void> _control(String sphereId, String type, Map<String, dynamic> body) async {
+    final sphere = _spheres.sphere(sphereId);
+    if (sphere == null) return;
+    final sealed = await _spheres.sealContent(
+      sphereId: sphereId,
+      type: 'sphere_content',
+      plaintext: jsonEncode({'type': type, ...body}),
+    );
+    await _fanOut(sphere, sealed, '$type:${_uuid.v4()}');
+  }
+
+  Future<void> editMessage(String sphereId, String messageId, String text) async {
+    final msg = _find(sphereId, messageId);
+    if (msg == null || msg.senderId != _myIdentityKey) {
+      throw StateError('Only your own messages can be edited');
+    }
+    if (DateTime.now().difference(msg.timestamp) > editWindow) {
+      throw StateError('Messages can be edited for ${editWindow.inMinutes} minutes after sending');
+    }
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || trimmed == msg.content) return;
+    final at = DateTime.now();
+    await _replace(sphereId, msg.copyWith(content: trimmed, editedAt: at));
+    await _control(sphereId, 'sphere_msg_edit',
+        {'message_id': messageId, 'content': trimmed, 'edited_at': at.toIso8601String()});
+  }
+
+  Future<void> deleteForEveryone(String sphereId, String messageId) async {
+    final msg = _find(sphereId, messageId);
+    final me = _myIdentityKey;
+    final sphere = _spheres.sphere(sphereId);
+    if (msg == null || me == null || sphere == null) return;
+    // Authors unsend their own; admins may remove anything, as moderation.
+    if (msg.senderId != me && !sphere.isAdmin(me)) {
+      throw StateError('Only the author or an admin can remove this');
+    }
+    await _replace(sphereId, _tombstone(msg));
+    await _control(sphereId, 'sphere_msg_delete', {'message_id': messageId});
+  }
+
+  Message _tombstone(Message m) => Message(
+        id: m.id,
+        senderId: m.senderId,
+        recipientId: m.recipientId,
+        content: '',
+        timestamp: m.timestamp,
+        deletedAt: DateTime.now(),
+        replyToMessageId: m.replyToMessageId,
+        readBy: m.readBy,
+      );
+
+  Future<void> pinMessage(String sphereId, String? messageId) async {
+    final me = _myIdentityKey;
+    final sphere = _spheres.sphere(sphereId);
+    if (me == null || sphere == null) return;
+    if (!sphere.isAdmin(me)) throw StateError('Only an admin can pin here');
+    await _applyPin(sphereId, messageId);
+    await _control(sphereId, 'sphere_msg_pin', {'message_id': messageId});
+  }
+
+  Future<void> _applyPin(String sphereId, String? messageId) async {
+    if (messageId == null) {
+      _pins.remove(sphereId);
+    } else {
+      _pins[sphereId] = messageId;
+    }
+    await SecureStore.instance.setString(_pinsKey, jsonEncode(_pins));
+    notifyListeners();
+  }
+
+  Future<void> setDisappearing(String sphereId, Duration? after) async {
+    final me = _myIdentityKey;
+    final sphere = _spheres.sphere(sphereId);
+    if (me == null || sphere == null) return;
+    if (!sphere.isAdmin(me)) throw StateError('Only an admin can change the timer');
+    final seconds = after?.inSeconds ?? 0;
+    await _applyDisappearing(sphereId, seconds, by: me);
+    await _control(sphereId, 'sphere_msg_settings', {'disappear_seconds': seconds});
+  }
+
+  Future<void> _applyDisappearing(String sphereId, int seconds, {required String by}) async {
+    if ((_disappear[sphereId] ?? 0) == seconds) return;
+    if (seconds <= 0) {
+      _disappear.remove(sphereId);
+    } else {
+      _disappear[sphereId] = seconds;
+    }
+    await SecureStore.instance.setString(_settingsKey, jsonEncode(_disappear));
+    final who = by == _myIdentityKey ? 'You' : (resolveName?.call(by) ?? 'An admin');
+    _append(sphereId, Message(
+      id: _uuid.v4(),
+      senderId: by,
+      recipientId: sphereId,
+      content: seconds <= 0
+          ? '$who turned off disappearing messages.'
+          : '$who set messages to disappear after ${ChatService.describeDuration(Duration(seconds: seconds))}.',
+      timestamp: DateTime.now(),
+      kind: 'system',
+    ));
+    await _persist(sphereId);
+    notifyListeners();
+  }
+
+  Future<Message> sendPoll(String sphereId, String question, List<String> options,
+          {bool multiple = false, bool anonymous = false}) =>
+      sendMessage(sphereId, question, kind: 'poll', payload: {
+        'question': question,
+        'options': options,
+        'multiple': multiple,
+        'anonymous': anonymous,
+        'votes': <String, dynamic>{},
+      });
+
+  Future<void> votePoll(String sphereId, String messageId, List<int> choices) async {
+    final msg = _find(sphereId, messageId);
+    final me = _myIdentityKey;
+    if (msg == null || me == null || !msg.isPoll) return;
+    await _applyVote(sphereId, msg, me, choices);
+    await _control(sphereId, 'sphere_msg_vote', {'message_id': messageId, 'choices': choices});
+  }
+
+  Future<void> _applyVote(String sphereId, Message poll, String voter, List<int> choices) async {
+    final payload = Map<String, dynamic>.from(poll.payload ?? {});
+    final count = (payload['options'] as List?)?.length ?? 0;
+    var valid = choices.where((c) => c >= 0 && c < count).toSet().toList()..sort();
+    if (payload['multiple'] != true && valid.length > 1) valid = [valid.first];
+    final votes = Map<String, dynamic>.from(payload['votes'] as Map? ?? {});
+    final key = payload['anonymous'] == true ? ChatService.voterHash(voter, poll.id) : voter;
+    if (valid.isEmpty) {
+      votes.remove(key);
+    } else {
+      votes[key] = valid;
+    }
+    payload['votes'] = votes;
+    await _replace(sphereId, poll.copyWith(payload: payload));
+  }
+
+  /// The thread is on screen: tell the sphere what we have read.
+  Future<void> markRead(String sphereId) async {
+    if (!(sendReadReceipts?.call() ?? true)) return;
+    final unread = (_threads[sphereId] ?? const <Message>[])
+        .where((m) => m.senderId != _myIdentityKey && !m.isSystem && !_readSent.contains(m.id))
+        .map((m) => m.id)
+        .toList();
+    if (unread.isEmpty) return;
+    _readSent.addAll(unread);
+    try {
+      await _control(sphereId, 'sphere_msg_read', {'ids': unread});
+    } catch (_) {}
+  }
+
+  /// Drop messages whose time is up.
+  Future<void> sweepExpired() async {
+    for (final entry in _threads.entries) {
+      final before = entry.value.length;
+      entry.value.removeWhere((m) => m.isExpired);
+      if (entry.value.length != before) await _persist(entry.key);
+    }
+    notifyListeners();
   }
 
   Future<void> _fanOut(Sphere sphere, String sealed, String messageId) async {
@@ -176,8 +428,14 @@ class SphereChatService extends ChangeNotifier {
     String sphereId,
     Map<String, dynamic> payload,
   ) async {
+    final type = payload['type'];
+    if (type != 'sphere_msg') {
+      await _handleControl(authorId, sphereId, type as String? ?? '', payload);
+      return;
+    }
     try {
       final message = Message.fromJson(payload['message'] as Map<String, dynamic>);
+      if (message.isExpired) return;
 
       if (message.senderId != authorId || message.recipientId != sphereId) {
         DebugLogService().warn('SphereChat',
@@ -201,8 +459,71 @@ class SphereChatService extends ChangeNotifier {
       }
       await _persist(sphereId);
       notifyListeners();
+      if (authorId != _myIdentityKey) {
+        final who = resolveName?.call(authorId) ?? 'Someone';
+        final mentioned = message.mentions.contains(_myIdentityKey);
+        InboundEvents.emit(InboundEvent(
+          kind: InboundKind.sphereChat,
+          id: 'sphere-msg:${message.id}',
+          title: mentioned ? '${sphere.name} · mentioned you' : sphere.name,
+          body: '$who: ${ChatService.describeMessage(message)}',
+          route: '/sphere/$sphereId/chat',
+          thread: 'sphere:$sphereId',
+        ));
+      }
     } catch (e) {
       DebugLogService().error('SphereChat', 'Could not apply a message: $e');
+    }
+  }
+
+  Future<void> _handleControl(
+      String from, String sphereId, String type, Map<String, dynamic> payload) async {
+    final sphere = _spheres.sphere(sphereId);
+    if (sphere == null) return;
+    try {
+      switch (type) {
+        case 'sphere_msg_edit':
+          final msg = _find(sphereId, payload['message_id'] as String? ?? '');
+          if (msg == null || msg.senderId != from) return;
+          final at = DateTime.tryParse(payload['edited_at'] as String? ?? '') ?? DateTime.now();
+          await _replace(sphereId, msg.copyWith(content: payload['content'] as String? ?? msg.content, editedAt: at));
+        case 'sphere_msg_delete':
+          final msg = _find(sphereId, payload['message_id'] as String? ?? '');
+          if (msg == null) return;
+          if (msg.senderId != from && !sphere.isAdmin(from)) return;
+          await _replace(sphereId, _tombstone(msg));
+        case 'sphere_msg_pin':
+          if (!sphere.isAdmin(from)) return;
+          await _applyPin(sphereId, payload['message_id'] as String?);
+        case 'sphere_msg_settings':
+          if (!sphere.isAdmin(from)) return;
+          final seconds = payload['disappear_seconds'];
+          if (seconds is int) await _applyDisappearing(sphereId, seconds, by: from);
+        case 'sphere_msg_vote':
+          final msg = _find(sphereId, payload['message_id'] as String? ?? '');
+          if (msg == null || !msg.isPoll) return;
+          final choices = (payload['choices'] as List?)?.whereType<int>().toList() ?? const [];
+          await _applyVote(sphereId, msg, from, choices);
+        case 'sphere_msg_read':
+          final ids = (payload['ids'] as List?)?.cast<String>() ?? const [];
+          final list = _threads[sphereId];
+          if (list == null) return;
+          var changed = false;
+          for (var i = 0; i < list.length; i++) {
+            if (ids.contains(list[i].id) && !list[i].readBy.contains(from)) {
+              list[i] = list[i].copyWith(readBy: [...list[i].readBy, from]);
+              changed = true;
+            }
+          }
+          if (changed) {
+            await _persist(sphereId);
+            notifyListeners();
+          }
+        default:
+          DebugLogService().warn('SphereChat', 'Unknown control $type');
+      }
+    } catch (e) {
+      DebugLogService().error('SphereChat', 'Could not apply $type: $e');
     }
   }
 
@@ -241,6 +562,21 @@ class SphereChatService extends ChangeNotifier {
   // ── Persistence ────────────────────────────────────────────────────────────
 
   Future<void> load() async {
+    try {
+      final store = SecureStore.instance;
+      final raw = await store.getString(_settingsKey);
+      if (raw != null) {
+        (jsonDecode(raw) as Map<String, dynamic>).forEach((k, v) {
+          if (v is int) _disappear[k] = v;
+        });
+      }
+      final pins = await store.getString(_pinsKey);
+      if (pins != null) {
+        (jsonDecode(pins) as Map<String, dynamic>).forEach((k, v) {
+          if (v is String) _pins[k] = v;
+        });
+      }
+    } catch (_) {}
     final store = SecureStore.instance;
     _known.addAll(await store.getStringList(_prefsIndexKey) ?? const []);
 

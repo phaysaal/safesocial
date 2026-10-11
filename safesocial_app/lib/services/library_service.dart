@@ -14,6 +14,16 @@ class LibraryService extends ChangeNotifier {
   static const _savedKey = 'spheres_saved_v1';
   static const _mutedKey = 'spheres_muted_spheres_v1';
   static const _pinnedKey = 'spheres_pinned_chats_v1';
+  static const _archivedChatsKey = 'spheres_archived_chats_v1';
+  static const _archivedSpheresKey = 'spheres_archived_spheres_v1';
+  static const _mutedMembersKey = 'spheres_muted_members_v1';
+  static const _starredKey = 'spheres_starred_v1';
+  static const _lockedKey = 'spheres_locked_chats_v1';
+  static const _appLockKey = 'spheres_app_lock';
+  static const _hiddenWordsKey = 'spheres_hidden_words_v1';
+  static const _memberNotesKey = 'spheres_member_notes_v1';
+  static const _stickersKey = 'spheres_stickers_v1';
+  static const _blurMediaKey = 'spheres_blur_media_v1';
 
   /// Collection name -> post ids. The default collection is always present so
   /// saving never requires choosing one first.
@@ -22,6 +32,12 @@ class LibraryService extends ChangeNotifier {
   final Map<String, List<String>> _collections = {defaultCollection: []};
   final Set<String> _mutedSpheres = {};
   final List<String> _pinnedChats = [];
+  final Set<String> _archivedChats = {};
+  final Set<String> _archivedSpheres = {};
+
+  /// Sphere id -> members whose content is hidden there, without removing
+  /// them. They are not told.
+  final Map<String, Set<String>> _mutedMembers = {};
 
   List<String> get collectionNames => _collections.keys.toList();
 
@@ -103,6 +119,158 @@ class LibraryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Blurred media ─────────────────────────────────────────────────────────
+
+  /// Chats (by contact key) and spheres (by id) whose pictures and videos are
+  /// shown blurred until tapped. Local only; nobody is told.
+  final Set<String> _blurMedia = {};
+
+  bool isMediaBlurred(String key) => _blurMedia.contains(key);
+
+  /// Whether any of [keys] (a post can reach us through several spheres) asks
+  /// for a blur.
+  bool blursAnyOf(Iterable<String> keys) => keys.any(_blurMedia.contains);
+
+  Future<void> toggleBlurMedia(String key) async {
+    if (!_blurMedia.remove(key)) _blurMedia.add(key);
+    await SecureStore.instance.setStringList(_blurMediaKey, _blurMedia.toList());
+    notifyListeners();
+  }
+
+  // ── Starred messages, locked chats ────────────────────────────────────────
+
+  /// Message ids the user starred, newest first, with the chat they live in.
+  final List<MapEntry<String, String>> _starred = [];
+  final Set<String> _lockedChats = {};
+  bool _appLock = false;
+
+  bool isStarred(String messageId) => _starred.any((e) => e.value == messageId);
+  List<MapEntry<String, String>> get starred => List.unmodifiable(_starred);
+
+  Future<void> toggleStar(String chatKey, String messageId) async {
+    if (!_starred.any((e) => e.value == messageId)) {
+      _starred.insert(0, MapEntry(chatKey, messageId));
+    } else {
+      _starred.removeWhere((e) => e.value == messageId);
+    }
+    await SecureStore.instance.setString(
+        _starredKey, jsonEncode(_starred.map((e) => [e.key, e.value]).toList()));
+    notifyListeners();
+  }
+
+  bool isChatLocked(String chatKey) => _lockedChats.contains(chatKey);
+  bool get appLock => _appLock;
+
+  Future<void> toggleChatLock(String chatKey) async {
+    if (!_lockedChats.remove(chatKey)) _lockedChats.add(chatKey);
+    await SecureStore.instance.setStringList(_lockedKey, _lockedChats.toList());
+    notifyListeners();
+  }
+
+  Future<void> setAppLock(bool on) async {
+    _appLock = on;
+    await SecureStore.instance.setBool(_appLockKey, on);
+    notifyListeners();
+  }
+
+  // ── Hidden words, member notes, stickers ──────────────────────────────────
+
+  /// Words and phrases that hide a post or message on this device. Matching is
+  /// case-insensitive and local; Meta runs the same feature on-device.
+  final List<String> _hiddenWords = [];
+  List<String> get hiddenWords => List.unmodifiable(_hiddenWords);
+
+  bool hidesText(String text) {
+    if (_hiddenWords.isEmpty || text.isEmpty) return false;
+    final lower = text.toLowerCase();
+    return _hiddenWords.any((w) => lower.contains(w));
+  }
+
+  Future<void> setHiddenWords(List<String> words) async {
+    _hiddenWords
+      ..clear()
+      ..addAll(words.map((w) => w.trim().toLowerCase()).where((w) => w.isNotEmpty).toSet());
+    await SecureStore.instance.setStringList(_hiddenWordsKey, _hiddenWords);
+    notifyListeners();
+  }
+
+  /// Private notes about a member of a sphere, for admins' own memory. Never
+  /// sent anywhere.
+  final Map<String, Map<String, String>> _memberNotes = {};
+
+  String? memberNote(String sphereId, String identityKey) => _memberNotes[sphereId]?[identityKey];
+
+  Future<void> setMemberNote(String sphereId, String identityKey, String note) async {
+    final notes = _memberNotes.putIfAbsent(sphereId, () => {});
+    if (note.trim().isEmpty) {
+      notes.remove(identityKey);
+    } else {
+      notes[identityKey] = note.trim();
+    }
+    if (notes.isEmpty) _memberNotes.remove(sphereId);
+    await SecureStore.instance.setString(_memberNotesKey, jsonEncode(_memberNotes));
+    notifyListeners();
+  }
+
+  /// Images saved as stickers, local paths. A sticker pack here is just the
+  /// images one keeps; sharing one is sending it.
+  final List<String> _stickers = [];
+  List<String> get stickers => List.unmodifiable(_stickers);
+
+  Future<void> addSticker(String path) async {
+    if (_stickers.contains(path)) return;
+    _stickers.insert(0, path);
+    await SecureStore.instance.setStringList(_stickersKey, _stickers);
+    notifyListeners();
+  }
+
+  Future<void> removeSticker(String path) async {
+    _stickers.remove(path);
+    await SecureStore.instance.setStringList(_stickersKey, _stickers);
+    notifyListeners();
+  }
+
+  // ── Archiving ─────────────────────────────────────────────────────────────
+
+  bool isChatArchived(String chatKey) => _archivedChats.contains(chatKey);
+  bool isSphereArchived(String sphereId) => _archivedSpheres.contains(sphereId);
+  int get archivedChatCount => _archivedChats.length;
+  int get archivedSphereCount => _archivedSpheres.length;
+
+  /// Archiving hides a chat from the main list without leaving it or deleting
+  /// anything. New messages still arrive; the chat just stays out of the way.
+  Future<void> toggleArchiveChat(String chatKey) async {
+    if (!_archivedChats.remove(chatKey)) _archivedChats.add(chatKey);
+    await SecureStore.instance.setStringList(_archivedChatsKey, _archivedChats.toList());
+    notifyListeners();
+  }
+
+  Future<void> toggleArchiveSphere(String sphereId) async {
+    if (!_archivedSpheres.remove(sphereId)) _archivedSpheres.add(sphereId);
+    await SecureStore.instance
+        .setStringList(_archivedSpheresKey, _archivedSpheres.toList());
+    notifyListeners();
+  }
+
+  // ── Muting one member in one sphere ───────────────────────────────────────
+
+  Set<String> mutedMembersIn(String sphereId) =>
+      _mutedMembers[sphereId] ?? const <String>{};
+
+  bool isMemberMuted(String sphereId, String identityKey) =>
+      mutedMembersIn(sphereId).contains(identityKey);
+
+  Future<void> toggleMuteMember(String sphereId, String identityKey) async {
+    final set = _mutedMembers.putIfAbsent(sphereId, () => {});
+    if (!set.remove(identityKey)) set.add(identityKey);
+    if (set.isEmpty) _mutedMembers.remove(sphereId);
+    await SecureStore.instance.setString(
+      _mutedMembersKey,
+      jsonEncode(_mutedMembers.map((k, v) => MapEntry(k, v.toList()))),
+    );
+    notifyListeners();
+  }
+
   // ── Pinning ───────────────────────────────────────────────────────────────
 
   Future<void> togglePin(String chatKey) async {
@@ -140,6 +308,39 @@ class LibraryService extends ChangeNotifier {
 
     _mutedSpheres.addAll(await store.getStringList(_mutedKey) ?? const []);
     _pinnedChats.addAll(await store.getStringList(_pinnedKey) ?? const []);
+    _archivedChats.addAll(await store.getStringList(_archivedChatsKey) ?? const []);
+    _archivedSpheres
+        .addAll(await store.getStringList(_archivedSpheresKey) ?? const []);
+    _hiddenWords.addAll(await store.getStringList(_hiddenWordsKey) ?? const []);
+    _stickers.addAll(await store.getStringList(_stickersKey) ?? const []);
+    final notesRaw = await store.getString(_memberNotesKey);
+    if (notesRaw != null) {
+      try {
+        (jsonDecode(notesRaw) as Map<String, dynamic>).forEach((sphere, notes) {
+          _memberNotes[sphere] = (notes as Map).cast<String, String>();
+        });
+      } catch (_) {}
+    }
+    _lockedChats.addAll(await store.getStringList(_lockedKey) ?? const []);
+    _blurMedia.addAll(await store.getStringList(_blurMediaKey) ?? const []);
+    _appLock = await store.getBool(_appLockKey) ?? false;
+    final starredRaw = await store.getString(_starredKey);
+    if (starredRaw != null) {
+      try {
+        for (final pair in jsonDecode(starredRaw) as List<dynamic>) {
+          _starred.add(MapEntry(pair[0] as String, pair[1] as String));
+        }
+      } catch (_) {}
+    }
+    final mutedRaw = await store.getString(_mutedMembersKey);
+    if (mutedRaw != null) {
+      try {
+        final decoded = jsonDecode(mutedRaw) as Map<String, dynamic>;
+        decoded.forEach((sphere, keys) {
+          _mutedMembers[sphere] = (keys as List<dynamic>).cast<String>().toSet();
+        });
+      } catch (_) {}
+    }
     notifyListeners();
   }
 

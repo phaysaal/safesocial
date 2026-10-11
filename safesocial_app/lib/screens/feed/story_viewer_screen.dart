@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -10,7 +11,10 @@ import '../../crypto/session_manager.dart';
 import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
+import '../../services/media_service.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/media_thumb.dart';
+import '../../widgets/post_extras.dart';
 
 /// Full-screen viewer for 24-hour ephemeral stories.
 class StoryViewerScreen extends StatefulWidget {
@@ -99,9 +103,10 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
       _currentIndex = index;
       _recordView(index);
     });
-    _animController.reset();
-    _animController.forward();
-    _recordView(_currentIndex);
+    _animController
+      ..duration = _storyDuration
+      ..reset()
+      ..forward();
   }
 
   @override
@@ -128,7 +133,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
               itemCount: widget.stories.length,
               itemBuilder: (context, index) {
                 final story = widget.stories[index];
-                return _buildStoryContent(story);
+                return _buildStoryContent(story, index);
               },
             ),
             _buildOverlays(),
@@ -138,14 +143,31 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
     );
   }
 
-  Widget _buildStoryContent(Post story) {
+  /// A video story runs for as long as the clip; everything else for the
+  /// default five seconds.
+  void _useVideoDuration(int index, Duration duration) {
+    if (!mounted || index != _currentIndex) return;
+    final clamped = duration < const Duration(seconds: 1)
+        ? _storyDuration
+        : (duration > const Duration(seconds: 60)
+            ? const Duration(seconds: 60)
+            : duration);
+    _animController
+      ..stop()
+      ..duration = clamped
+      ..reset()
+      ..forward();
+  }
+
+  Widget _buildStoryContent(Post story, int index) {
     return Stack(
       fit: StackFit.expand,
       children: [
         if (story.mediaRefs.isNotEmpty)
-          Image.file(
-            File(story.mediaRefs.first),
-            fit: BoxFit.cover,
+          _StoryMedia(
+            ref: story.mediaRefs.first,
+            active: index == _currentIndex,
+            onVideoDuration: (d) => _useVideoDuration(index, d),
           )
         else
           Container(
@@ -153,6 +175,29 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
             alignment: Alignment.center,
           ),
         
+        if (story.payload?['sticker'] is Map)
+          Align(
+            alignment: const Alignment(0, 0.45),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: StorySticker(
+                sticker: (story.payload!['sticker'] as Map).cast<String, dynamic>(),
+                onAnswer: story.authorId == context.read<IdentityService>().publicKey
+                    ? null
+                    : (answer) async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await context.read<ChatService>().sendMessage(
+                                story.authorId, answer, replyToStoryId: story.id);
+                          messenger.showSnackBar(
+                              const SnackBar(content: Text('Sent privately to the author')));
+                        } catch (e) {
+                          messenger.showSnackBar(SnackBar(content: Text('Could not send: $e')));
+                        }
+                      },
+              ),
+            ),
+          ),
         if (story.content.isNotEmpty)
           Align(
             alignment: Alignment.center,
@@ -399,5 +444,95 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
         ],
       ),
     );
+  }
+}
+
+/// The picture or clip behind a story.
+///
+/// A local image fills the screen; a local video plays while its page is the
+/// active one and reports its length so the progress bar matches; a blob that
+/// has not been fetched yet shows its inline thumbnail rather than nothing.
+class _StoryMedia extends StatefulWidget {
+  final String ref;
+  final bool active;
+  final void Function(Duration) onVideoDuration;
+
+  const _StoryMedia({
+    required this.ref,
+    required this.active,
+    required this.onVideoDuration,
+  });
+
+  @override
+  State<_StoryMedia> createState() => _StoryMediaState();
+}
+
+class _StoryMediaState extends State<_StoryMedia> {
+  VideoPlayerController? _video;
+
+  bool get _isLocalVideo =>
+      MediaService.looksLikeVideo(widget.ref) && File(widget.ref).existsSync();
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isLocalVideo) _start();
+  }
+
+  Future<void> _start() async {
+    final controller = VideoPlayerController.file(File(widget.ref));
+    try {
+      await controller.initialize();
+    } catch (_) {
+      await controller.dispose();
+      return;
+    }
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+    setState(() => _video = controller);
+    widget.onVideoDuration(controller.value.duration);
+    if (widget.active) await controller.play();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StoryMedia old) {
+    super.didUpdateWidget(old);
+    final v = _video;
+    if (v == null) return;
+    if (widget.active && !old.active) {
+      v.seekTo(Duration.zero);
+      v.play();
+      widget.onVideoDuration(v.value.duration);
+    } else if (!widget.active && old.active) {
+      v.pause();
+    }
+  }
+
+  @override
+  void dispose() {
+    _video?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _video;
+    if (v != null && v.value.isInitialized) {
+      return FittedBox(
+        fit: BoxFit.cover,
+        clipBehavior: Clip.hardEdge,
+        child: SizedBox(
+          width: v.value.size.width,
+          height: v.value.size.height,
+          child: VideoPlayer(v),
+        ),
+      );
+    }
+    if (!_isLocalVideo && File(widget.ref).existsSync()) {
+      return Image.file(File(widget.ref), fit: BoxFit.cover);
+    }
+    return MediaThumb(ref: widget.ref, fit: BoxFit.cover, showPlayBadge: false);
   }
 }

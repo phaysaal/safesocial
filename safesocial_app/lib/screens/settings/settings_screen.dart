@@ -16,6 +16,11 @@ import '../../services/sync_service.dart';
 import '../../services/backup_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
+import '../../services/inbound_events.dart';
+import '../../services/notification_service.dart';
+import '../../services/wake_service.dart';
+import '../../services/app_lock_service.dart';
+import '../../services/library_service.dart';
 import '../../services/theme_service.dart';
 
 /// Settings screen — privacy, appearance, identity, backup.
@@ -107,18 +112,40 @@ class SettingsScreen extends StatelessWidget {
           const Divider(indent: 56),
 
           // ── Identity ──────────────────────────────────
-          _SectionHeader(title: 'Identity & Multi-Device'),
+          _SectionHeader(title: 'Identity & Devices'),
+          if (identityService.thisDeviceRevoked)
+            ListTile(
+              leading: Icon(Icons.block, color: cs.error),
+              title: Text('This device was removed from your identity',
+                  style: TextStyle(color: cs.error)),
+              subtitle: const Text(
+                  'Another of your devices revoked it. Contacts no longer send '
+                  'here. Link it again from a device that still works, or reset.'),
+            ),
+          Builder(builder: (context) {
+            final list = context.watch<IdentityService>().deviceList;
+            final count = list?.devices.length ?? 1;
+            return ListTile(
+              leading: Icon(Icons.devices, color: cs.primary),
+              title: const Text('Your Devices'),
+              subtitle: Text(count == 1
+                  ? 'Only this device'
+                  : '$count devices share this identity'),
+              onTap: () => _showDevicesDialog(context),
+            );
+          }),
+          const Divider(indent: 56),
           ListTile(
-            leading: Icon(Icons.devices, color: cs.primary),
+            leading: Icon(Icons.add_to_home_screen, color: cs.primary),
             title: const Text('Link Another Device'),
-            subtitle: const Text('Copy this identity to a second device'),
+            subtitle: const Text('Add a phone or tablet; both work at once'),
             onTap: () => _showLinkDeviceDialog(context, context.read<SyncService>()),
           ),
           const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.qr_code_scanner, color: cs.primary),
-            title: const Text('Clone From Another Device'),
-            subtitle: const Text('Enter a pairing code from your first device'),
+            title: const Text('Join From Another Device'),
+            subtitle: const Text('Enter a pairing code shown on your first device'),
             onTap: () => _showCloneDialog(context, context.read<SyncService>()),
           ),
           const Divider(indent: 56),
@@ -182,6 +209,20 @@ class SettingsScreen extends StatelessWidget {
           }),
           const Divider(indent: 56),
 
+          // ── Notifications ──────────────────────────────
+          _SectionHeader(title: 'Notifications'),
+          Builder(builder: (context) {
+            final notifications = context.watch<NotificationService>();
+            final wake = context.watch<WakeService>();
+            return ListTile(
+              leading: Icon(Icons.notifications_outlined, color: cs.primary),
+              title: const Text('Notifications'),
+              subtitle: Text(_notificationSummary(notifications, wake)),
+              onTap: () => _showNotificationsDialog(context),
+            );
+          }),
+          const Divider(indent: 56),
+
           // ── Privacy & Security ──────────────────────────
           _SectionHeader(title: 'Privacy & Security'),
           Builder(builder: (context) {
@@ -227,6 +268,70 @@ class SettingsScreen extends StatelessWidget {
               isThreeLine: true,
               value: chat.sendTypingSignals,
               onChanged: chat.setSendTypingSignals,
+            );
+          }),
+          Builder(builder: (context) {
+            final chat = context.watch<ChatService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.done_all, color: cs.primary),
+              title: const Text('Read receipts'),
+              subtitle: const Text(
+                  'Tell senders when you have read their messages. Reciprocal: off '
+                  'means you do not see theirs either.'),
+              value: chat.sendReadReceipts,
+              onChanged: chat.setSendReadReceipts,
+            );
+          }),
+          Builder(builder: (context) {
+            final library = context.watch<LibraryService>();
+            return ListTile(
+              leading: Icon(Icons.visibility_off_outlined, color: cs.primary),
+              title: const Text('Hidden words'),
+              subtitle: Text(library.hiddenWords.isEmpty
+                  ? 'Hide posts and messages containing words you choose'
+                  : '${library.hiddenWords.length} word(s) hidden'),
+              onTap: () async {
+                final controller = TextEditingController(text: library.hiddenWords.join('\n'));
+                final text = await showDialog<String>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Hidden words'),
+                    content: TextField(
+                      controller: controller,
+                      maxLines: 6,
+                      decoration: const InputDecoration(
+                          helperText: 'One per line. Matched on this device only; nothing is deleted.'),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Save')),
+                    ],
+                  ),
+                );
+                if (text != null) await library.setHiddenWords(text.split('\n'));
+              },
+            );
+          }),
+          Builder(builder: (context) {
+            final library = context.watch<LibraryService>();
+            final lock = context.read<AppLockService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.fingerprint, color: cs.primary),
+              title: const Text('App lock'),
+              subtitle: const Text(
+                  'Ask for your fingerprint, face or PIN when Spheres comes back to the screen.'),
+              value: library.appLock,
+              onChanged: (v) async {
+                final messenger = ScaffoldMessenger.of(context);
+                if (!await lock.isAvailable) {
+                  messenger.showSnackBar(const SnackBar(
+                      content: Text('This device has no screen lock to check against.')));
+                  return;
+                }
+                if (!await lock.authenticate('Confirm to change the app lock')) return;
+                await library.setAppLock(v);
+              },
             );
           }),
           const Divider(indent: 56),
@@ -380,12 +485,21 @@ class SettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Both devices will share one identity. Using them at the same '
-                'time is not supported yet — messages can arrive out of order '
-                'or fail to decrypt. Treat this as moving to a new device, not '
-                'running two.',
+                'The new device gets its own encryption key, certified by your '
+                'identity, and a copy of your contacts, spheres and history. '
+                'Both devices then work at the same time. Contacts learn about '
+                'the new device automatically.',
                 style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic),
               ),
+              const SizedBox(height: 12),
+              Builder(builder: (ctx) {
+                final s = ctx.watch<SyncService>();
+                final line = s.lastResult ??
+                    (s.pendingDeviceName != null
+                        ? 'Linking ${s.pendingDeviceName}…'
+                        : 'Waiting for the other device…');
+                return Text(line, style: const TextStyle(fontSize: 12));
+              }),
             ],
           ),
         ),
@@ -402,6 +516,112 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _showDevicesDialog(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Consumer<IdentityService>(
+        builder: (ctx, identity, _) {
+          final list = identity.deviceList;
+          final devices = list?.devices ?? const [];
+          return AlertDialog(
+            title: const Text('Your Devices'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Each device has its own encryption key, certified by your '
+                    'identity. Removing one stops contacts sending to it. It '
+                    'keeps what it already has, and it still holds your identity '
+                    'key — if a device was stolen rather than retired, you need '
+                    'a new identity, not just a shorter list.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  if (devices.isEmpty)
+                    const Text('Only this device.'),
+                  for (final d in devices)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      leading: Icon(d.deviceId == identity.deviceId
+                          ? Icons.smartphone
+                          : Icons.devices_other),
+                      title: Text(d.name ?? 'Device ${d.deviceId.substring(0, 6)}'),
+                      subtitle: Text(
+                        '${d.deviceId == identity.deviceId ? 'This device · ' : ''}'
+                        'added ${DateTime.fromMillisecondsSinceEpoch(d.createdAtMs).toLocal().toString().substring(0, 10)}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (action) async {
+                          if (action == 'rename') {
+                            final name = await _askText(ctx, 'Name this device', d.name ?? '');
+                            if (name != null && name.isNotEmpty) {
+                              await identity.renameDevice(d.deviceId, name);
+                            }
+                          } else if (action == 'revoke') {
+                            final sure = await showDialog<bool>(
+                              context: ctx,
+                              builder: (c) => AlertDialog(
+                                title: const Text('Remove this device?'),
+                                content: const Text(
+                                    'Contacts stop sending to it. It keeps everything '
+                                    'it already has and still holds your identity key.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                                  FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Remove')),
+                                ],
+                              ),
+                            );
+                            if (sure != true) return;
+                            try {
+                              await identity.revokeDevice(d.deviceId);
+                              messenger.showSnackBar(const SnackBar(
+                                  content: Text('Device removed; contacts are being told')));
+                            } catch (e) {
+                              messenger.showSnackBar(SnackBar(content: Text('$e')));
+                            }
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                          if (d.deviceId != identity.deviceId)
+                            const PopupMenuItem(value: 'revoke', child: Text('Remove')),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<String?> _askText(BuildContext context, String title, String initial) {
+    final controller = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(title),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, controller.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showCloneDialog(BuildContext context, SyncService sync) async {
     final controller = TextEditingController();
     final messenger = ScaffoldMessenger.of(context);
@@ -409,13 +629,14 @@ class SettingsScreen extends StatelessWidget {
     final code = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Clone From Another Device'),
+        title: const Text('Join From Another Device'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'Enter the pairing code shown on your first device. This '
-              'replaces any identity already on this device.',
+              'Enter the pairing code shown on your first device. This device '
+              'becomes one of that identity\'s devices, with its own key, and '
+              'replaces any identity already here.',
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 16),
@@ -432,14 +653,15 @@ class SettingsScreen extends StatelessWidget {
               onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Clone'),
+            child: const Text('Join'),
           ),
         ],
       ),
     );
 
     if (code == null || code.isEmpty) return;
-    await sync.startSecondaryLinking(code);
+    await sync.startSecondaryLinking(code,
+        deviceName: 'New ${Theme.of(context).platform.name} device');
     messenger.showSnackBar(const SnackBar(
       content: Text('Waiting for the other device… keep both apps open.'),
     ));
@@ -504,6 +726,164 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
+  String _notificationSummary(NotificationService n, WakeService w) {
+    if (!n.enabled) return 'Off';
+    if (!w.enabled) return 'While the app is open only';
+    if (w.registeredCount > 0) {
+      return 'On · ${w.provider.name} wakes this device';
+    }
+    if (w.started) return 'On · waiting for ${w.provider.name}';
+    return 'On · background delivery not set up';
+  }
+
+  Future<void> _showNotificationsDialog(BuildContext context) async {
+    final wake = context.read<WakeService>();
+    final messenger = ScaffoldMessenger.of(context);
+    final provider = wake.provider;
+    final available = await provider.isAvailable;
+    final reason = available ? null : await provider.unavailableReason;
+    final distributors = provider is UnifiedPushWakeProvider
+        ? await provider.distributors()
+        : const <String>[];
+    if (!context.mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final n = ctx.watch<NotificationService>();
+          final w = ctx.watch<WakeService>();
+          return AlertDialog(
+            title: const Text('Notifications'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Every notification is built on this phone from content '
+                    'that was decrypted here. To be woken while the app is '
+                    'closed, the relay knocks on a push endpoint — the knock '
+                    'carries nothing, and whoever runs that endpoint learns '
+                    'only that this phone was woken, and when.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: n.enabled,
+                    title: const Text('Show notifications',
+                        style: TextStyle(fontSize: 14)),
+                    onChanged: (v) async {
+                      if (v) {
+                        final ok = await n.requestPermission();
+                        if (!ok) {
+                          messenger.showSnackBar(const SnackBar(
+                              content: Text(
+                                  'Notifications were not allowed by the system')));
+                        }
+                      }
+                      await n.setEnabled(v);
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: n.preview,
+                    title: const Text('Show message text',
+                        style: TextStyle(fontSize: 14)),
+                    subtitle: const Text(
+                        'Off shows only who it is from, not what they said',
+                        style: TextStyle(fontSize: 11)),
+                    onChanged: n.enabled ? (v) => n.setPreview(v) : null,
+                  ),
+                  for (final kind in InboundKind.values)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      value: n.allows(kind),
+                      title: Text(_kindLabel(kind),
+                          style: const TextStyle(fontSize: 13)),
+                      onChanged: n.enabled
+                          ? (v) => n.setAllowed(kind, v ?? false)
+                          : null,
+                    ),
+                  const Divider(),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: w.enabled,
+                    title: const Text('Wake for new mail',
+                        style: TextStyle(fontSize: 14)),
+                    subtitle: Text(
+                      available
+                          ? (w.registeredCount > 0
+                              ? '${provider.name}: ${w.registeredCount} mailbox(es) '
+                                  'registered with the relay'
+                              : '${provider.name} is available')
+                          : (reason ?? 'Not available on this device'),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    onChanged: available ? (v) => w.setEnabled(v) : null,
+                  ),
+                  if (provider is UnifiedPushWakeProvider &&
+                      distributors.length > 1) ...[
+                    const SizedBox(height: 4),
+                    const Text('Distributor', style: TextStyle(fontSize: 12)),
+                    for (final d in distributors)
+                      RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: d,
+                        groupValue: provider.distributor,
+                        title: Text(d, style: const TextStyle(fontSize: 12)),
+                        onChanged: (v) async {
+                          if (v == null) return;
+                          await provider.useDistributor(v);
+                          await w.start();
+                          setDialogState(() {});
+                        },
+                      ),
+                  ],
+                  if (w.lastError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'The relay refused the wake endpoint: ${w.lastError}',
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(ctx).colorScheme.error),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Close')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  static String _kindLabel(InboundKind kind) {
+    switch (kind) {
+      case InboundKind.chat:
+        return 'Direct messages';
+      case InboundKind.sphereChat:
+        return 'Sphere chats';
+      case InboundKind.post:
+        return 'New posts and stories';
+      case InboundKind.comment:
+        return 'Comments on your posts';
+      case InboundKind.contactRequest:
+        return 'Contact requests';
+      case InboundKind.call:
+        return 'Calls';
+      case InboundKind.security:
+        return 'Security notices (keys changed, new devices)';
+    }
+  }
+
   Future<void> _showCallServersDialog(
       BuildContext context, CallConfig config) async {
     final controller = TextEditingController();
@@ -524,9 +904,11 @@ class SettingsScreen extends StatelessWidget {
                   'the whole call when a direct connection is not possible, so '
                   'it sees both IPs and the timing and volume of the media — '
                   'the audio and video stay encrypted, the metadata does not.\n\n'
-                  'The default TURN is a free shared-credential public service, '
-                  'which means a third party is in that position unless you '
-                  'change it. Running your own coturn is the better setup.',
+                  'By default both come from whoever runs your relay: it issues '
+                  'short-lived TURN credentials for its own server, so no '
+                  'unaffiliated third party is in the path. If your relay has '
+                  'no TURN set up, calls fall back to public STUN only and '
+                  'connect only over a direct path.',
                   style: TextStyle(fontSize: 12),
                 ),
                 const SizedBox(height: 12),
@@ -724,7 +1106,7 @@ class SettingsScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'The backup holds your identity, contacts and posts. With a '
+              'The backup holds ${BackupService.coverageSummary} With a '
               'passphrase it is encrypted; leave it empty and the file '
               'contains your private key in readable form, so anyone who gets '
               'it becomes you.\n\n'
