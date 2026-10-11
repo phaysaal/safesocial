@@ -73,8 +73,11 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   classifier (nudity or AI-image detection; the origin score reads metadata only),
   communities as spheres of spheres, pending-post approval queues, story drawing.
 - **Still open:** a call between phones on different networks that cannot reach each
-  other directly (needs the operator TURN), background wakes (needs ntfy), an operator-run
-  coturn/ntfy/APNs, reproducible-build proof, external audit. See the plan's §13.
+  other directly (needs the operator TURN), an operator-run coturn/ntfy/APNs,
+  reproducible-build proof, external audit. See the plan's §13. Background wakes through
+  ntfy and restoring an encrypted backup from Settings both passed on hardware on
+  11 October 2026 (the phones used the public ntfy.sh server; the project server is
+  still to run).
 - Directory names: the app is `safesocial_app/`, the Dart package `spheres_app`, the
   product Spheres.
 
@@ -92,7 +95,8 @@ as a third party; two devices linked to one identity, a message from the third l
 both and a reply from either reaching the third and the sibling). Direct
 chat, media, offline delivery, spheres, posts and sphere chat worked; the first call
 crashed the receiver and a half-dead socket lost sphere messages, both fixed the same
-day. When a change touches the message path, say so in the commit and prefer changes
+day. A ntfy wake brought a stopped app back with a notification, and an encrypted
+backup restored from Settings (which had never asked for the passphrase; fixed). When a change touches the message path, say so in the commit and prefer changes
 that a test can cover. Emulator pairs cannot
 scan QR codes; debug builds print the invite link instead (see `identity_service.dart`).
 
@@ -102,7 +106,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 623 tests in 51 files under test/{crypto,models,screens,services}
+flutter test                       # 624 tests in 51 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

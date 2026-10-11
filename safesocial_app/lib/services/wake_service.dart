@@ -156,6 +156,8 @@ class WakeService extends ChangeNotifier {
     } else {
       _registered[instance] = target;
       lastError = null;
+      DebugLogService().success('Wake',
+          'Relay will knock on ${provider.name} for a mailbox (${_registered.length} registered)');
     }
     notifyListeners();
   }

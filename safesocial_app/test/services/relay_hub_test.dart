@@ -220,6 +220,42 @@ void main() {
     expect(sockets.current.ofType('sub').single['a'], a.id);
   });
 
+  test('a resting hub lets the socket go, keeps its subscriptions, and the '
+      'next wake brings it back', () async {
+    final chat = RelayService();
+    final a = await mailbox('a');
+    await chat.connectMailbox('alice', a);
+    await settle();
+    sockets.current.receive({'t': 'ok', 'a': a.id});
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(chat.isConnected('alice'), isTrue);
+
+    // The headless wake's window closed.
+    RelayHub.instance.rest();
+    await settle();
+    expect(sockets.current.closed, isTrue);
+    expect(RelayHub.instance.subscriptionCount, 1,
+        reason: 'resting is not leaving; the mailbox is still ours');
+    expect(chat.stateFor('alice'), RelayConnectionState.connecting);
+    expect(RelayHub.instance.debugRetryPending, isFalse,
+        reason: 'nothing may try to come back on its own');
+    expect(sockets.created.length, 1);
+
+    // The next wake checks the hub, which reconnects and resubscribes.
+    await RelayService.verifyAll();
+    await settle();
+    expect(sockets.created.length, 2);
+    expect(sockets.current.ofType('sub').single['a'], a.id);
+    sockets.current.receive({'t': 'ok', 'a': a.id});
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(chat.isConnected('alice'), isTrue);
+
+    // And a socket lost after that reconnects on its own again.
+    sockets.current.dropConnection();
+    await settle();
+    expect(RelayHub.instance.debugRetryPending, isTrue);
+  });
+
   test('a mailbox that forgot us is re-proven, not abandoned', () async {
     final chat = RelayService();
     final a = await mailbox('a');

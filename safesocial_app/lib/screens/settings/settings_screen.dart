@@ -13,6 +13,7 @@ import '../../services/contact_service.dart';
 import '../../services/call_config.dart';
 import '../../services/relay_config.dart';
 import '../../services/sync_service.dart';
+import '../../crypto/vault.dart';
 import '../../services/backup_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
@@ -1176,6 +1177,29 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
+  Future<String?> _askPassphrase(BuildContext context) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Backup passphrase'),
+        content: TextField(
+          controller: controller,
+          obscureText: true,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Passphrase'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('Restore')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showRestoreDialog(BuildContext context, BackupService backupService) async {
     final theme = Theme.of(context);
     final backups = await backupService.listBackups();
@@ -1239,8 +1263,23 @@ class SettingsScreen extends StatelessWidget {
                         ),
                       );
                       if (confirmed != true) return;
+                      // An encrypted backup needs its passphrase; asking for
+                      // one here was the missing step, so a backup made with
+                      // one could never be restored from this list.
+                      String? passphrase;
                       try {
-                        await backupService.restoreBackup(backups[i].path);
+                        final raw = await File(backups[i].path).readAsString();
+                        if (Vault.looksLikeVault(raw)) {
+                          if (!context.mounted) return;
+                          passphrase = await _askPassphrase(context);
+                          if (passphrase == null) return;
+                        }
+                      } catch (_) {
+                        // Let restoreBackup report the unreadable file.
+                      }
+                      try {
+                        await backupService.restoreBackup(backups[i].path,
+                            passphrase: passphrase);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(

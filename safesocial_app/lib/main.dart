@@ -18,6 +18,7 @@ void main(List<String> args) async {
 
   final woken = args.contains('--unifiedpush-bg');
   if (woken) {
+    BackgroundSync.headless = true;
     await services.startNotifications(onWake: BackgroundSync.run);
     await BackgroundSync.run();
     return;

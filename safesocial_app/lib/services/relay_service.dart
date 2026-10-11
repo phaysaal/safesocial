@@ -163,6 +163,10 @@ class RelayHub {
   RelaySocket? _socket;
   bool _connected = false;
   bool _connecting = false;
+
+  /// Set by [rest]: the socket was let go on purpose and must not come back
+  /// on a timer. The next connect attempt, however it is triggered, clears it.
+  bool _resting = false;
   bool _usingFallback = false;
   int _attempt = 0;
   Timer? _retryTimer;
@@ -219,6 +223,26 @@ class RelayHub {
 
   @visibleForTesting
   int get subscriptionCount => _subs.length;
+
+  /// Whether a reconnect is waiting on the backoff timer. Tests only.
+  @visibleForTesting
+  bool get debugRetryPending => _retryTimer != null;
+
+  /// Let the socket go but keep every subscription, so the next [verifyIdle]
+  /// brings it straight back. The headless wake calls this when its window
+  /// closes: Android cuts the process's network soon after, and a socket
+  /// retrying from a frozen process is wasted battery and log noise. Pending
+  /// publishes are reported as not sent, the same as any other closed socket.
+  void rest() {
+    _resting = true;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _attempt = 0;
+    final socket = _socket;
+    if (socket == null) return;
+    _onClosed();
+    unawaited(socket.close().catchError((_) {}));
+  }
 
   /// Every mailbox currently subscribed, for whoever registers wake targets.
   Iterable<Mailbox> get mailboxes => _subs.values.map((s) => s.mailbox);
@@ -421,6 +445,7 @@ class RelayHub {
   Future<void> _connect() async {
     if (_connecting || _connected) return;
     _connecting = true;
+    _resting = false;
 
     final host = _host();
     final uri = Uri.parse('wss://$host/hub/$_hubId');
@@ -489,7 +514,7 @@ class RelayHub {
   ///
   /// Jittered so a relay restart does not bring every client back at once.
   void _scheduleRetry() {
-    if (_subs.isEmpty) return;
+    if (_subs.isEmpty || _resting) return;
     _attempt++;
     final backoffMs = _baseRetryDelay.inMilliseconds * (1 << min(_attempt - 1, 10));
     final cappedMs = backoffMs.clamp(

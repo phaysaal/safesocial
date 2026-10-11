@@ -16,6 +16,10 @@ class BackgroundSync {
 
   static bool _running = false;
 
+  /// True in the `--unifiedpush-bg` process, where there is no UI to keep the
+  /// socket for: when the window closes the hub rests until the next wake.
+  static bool headless = false;
+
   /// How long to keep the process alive after the hub is up, so slow mailboxes
   /// still drain. Android allows a wake a short budget; this is well inside it.
   static Duration hold = const Duration(seconds: 12);
@@ -33,7 +37,14 @@ class BackgroundSync {
       // it is not, this starts it.
       await RelayService.verifyAll();
       await Future<void>.delayed(hold);
-      log.info('Wake', 'Sync window closed');
+      if (headless) {
+        // Android cuts this process's network a few seconds after the push;
+        // a socket left up would only churn through failed reconnects.
+        RelayHub.instance.rest();
+        log.info('Wake', 'Sync window closed; socket released until the next wake');
+      } else {
+        log.info('Wake', 'Sync window closed');
+      }
     } catch (e) {
       log.error('Wake', 'Background sync failed: $e');
     } finally {
