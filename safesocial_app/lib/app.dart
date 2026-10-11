@@ -20,6 +20,7 @@ import 'screens/chat/starred_screen.dart';
 import 'screens/call/call_history_screen.dart';
 import 'screens/feed/drafts_screen.dart';
 import 'services/contact_service.dart';
+import 'screens/feed/events_screen.dart';
 import 'screens/feed/feed_screen.dart';
 import 'screens/feed/memories_screen.dart';
 import 'screens/feed/saved_screen.dart';
@@ -221,6 +222,10 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
         GoRoute(
           path: '/saved',
           builder: (context, state) => const SavedScreen(),
+        ),
+        GoRoute(
+          path: '/events',
+          builder: (context, state) => const EventsScreen(),
         ),
         GoRoute(
           path: '/memories',

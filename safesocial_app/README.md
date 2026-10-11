@@ -1,17 +1,191 @@
-# spheres_app
+# Spheres
 
-A new Flutter project.
+**Your data. Your network. Your rules.**
 
-## Getting Started
+Spheres is an in-development social network built so that no content has a public
+audience: everything lives inside a *sphere*, a named group with an explicit
+membership list and its own encryption key. Your identity is a cryptographic keypair,
+not an email address or phone number.
 
-This project is a starting point for a Flutter application.
+> ## ⚠️ Pre-alpha — unaudited, run on two real phones once
+>
+> Everything that crosses the network is end-to-end encrypted (X25519 key agreement,
+> HKDF, XChaCha20-Poly1305, Ed25519 signatures), local storage is encrypted at rest,
+> and the relay derives its addresses from shared secrets so it cannot tell who talks
+> to whom. What is still true:
+>
+> - **Nothing here has been independently audited.**
+> - **No two physical devices have exchanged a message.** Everything has been
+>   exercised through 534 unit tests, a relay test suite and two emulators. Unknown
+>   unknowns dominate every other risk; the first two-phone test is the next milestone.
+> - **The relay sees timing and bucketed message sizes**, and Cloudflare sees IP
+>   addresses. There is no peer-to-peer path. Each person uses the relay they choose
+>   and contacts send there, so no single operator is structural, but today there is
+>   one default.
+> - **Calls use the operator's TURN server when a direct path fails.** The relay issues
+>   short-lived credentials for it; a relay without one falls back to public STUN and
+>   only connects over a direct path, and Settings says which applies. The project's
+>   coturn runs on a Scaleway instance in Amsterdam and has carried one forced call
+>   between a phone and a tablet. The old public TURN default is gone.
+> - **Push is content-free and self-hosted.** Android wakes through UnifiedPush (bring a
+>   distributor such as ntfy; no Google SDK in the build), iOS through APNs. Proven on a
+>   phone with the app process gone: a knock through the project's own ntfy server in
+>   Amsterdam brought it back and a message produced a notification within five seconds.
+>   The APNs key is still to come; without it the iOS app says so.
+> - **Multi-device has run on hardware once.** Each device has its own key, certified by
+>   the identity; contacts seal once per device. See `docs/rebuild_plan.md` §12.4 for what
+>   revoking a device can and cannot do.
+>
+> The plan for closing these gaps, and the decisions behind it, is in
+> [`docs/rebuild_plan.md`](docs/rebuild_plan.md).
 
-A few resources to get you started if this is your first Flutter project:
+## The model
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+**Everything is a sphere.** A direct message is a sphere with two members; a group chat,
+a shared album, and a "close friends" audience are the same primitive with different
+presentation. There is no "everyone" and no public profile. Content that is not addressed
+to a sphere does not exist, and the code path that would produce it does not exist either.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Non-goals, deliberately: global discovery, trending, public profiles, follower counts,
+server-side moderation (membership is the moderation), and resistance to a state-level
+adversary who already controls your device. The target is no bulk surveillance and no
+platform-side data mining.
+
+## Current state (v0.8.0)
+
+| Area | Status |
+|---|---|
+| Identity (Ed25519 signing + X25519 exchange keys, platform keystore) | Working |
+| Contacts: QR exchange, approval before adding, blocking | Working |
+| Spheres: create, invite, accept, leave, remove with key rotation | Working |
+| Sphere governance: owner/admin roles, transfer, removal by vote, audit log | Working |
+| Direct chat: ratcheted sessions per device pair, durable outbox, receipts, session repair | Working |
+| Sphere chat: group conversation owned by a sphere | Working |
+| Feed: posts to one or several spheres, comments, replies, reactions, saves | Working |
+| Stories: sphere-scoped expiry, author-only view receipts, private replies | Working |
+| Albums: sealed per sphere, synced like everything else | Working |
+| Media: per-blob keys, 48 KB encrypted chunks, inline thumbnails, EXIF/GPS stripped | Working; video transcoded on-device to 720p (60 s feed, 3 min chat, 64 MB), poster frames, in-app playback, save to gallery |
+| Media origin score: a 0–10 trust badge on every picture, from the file's own data on the sender's device (camera EXIF, editing tags, Content Credentials and generator marks, name, size); in-app camera capture scores 10; blur-until-tapped per chat or sphere | Working; a reading of the file's claims with a disclaimer, not a detector; untested on hardware |
+| Voice/video calls over WebRTC, signalling encrypted | 1:1 working on hardware, direct and through the project's TURN; group (mesh) on emulators only |
+| Local search over messages, posts, comments, spheres, contacts | Working |
+| Edit own posts, pin posts in a sphere (admins), archive chats and spheres, mute a member within a sphere, per-sphere media gallery | Working |
+| Key verification: safety number and QR comparison per contact, with a banner when keys change | Working |
+| Messaging extras: disappearing messages, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, chat lock, export, filters | Working; untested on hardware |
+| Feed extras: events with RSVP, poll posts, co-authored posts, alt text, drafts and scheduled posts, story captions and stickers, hidden-words filter, report to the sphere | Working; untested on hardware |
+| Comments: reply threads, seven reactions on posts and comments, edit with history, delete, hide and pin by the post's author or an admin, comments off per post, follow or mute a post, newest-first | Working; comment, reaction, reply, hide and edit checked between a phone and a tablet |
+| Spheres: invite links with admin approval, private member notes, birthdays and avatars shared with contacts | Working; untested on hardware |
+| Composer: coloured backgrounds for short text, feeling or activity, life events, asking for recommendations, resharing into another sphere with the author's signed words, pin to profile, delete with a thirty-day trash, archive, bulk manage, picture editing (rotate, flip, crop, filters, text, stickers, drawing), 360° photos panned in the viewer, video trim and cover frame | Working; signature, reshare, delete and trim rules covered by tests, untested on hardware |
+| Events: co-hosts who may edit, repeating events with the next occurrence shown, going/interested/maybe/can't go, photos added by anyone in the sphere, reminders shown by the phone, add to the device calendar, .ics export, a map link, an upcoming-events list | Working; the rules are covered by tests; calendar and export are Android only and say so elsewhere; untested on hardware |
+| Contacts and feed: mute, unfollow, snooze for 30 days, take a break (quiet and restricted until ended), restrict (they get only your name and picture), favourites and a favourites-only feed, birthday and anniversary cards, data saver | Working; local only, nothing is told to the other person; covered by tests, untested on hardware |
+| Profile: cover and featured photos, pronouns, nickname, pronunciation, work, education, places, relationship and family, languages, websites, hobbies, quotes, life events, a temporary picture that reverts, a legacy contact, an audience per field and a "view as" that shows exactly what each contact gets | Working; the per-contact cut is covered by tests, untested on hardware |
+| Calls: history, missed-call notifications, screen sharing, join a sphere call from its chat | Working; screen share needs platform support, large calls still mesh |
+| Local sticker packs, app lock and locked chats with biometrics, security notices on key changes, inbox rate limiting | Working |
+| Encrypted backup, identity export/import (Argon2id + XChaCha20) | Working; covers every store except sessions and outboxes |
+| Social recovery (Shamir, verified against the public key) | Working |
+| Multiple devices (per-device keys, signed device list, link/revoke) | Implemented, with tests; not yet exercised on hardware |
+| Local storage encrypted at rest (`SecureStore`) | Working; key names and entry counts remain visible |
+| Notifications and push wake (UnifiedPush / APNs, content-free) | Working on Android through the project's ntfy server (one phone, app process gone, woken and notified); the APNs key is still to come |
+| Federation: each contact reached on the relay they chose | Implemented; relay host travels in the signed bundle |
+| Peer-to-peer / Veilid / DHT | Not implemented, not planned for now |
+
+## Architecture (as built)
+
+```
++---------------------------------------------------------------+
+|                         Flutter UI                            |
+|      screens, widgets, Material 3 theme — Provider + GoRouter |
++---------------------------------------------------------------+
+|                       Dart services                           |
+|  Identity · Contact · Chat · SphereChat · Feed · Album        |
+|  Sphere · SphereSync · Sync (device link) · Call · Media      |
+|  Blob · Outbox · Search · Backup · Library · SecureStore      |
++---------------------------------------------------------------+
+|                     Crypto (lib/crypto/)                      |
+|  pairwise ratchet sessions · sphere keyring · envelopes       |
+|  mailbox derivation · chunked blobs · vault · Shamir          |
++---------------------------------------------------------------+
+|              relay/worker.js — Cloudflare Worker (EU)         |
+|  /hub   one socket per client, mailboxes subscribed by sig    |
+|  /mbx   secret-derived pairwise mailboxes, 30-day queue, wake |
+|  /inbox first contact   /blob media chunks   /prekey bundles  |
+|  /turn  short-lived credentials for the operator's coturn     |
++---------------------------------------------------------------+
+```
+
+The app is 100% Dart. The dormant Rust crate and its bridge were removed in October 2026;
+git history has them.
+
+There is no database. Everything is local, in `SharedPreferences` behind `SecureStore`
+(sealed with XChaCha20-Poly1305 under a key in the platform keystore), with the identity
+secret itself in `flutter_secure_storage`. Decoded media and backups live in the app
+documents directory.
+
+## Prerequisites
+
+- **Flutter**, pinned for reproducible builds in [`FLUTTER_TOOLCHAIN`](FLUTTER_TOOLCHAIN)
+  (currently 3.41.5 / Dart 3.11.3).
+- **Platform tools**: Android SDK or Xcode for mobile; the desktop targets exist but are
+  untested.
+- **Node 22 and wrangler**, to test or deploy the relay.
+
+## Quick start
+
+```bash
+cd safesocial_app
+flutter pub get
+flutter analyze --no-fatal-infos   # must be clean
+flutter test                       # 711 tests in 61 files
+flutter run
+```
+
+Release builds require `safesocial_app/android/key.properties`. Without it the release
+build fails by design: it must never fall back to the public Android debug key.
+`build_release.sh` bumps the version, builds, and writes `SHA256SUMS.txt`;
+`scripts/verify_build.sh` lets anyone rebuild a release and diff the bytes.
+
+## Project structure
+
+```
+safesocial/
+  safesocial_app/        Flutter application (Dart package name: spheres_app)
+    lib/
+      main.dart          Entry point, Provider setup
+      app_wiring.dart    Connects an identity to every service (startup and post-onboarding)
+      app.dart           GoRouter configuration, navigation shell
+      app_info.dart      Version strings shown in the UI
+      crypto/            Sessions, sphere keyring, envelopes, blobs, vault, Shamir
+      services/          One ChangeNotifier per concern; SecureStore for storage
+      screens/           UI by area (chat, feed, spheres, media, settings, ...)
+      models/            Equatable data models with JSON serialization
+      widgets/           Reusable components
+    test/                crypto/, models/, services/ — plus a seeded parser fuzzer
+  relay/                 Cloudflare Worker + Durable Objects, with tests; see relay/README.md
+  infra/                 The EU edge box as code: coturn, ntfy, Caddy; setup and check scripts
+  landing/               Project website
+  scripts/               verify_build.sh
+  docs/
+    rebuild_plan.md             The plan, its decisions, and what remains — start here
+    threat_model.md             Current; adversary by adversary against what is built
+    privacy_protocol.md         The cryptographic design, now implemented
+    reproducible_builds.md      How to verify a release
+    architecture_weaknesses.md  The 2026-07 findings that motivated the rebuild (historical)
+    feature_landscape.md        What mainstream platforms have and what Spheres cannot build
+    feature_review.md           What to build from that landscape
+    facebook_feature_list.md    The Facebook app item by item against Spheres, and the parity plan
+    architecture.md, protocol.md, analysis_review.md   Original Veilid-era design (historical)
+```
+
+## Part of SafeSelf
+
+Spheres is the second phase of the **SafeSelf** umbrella project:
+
+1. **SeeSelf** (Phase 1): a personal data audit crawler that discovers what information
+   about you is publicly available and models what an AI system could infer from it.
+2. **Spheres** (Phase 2): this project. A social network with no public audience, as a
+   practical alternative to surveillance-based platforms.
+
+If SeeSelf shows you how exposed you are, Spheres gives you a way to take back control.
+
+## License
+
+TBD

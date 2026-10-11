@@ -1,14 +1,27 @@
 import 'package:flutter/material.dart';
 
 import '../models/post.dart';
+import 'media_thumb.dart';
+import '../models/event_time.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/chat_service.dart';
 
-/// An event inside a post: when, where, and who is coming.
+/// An event inside a post: when, where, who is hosting, who is coming,
+/// and the pictures people added. Everything that needs a service comes in
+/// as a callback, so the card stays a picture of the post.
 class EventCard extends StatelessWidget {
   final Post post;
   final String? myKey;
   final String Function(String key) nameFor;
   final void Function(String status)? onRsvp;
+  final bool isHost;
+  final VoidCallback? onEdit;
+  final VoidCallback? onAddPhoto;
+  final VoidCallback? onReminders;
+  final VoidCallback? onCalendar;
+  final VoidCallback? onExport;
+  final void Function(String ref)? onOpenPhoto;
+  final bool hasReminder;
 
   const EventCard({
     super.key,
@@ -16,6 +29,14 @@ class EventCard extends StatelessWidget {
     required this.myKey,
     required this.nameFor,
     this.onRsvp,
+    this.isHost = false,
+    this.onEdit,
+    this.onAddPhoto,
+    this.onReminders,
+    this.onCalendar,
+    this.onExport,
+    this.onOpenPhoto,
+    this.hasReminder = false,
   });
 
   @override
@@ -27,11 +48,21 @@ class EventCard extends StatelessWidget {
     final starts = DateTime.tryParse(p['starts_at'] as String? ?? '')?.toLocal();
     final ends = DateTime.tryParse(p['ends_at'] as String? ?? '')?.toLocal();
     final place = p['place'] as String? ?? '';
+    final ticket = p['ticket_url'] as String? ?? '';
+    final recurrence = p['recurrence'] as String? ?? 'none';
+    final coHosts = (p['co_hosts'] as List?)?.whereType<String>().toList() ?? const <String>[];
+    final photos = (p['photos'] as List?)?.whereType<Map>().toList() ?? const <Map>[];
     final rsvps = (p['rsvps'] as Map?)?.cast<String, dynamic>() ?? const {};
     final mine = rsvps[myKey] as String?;
     final going = rsvps.entries.where((e) => e.value == 'going').map((e) => nameFor(e.key)).toList();
+    final interested = rsvps.values.where((v) => v == 'interested').length;
     final maybe = rsvps.values.where((v) => v == 'maybe').length;
-    final past = ends != null ? ends.isBefore(DateTime.now()) : (starts?.isBefore(DateTime.now()) ?? false);
+    final now = DateTime.now();
+    final past = starts == null ||
+        EventTime.isPast(starts: starts, ends: ends, recurrence: recurrence, now: now);
+    final next = starts == null
+        ? null
+        : EventTime.occurrence(starts: starts, ends: ends, recurrence: recurrence, now: now);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -46,21 +77,58 @@ class EventCard extends StatelessWidget {
           Row(children: [
             Icon(Icons.event, color: cs.primary),
             const SizedBox(width: 8),
-            Expanded(child: Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700))),
+            Expanded(
+                child: Text(title,
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700))),
+            if (isHost && onEdit != null)
+              IconButton(
+                  tooltip: 'Edit event',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  onPressed: onEdit),
           ]),
+          if (coHosts.isNotEmpty)
+            Text('Hosted with ${coHosts.map(nameFor).join(', ')}',
+                style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
           const SizedBox(height: 6),
-          if (starts != null)
+          if (next != null)
             Text(
-              '${_fmt(starts)}${ends != null ? ' – ${_fmtShort(ends, starts)}' : ''}',
+              '${_fmt(next.starts)}${next.ends != null ? ' – ${_fmtShort(next.ends!, next.starts)}' : ''}',
               style: theme.textTheme.bodyMedium,
             ),
-          if (place.isNotEmpty) Text(place, style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+          if (recurrence != 'none')
+            Text(EventTime.label(recurrence),
+                style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          if (place.isNotEmpty)
+            InkWell(
+              onTap: () => _openMap(place),
+              child: Row(children: [
+                Icon(Icons.place_outlined, size: 16, color: cs.primary),
+                const SizedBox(width: 4),
+                Expanded(
+                    child: Text(place,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: cs.primary))),
+              ]),
+            ),
+          if (ticket.isNotEmpty)
+            TextButton.icon(
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+              onPressed: () => _open(ticket),
+              icon: const Icon(Icons.confirmation_number_outlined, size: 16),
+              label: Text(ticket, overflow: TextOverflow.ellipsis),
+            ),
           const SizedBox(height: 10),
           if (!past && onRsvp != null)
             Wrap(
               spacing: 8,
+              runSpacing: 4,
               children: [
-                for (final (status, label) in const [('going', 'Going'), ('maybe', 'Maybe'), ('no', "Can't go")])
+                for (final (status, label) in const [
+                  ('going', 'Going'),
+                  ('interested', 'Interested'),
+                  ('maybe', 'Maybe'),
+                  ('no', "Can't go"),
+                ])
                   ChoiceChip(
                     label: Text(label),
                     selected: mine == status,
@@ -69,17 +137,75 @@ class EventCard extends StatelessWidget {
               ],
             ),
           if (past)
-            Text('This event has passed', style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+            Text('This event has passed',
+                style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
           const SizedBox(height: 6),
           Text(
-            going.isEmpty
-                ? (maybe > 0 ? '$maybe maybe' : 'Nobody has answered yet')
-                : '${going.length} going${maybe > 0 ? ' · $maybe maybe' : ''}: ${going.join(', ')}',
+            [
+              if (going.isNotEmpty) '${going.length} going: ${going.join(', ')}',
+              if (interested > 0) '$interested interested',
+              if (maybe > 0) '$maybe maybe',
+              if (going.isEmpty && interested == 0 && maybe == 0) 'Nobody has answered yet',
+            ].join(' · '),
             style: theme.textTheme.bodySmall,
           ),
+          if (photos.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 84,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: photos.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (_, i) {
+                  final ref = photos[i]['ref'] as String? ?? '';
+                  return GestureDetector(
+                    onTap: onOpenPhoto == null ? null : () => onOpenPhoto!(ref),
+                    child: MediaThumb(ref: ref, width: 84, height: 84, borderRadius: BorderRadius.circular(10)),
+                  );
+                },
+              ),
+            ),
+          ],
+          if (!past || photos.isNotEmpty || onAddPhoto != null) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 4,
+              children: [
+                if (onAddPhoto != null)
+                  _Small(icon: Icons.add_a_photo_outlined, label: 'Photo', onTap: onAddPhoto!),
+                if (!past && onReminders != null)
+                  _Small(
+                      icon: hasReminder ? Icons.notifications_active : Icons.notifications_none,
+                      label: hasReminder ? 'Reminder set' : 'Remind me',
+                      onTap: onReminders!),
+                if (!past && onCalendar != null)
+                  _Small(icon: Icons.calendar_month_outlined, label: 'Calendar', onTap: onCalendar!),
+                if (onExport != null)
+                  _Small(icon: Icons.ios_share, label: '.ics', onTap: onExport!),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  static Future<void> _open(String url) async {
+    final uri = Uri.tryParse(url.startsWith('http') ? url : 'https://$url');
+    if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// The place goes to the map app the user has, and nowhere before that.
+  static Future<void> _openMap(String place) async {
+    final q = Uri.encodeComponent(place);
+    final geo = Uri.parse('geo:0,0?q=$q');
+    if (await canLaunchUrl(geo)) {
+      await launchUrl(geo);
+      return;
+    }
+    await launchUrl(Uri.parse('https://www.openstreetmap.org/search?query=$q'),
+        mode: LaunchMode.externalApplication);
   }
 
   static String _fmt(DateTime d) =>
@@ -89,6 +215,23 @@ class EventCard extends StatelessWidget {
   static String _hm(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   static String _weekday(int w) => const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][w - 1];
+}
+
+class _Small extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _Small({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+        style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8)),
+        onPressed: onTap,
+        icon: Icon(icon, size: 16),
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+      );
 }
 
 /// A poll inside a post, on the feed's surface colours.
@@ -196,24 +339,56 @@ class FeedPollCard extends StatelessWidget {
 }
 
 /// Fields for creating an event, returned to the composer.
-Future<({String title, DateTime startsAt, DateTime? endsAt, String place})?> showEventDialog(
-    BuildContext context) async {
-  final title = TextEditingController();
-  final place = TextEditingController();
-  DateTime starts = DateTime.now().add(const Duration(hours: 1));
-  DateTime? ends;
-  return showDialog(
+/// What the event dialog produces.
+class EventDraft {
+  final String title;
+  final DateTime startsAt;
+  final DateTime? endsAt;
+  final String place;
+  final String ticketUrl;
+  final String recurrence;
+  final List<String> coHosts;
+
+  const EventDraft({
+    required this.title,
+    required this.startsAt,
+    this.endsAt,
+    this.place = '',
+    this.ticketUrl = '',
+    this.recurrence = 'none',
+    this.coHosts = const [],
+  });
+}
+
+/// Make or change an event. [candidates] are the people who could co-host,
+/// as (key, name); [initial] fills the form for an edit, and [canPickHosts]
+/// is false for a co-host editing somebody else's event.
+Future<EventDraft?> showEventDialog(
+  BuildContext context, {
+  List<(String, String)> candidates = const [],
+  EventDraft? initial,
+  bool canPickHosts = true,
+}) async {
+  final title = TextEditingController(text: initial?.title ?? '');
+  final place = TextEditingController(text: initial?.place ?? '');
+  final ticket = TextEditingController(text: initial?.ticketUrl ?? '');
+  DateTime starts = initial?.startsAt ?? DateTime.now().add(const Duration(hours: 1));
+  DateTime? ends = initial?.endsAt;
+  String recurrence = initial?.recurrence ?? 'none';
+  final hosts = <String>{...?initial?.coHosts};
+  return showDialog<EventDraft>(
     context: context,
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setState) => AlertDialog(
-        title: const Text('New event'),
+        title: Text(initial == null ? 'New event' : 'Edit event'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               TextField(
                 controller: title,
-                autofocus: true,
+                autofocus: initial == null,
                 decoration: const InputDecoration(labelText: 'What'),
                 textCapitalization: TextCapitalization.sentences,
               ),
@@ -235,11 +410,49 @@ Future<({String title, DateTime startsAt, DateTime? endsAt, String place})?> sho
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.schedule_outlined),
                 title: Text(ends == null ? 'Add an end time' : 'Ends ${EventCard._fmt(ends!)}'),
+                trailing: ends == null
+                    ? null
+                    : IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => ends = null)),
                 onTap: () async {
                   final picked = await _pickDateTime(ctx, ends ?? starts.add(const Duration(hours: 2)));
                   if (picked != null) setState(() => ends = picked);
                 },
               ),
+              DropdownButtonFormField<String>(
+                initialValue: recurrence,
+                decoration: const InputDecoration(labelText: 'Repeats'),
+                items: [
+                  for (final r in EventTime.recurrences)
+                    DropdownMenuItem(value: r, child: Text(r == 'none' ? 'Does not repeat' : EventTime.label(r))),
+                ],
+                onChanged: (v) => setState(() => recurrence = v ?? 'none'),
+              ),
+              TextField(
+                controller: ticket,
+                decoration: const InputDecoration(
+                    labelText: 'Ticket link (optional)',
+                    helperText: 'Shown as a link; nothing is fetched'),
+                keyboardType: TextInputType.url,
+              ),
+              if (canPickHosts && candidates.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                const Text('Co-hosts', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text('They can change the details', style: TextStyle(fontSize: 11)),
+                for (final (key, name) in candidates)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: hosts.contains(key),
+                    title: Text(name),
+                    onChanged: (v) => setState(() {
+                      if (v == true) {
+                        hosts.add(key);
+                      } else {
+                        hosts.remove(key);
+                      }
+                    }),
+                  ),
+              ],
             ],
           ),
         ),
@@ -248,9 +461,20 @@ Future<({String title, DateTime startsAt, DateTime? endsAt, String place})?> sho
           FilledButton(
             onPressed: () {
               if (title.text.trim().isEmpty) return;
-              Navigator.pop(ctx, (title: title.text.trim(), startsAt: starts, endsAt: ends, place: place.text.trim()));
+              Navigator.pop(
+                ctx,
+                EventDraft(
+                  title: title.text.trim(),
+                  startsAt: starts,
+                  endsAt: ends,
+                  place: place.text.trim(),
+                  ticketUrl: ticket.text.trim(),
+                  recurrence: recurrence,
+                  coHosts: hosts.toList(),
+                ),
+              );
             },
-            child: const Text('Add'),
+            child: Text(initial == null ? 'Add' : 'Save'),
           ),
         ],
       ),

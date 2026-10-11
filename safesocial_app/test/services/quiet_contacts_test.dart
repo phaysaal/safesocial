@@ -209,4 +209,14 @@ class _SilentSink implements NotificationSink {
   @override
   Future<void> cancelThread(String thread) async {}
 
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+    required String route,
+  }) async {}
+  @override
+  Future<void> cancelScheduled(int id) async {}
 }

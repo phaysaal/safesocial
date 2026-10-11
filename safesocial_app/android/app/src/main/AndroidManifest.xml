@@ -59,6 +59,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Lets an exported .ics reach the app the user picks; only the ics cache folder. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.spheres.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/spheres_file_paths" />
+        </provider>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

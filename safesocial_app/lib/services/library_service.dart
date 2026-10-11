@@ -345,6 +345,27 @@ class LibraryService extends ChangeNotifier {
       _snoozedSpheresKey,
       jsonEncode({for (final e in _snoozedSpheres.entries) e.key: e.value.toIso8601String()}));
 
+  // ── Event reminders ───────────────────────────────────────────────────
+
+  static const _eventRemindersKey = 'spheres_event_reminders_v1';
+  final Map<String, List<int>> _eventReminders = {};
+
+  /// Minutes before an event's start at which this device reminds us.
+  List<int> eventReminders(String postId) =>
+      List.unmodifiable(_eventReminders[postId] ?? const <int>[]);
+
+  Map<String, List<int>> get allEventReminders => Map.unmodifiable(_eventReminders);
+
+  Future<void> setEventReminders(String postId, List<int> minutesBefore) async {
+    if (minutesBefore.isEmpty) {
+      _eventReminders.remove(postId);
+    } else {
+      _eventReminders[postId] = (minutesBefore.toSet().toList()..sort());
+    }
+    await SecureStore.instance.setString(_eventRemindersKey, jsonEncode(_eventReminders));
+    notifyListeners();
+  }
+
   // ── Comment order ─────────────────────────────────────────────────────
 
   static const _commentOrderKey = 'spheres_comments_newest_v1';
@@ -364,6 +385,15 @@ class LibraryService extends ChangeNotifier {
     _commentsNewestFirst = (await store.getString(_commentOrderKey)) == '1';
     _dataSaver = (await store.getString(_dataSaverKey)) == '1';
     _favouritesFeed = (await store.getString(_favouritesFeedKey)) == '1';
+    _eventReminders.clear();
+    final remRaw = await store.getString(_eventRemindersKey);
+    if (remRaw != null) {
+      try {
+        (jsonDecode(remRaw) as Map).forEach((k, v) {
+          if (v is List) _eventReminders[k.toString()] = v.whereType<int>().toList();
+        });
+      } catch (_) {}
+    }
     _snoozedSpheres.clear();
     final snoozedRaw = await store.getString(_snoozedSpheresKey);
     if (snoozedRaw != null) {

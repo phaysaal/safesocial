@@ -41,6 +41,17 @@ class _FakeSink implements NotificationSink {
 
   @override
   Future<void> cancelThread(String thread) async => cancelled.add(thread);
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+    required String route,
+  }) async {}
+  @override
+  Future<void> cancelScheduled(int id) async {}
 }
 
 InboundEvent chat({String id = 'm1', String body = 'hello'}) => InboundEvent(

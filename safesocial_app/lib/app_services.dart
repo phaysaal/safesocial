@@ -11,6 +11,7 @@ import 'services/call_service.dart';
 import 'services/chat_service.dart';
 import 'services/contact_service.dart';
 import 'services/debug_log_service.dart';
+import 'services/event_reminders.dart';
 import 'services/feed_service.dart';
 import 'services/identity_service.dart';
 import 'services/library_service.dart';
@@ -80,6 +81,10 @@ class AppServices {
   /// Load local state and connect the identity to every service.
   Future<void> load() async {
     if (_loaded) return;
+    // Alarms the device holds for event reminders do not survive every
+    // reboot; set them again from what this device chose.
+    await EventReminders.resync(
+        feed: feedService, library: libraryService, notifications: notificationService);
     _loaded = true;
 
     // Before anything touches storage: without the key loaded, early reads

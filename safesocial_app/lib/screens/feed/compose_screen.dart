@@ -121,7 +121,19 @@ class _ComposeScreenState extends State<ComposeScreen> {
   }
 
   Future<void> _makeEvent() async {
-    final event = await showEventDialog(context);
+    // Co-hosts come from the spheres this post goes to.
+    final spheres = context.read<SphereService>();
+    final contacts = context.read<ContactService>();
+    final me = context.read<IdentityService>().publicKey;
+    final members = <String>{};
+    for (final id in _targets) {
+      members.addAll(spheres.sphere(id)?.members.map((m) => m.identityKey) ?? const []);
+    }
+    final candidates = [
+      for (final k in members)
+        if (k != me) (k, contacts.getContact(k)?.displayName ?? '${k.substring(0, 8)}…'),
+    ];
+    final event = await showEventDialog(context, candidates: candidates);
     if (event == null) return;
     setState(() {
       _kind = 'event';
@@ -131,6 +143,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
         if (event.endsAt != null) 'ends_at': event.endsAt!.toIso8601String(),
         'place': event.place,
         'rsvps': <String, dynamic>{},
+        if (event.coHosts.isNotEmpty) 'co_hosts': event.coHosts,
+        if (event.recurrence != 'none') 'recurrence': event.recurrence,
+        if (event.ticketUrl.isNotEmpty) 'ticket_url': event.ticketUrl,
+        'photos': <dynamic>[],
       };
     });
   }

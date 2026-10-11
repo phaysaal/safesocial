@@ -10,6 +10,11 @@ import 'author_name.dart';
 import '../models/sphere.dart';
 import '../services/contact_service.dart';
 import '../services/feed_service.dart';
+import '../services/notification_service.dart';
+import '../services/media_service.dart';
+import '../services/event_reminders.dart';
+import '../services/calendar_bridge.dart';
+import '../models/event_time.dart';
 import '../services/library_service.dart';
 import '../services/identity_service.dart';
 import '../services/sphere_service.dart';
@@ -330,6 +335,14 @@ class _PostCardState extends State<PostCard> {
                   ? 'You'
                   : (context.read<ContactService>().getContact(k)?.displayName ?? '${k.substring(0, 8)}…'),
               onRsvp: (status) => context.read<FeedService>().rsvp(post.id, status),
+              isHost: context.read<FeedService>().isEventHost(post),
+              onEdit: () => _editEvent(context, post),
+              onAddPhoto: () => _addEventPhoto(context, post),
+              onReminders: () => _pickReminders(context, post),
+              onCalendar: () => _addToCalendar(context, post),
+              onExport: () => _exportIcs(context, post),
+              onOpenPhoto: (ref) => context.push('/media/view?ref=${Uri.encodeComponent(ref)}'),
+              hasReminder: context.watch<LibraryService>().eventReminders(post.id).isNotEmpty,
             ),
           if (post.isPoll)
             FeedPollCard(
@@ -844,6 +857,137 @@ class _PostCardState extends State<PostCard> {
       messenger.showSnackBar(const SnackBar(content: Text('Shared')));
     } on StateError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  // ── Events ──────────────────────────────────────────────
+
+  Future<void> _editEvent(BuildContext context, Post post) async {
+    final feed = context.read<FeedService>();
+    final p = post.payload ?? const {};
+    final me = context.read<IdentityService>().publicKey;
+    final spheres = context.read<SphereService>();
+    final contacts = context.read<ContactService>();
+    final members = <String>{};
+    for (final id in post.sphereIds) {
+      members.addAll(spheres.sphere(id)?.members.map((m) => m.identityKey) ?? const []);
+    }
+    final draft = await showEventDialog(
+      context,
+      initial: EventDraft(
+        title: p['title'] as String? ?? '',
+        startsAt: DateTime.tryParse(p['starts_at'] as String? ?? '') ?? DateTime.now(),
+        endsAt: DateTime.tryParse(p['ends_at'] as String? ?? ''),
+        place: p['place'] as String? ?? '',
+        ticketUrl: p['ticket_url'] as String? ?? '',
+        recurrence: p['recurrence'] as String? ?? 'none',
+        coHosts: FeedService.coHostsOf(post),
+      ),
+      candidates: [
+        for (final k in members)
+          if (k != post.authorId) (k, contacts.getContact(k)?.displayName ?? '${k.substring(0, 8)}…'),
+      ],
+      canPickHosts: post.authorId == me,
+    );
+    if (draft == null) return;
+    await feed.updateEvent(post.id, {
+      'title': draft.title,
+      'starts_at': draft.startsAt.toIso8601String(),
+      'ends_at': draft.endsAt?.toIso8601String(),
+      'place': draft.place,
+      'ticket_url': draft.ticketUrl,
+      'recurrence': draft.recurrence,
+      if (post.authorId == me) 'co_hosts': draft.coHosts,
+    });
+  }
+
+  Future<void> _addEventPhoto(BuildContext context, Post post) async {
+    final feed = context.read<FeedService>();
+    final path = await context.read<MediaService>().pickAndStoreImage();
+    if (path != null) await feed.addEventPhoto(post.id, path);
+  }
+
+  Future<void> _pickReminders(BuildContext context, Post post) async {
+    final library = context.read<LibraryService>();
+    final notifications = context.read<NotificationService>();
+    final chosen = Set<int>.from(library.eventReminders(post.id));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Remind me'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Shown by this phone, at the time; nothing is sent.',
+                  style: TextStyle(fontSize: 12)),
+              for (final m in EventReminders.choices)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: chosen.contains(m),
+                  title: Text(EventReminders.labelFor(m)),
+                  onChanged: (v) => setDialogState(() {
+                    if (v == true) {
+                      chosen.add(m);
+                    } else {
+                      chosen.remove(m);
+                    }
+                  }),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Done')),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      await EventReminders.set(
+          post: post, minutesBefore: chosen.toList(), library: library, notifications: notifications);
+    }
+  }
+
+  Future<void> _addToCalendar(BuildContext context, Post post) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final p = post.payload ?? const {};
+    final next = EventReminders.nextStart(post);
+    final starts = next ?? DateTime.tryParse(p['starts_at'] as String? ?? '') ?? DateTime.now();
+    final ends = DateTime.tryParse(p['ends_at'] as String? ?? '');
+    try {
+      await CalendarBridge.insert(
+        title: p['title'] as String? ?? 'Event',
+        starts: starts,
+        ends: ends == null ? null : starts.add(ends.difference(DateTime.parse(p['starts_at'] as String))),
+        place: p['place'] as String? ?? '',
+        description: post.content,
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _exportIcs(BuildContext context, Post post) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final p = post.payload ?? const {};
+    final starts = DateTime.tryParse(p['starts_at'] as String? ?? '');
+    if (starts == null) return;
+    final ics = EventTime.ics(
+      uid: '${post.id}@spheres',
+      title: p['title'] as String? ?? 'Event',
+      starts: starts,
+      ends: DateTime.tryParse(p['ends_at'] as String? ?? ''),
+      place: p['place'] as String? ?? '',
+      description: post.content,
+      recurrence: p['recurrence'] as String? ?? 'none',
+      url: p['ticket_url'] as String? ?? '',
+    );
+    try {
+      await CalendarBridge.shareIcs(fileName: 'spheres-event-${post.id.substring(0, 8)}.ics', contents: ics);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 

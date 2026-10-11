@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'debug_log_service.dart';
@@ -10,6 +12,18 @@ import 'inbound_events.dart';
 /// Where notifications are actually shown. Abstract so the decision logic can
 /// be tested without the platform plugin.
 abstract class NotificationSink {
+  /// Show [title]/[body] at [at], opening [route] when tapped. Replaces any
+  /// earlier schedule with the same [id].
+  Future<void> schedule({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+    required String route,
+  });
+
+  Future<void> cancelScheduled(int id);
+
   Future<void> initialize({required void Function(String route) onTap});
   Future<bool> requestPermission();
   Future<void> show({
@@ -137,6 +151,28 @@ class NotificationService extends ChangeNotifier {
   /// Whether a contact is muted, snoozed or on a break. Set by the app.
   bool Function(String identityKey)? isQuiet;
 
+  /// A reminder the device shows by itself at [at], e.g. before an event.
+  Future<void> scheduleReminder({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+    required String route,
+  }) async {
+    if (!_enabled) return;
+    try {
+      await _sink.schedule(id: id, at: at, title: title, body: body, route: route);
+    } catch (e) {
+      DebugLogService().error('Notify', 'Could not schedule a reminder: $e');
+    }
+  }
+
+  Future<void> cancelReminder(int id) async {
+    try {
+      await _sink.cancelScheduled(id);
+    } catch (_) {}
+  }
+
   Future<bool> _onEvent(InboundEvent event) async {
     if (!_enabled) return false;
     if (!_kinds.contains(event.kind)) return false;
@@ -248,6 +284,39 @@ class LocalNotificationSink implements NotificationSink {
     }
     _initialized = true;
   }
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+    required String route,
+  }) async {
+    // The instant is what matters, so it is scheduled in UTC; no need to
+    // know the device's zone name.
+    tz.initializeTimeZones();
+    await _plugin.zonedSchedule(
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: tz.TZDateTime.from(at.toUtc(), tz.UTC),
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(_activity.id, _activity.name,
+            channelDescription: _activity.description,
+            importance: Importance.high,
+            priority: Priority.high),
+        iOS: const DarwinNotificationDetails(),
+      ),
+      // Inexact: no alarm permission, and a minute either way is fine for a
+      // reminder.
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      payload: route,
+    );
+  }
+
+  @override
+  Future<void> cancelScheduled(int id) => _plugin.cancel(id: id);
 
   @override
   Future<bool> requestPermission() async {

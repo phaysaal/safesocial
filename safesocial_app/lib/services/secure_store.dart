@@ -67,6 +67,7 @@ class SecureStore {
     'spheres_post_watch_v1',
     'spheres_post_trash_v1',
     'spheres_snoozed_spheres_v1',
+    'spheres_event_reminders_v1',
     'spheres_archived_posts_v1',
     'spheres_post_mute_v1',
     'spheres_spheres_v1',

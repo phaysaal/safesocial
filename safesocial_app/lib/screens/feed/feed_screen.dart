@@ -162,6 +162,7 @@ class _FeedScreenState extends State<FeedScreen> {
                   const SliverToBoxAdapter(child: _CelebrationsBanner()),
                   // All posts, or favourites only
                   const SliverToBoxAdapter(child: _FeedFilterRow()),
+                  const SliverToBoxAdapter(child: _UpcomingEventsLine()),
                   // Memories Banner
                   if (memories.isNotEmpty)
                     SliverToBoxAdapter(child: _MemoriesBanner(count: memories.length)),
@@ -751,6 +752,37 @@ class _CelebrationCard extends StatelessWidget {
           Expanded(child: Text(text, style: TextStyle(color: onColour))),
           TextButton(onPressed: onTap, child: Text(action)),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Upcoming events ──────────────────────────────────────────────────────────
+
+class _UpcomingEventsLine extends StatelessWidget {
+  const _UpcomingEventsLine();
+
+  @override
+  Widget build(BuildContext context) {
+    final count = context.watch<FeedService>().upcomingEvents.length;
+    if (count == 0) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: InkWell(
+        onTap: () => context.push('/events'),
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(children: [
+            Icon(Icons.event_outlined, size: 18, color: cs.primary),
+            const SizedBox(width: 8),
+            Text('$count upcoming event${count == 1 ? '' : 's'}',
+                style: TextStyle(color: cs.primary, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Icon(Icons.chevron_right, color: cs.primary),
+          ]),
+        ),
       ),
     );
   }

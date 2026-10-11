@@ -11,6 +11,7 @@ import '../crypto/blob.dart';
 import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/contact.dart';
+import '../models/event_time.dart';
 import '../models/media_provenance.dart';
 import '../models/post.dart';
 import '../models/sphere.dart';
@@ -144,6 +145,9 @@ class FeedService extends ChangeNotifier {
     required DateTime startsAt,
     DateTime? endsAt,
     String place = '',
+    List<String> coHosts = const [],
+    String recurrence = 'none',
+    String ticketUrl = '',
     String details = '',
     String? authorName,
   }) =>
@@ -159,6 +163,10 @@ class FeedService extends ChangeNotifier {
           if (endsAt != null) 'ends_at': endsAt.toIso8601String(),
           'place': place,
           'rsvps': <String, dynamic>{},
+          if (coHosts.isNotEmpty) 'co_hosts': coHosts,
+          if (recurrence != 'none') 'recurrence': recurrence,
+          if (ticketUrl.isNotEmpty) 'ticket_url': ticketUrl,
+          'photos': <dynamic>[],
         },
       );
 
@@ -182,7 +190,7 @@ class FeedService extends ChangeNotifier {
     final rsvps = Map<String, dynamic>.from(payload['rsvps'] as Map? ?? {});
     if (status.isEmpty) {
       rsvps.remove(who);
-    } else if (const {'going', 'maybe', 'no'}.contains(status)) {
+    } else if (const {'going', 'interested', 'maybe', 'no'}.contains(status)) {
       rsvps[who] = status;
     } else {
       return;
@@ -1000,6 +1008,23 @@ class FeedService extends ChangeNotifier {
       if (index != -1 && _posts[index].isEvent) {
         _applyRsvp(index, authorId, json['status'] as String? ?? '');
       }
+    } else if (json['type'] == 'event_update') {
+      final index = _posts.indexWhere((p) => p.id == json['post_id']);
+      if (index != -1 && _posts[index].isEvent) {
+        _applyEventUpdate(index, authorId, json);
+      }
+    } else if (json['type'] == 'event_photo') {
+      final index = _posts.indexWhere((p) => p.id == json['post_id']);
+      final ref = json['ref'];
+      final id = json['id'];
+      if (index != -1 && _posts[index].isEvent && ref is String && id is String) {
+        String local = ref;
+        if (BlobRef.looksLikeRef(ref) && !(dataSaver?.call() ?? false)) {
+          local = await MediaService.decodeAndSaveImage(ref) ?? ref;
+        }
+        _applyEventPhoto(index, id: id, by: authorId, ref: local,
+            caption: json['caption'] is String ? json['caption'] as String : '');
+      }
     } else if (json['type'] == 'post_vote') {
       final index = _posts.indexWhere((p) => p.id == json['post_id']);
       if (index != -1 && _posts[index].isPoll) {
@@ -1579,6 +1604,125 @@ class FeedService extends ChangeNotifier {
       kind: 'reshare',
       payload: {'original': core.toJson()},
     );
+  }
+
+  // ── Events: hosts, details, photos, what is coming ────────────────────
+
+  static List<String> coHostsOf(Post post) =>
+      (post.payload?['co_hosts'] as List?)?.whereType<String>().toList() ?? const [];
+
+  /// The author, or a co-host the author named.
+  static bool hostedBy(Post post, String? who) =>
+      who != null && (post.authorId == who || coHostsOf(post).contains(who));
+
+  bool isEventHost(Post post) => hostedBy(post, _myPublicKey);
+
+  static const _eventFields = {'title', 'starts_at', 'ends_at', 'place', 'ticket_url', 'recurrence'};
+
+  /// Change an event's details. Any host may; the list of co-hosts only the
+  /// author. [fields] uses the payload's own names; a null value clears.
+  Future<void> updateEvent(String postId, Map<String, Object?> fields) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1 || !_posts[index].isEvent) return;
+    final json = <String, dynamic>{'type': 'event_update', 'post_id': postId, ...fields};
+    if (!_applyEventUpdate(index, me, json)) return;
+    for (final sphereId in _posts[index].sphereIds) {
+      await _publishToSphere(sphereId: sphereId, type: 'event_update', payloadJson: jsonEncode(json));
+    }
+  }
+
+  bool _applyEventUpdate(int index, String by, Map<String, dynamic> json) {
+    final post = _posts[index];
+    if (!hostedBy(post, by)) {
+      DebugLogService().warn('Feed', 'Dropping event update from a non-host');
+      return false;
+    }
+    final payload = Map<String, dynamic>.from(post.payload ?? {});
+    var changed = false;
+    for (final f in _eventFields) {
+      if (!json.containsKey(f)) continue;
+      final v = json[f];
+      if (v == null || (v is String && v.isEmpty)) {
+        if (f == 'title' || f == 'starts_at') continue; // an event keeps a title and a start
+        changed |= payload.remove(f) != null;
+      } else if (v is String) {
+        if ((f == 'starts_at' || f == 'ends_at') && DateTime.tryParse(v) == null) continue;
+        if (f == 'recurrence' && !EventTime.recurrences.contains(v)) continue;
+        payload[f] = v.length > 400 ? v.substring(0, 400) : v;
+        changed = true;
+      }
+    }
+    if (json.containsKey('co_hosts')) {
+      if (by != post.authorId) {
+        DebugLogService().warn('Feed', 'Only the author names co-hosts');
+      } else {
+        final hosts = (json['co_hosts'] as List?)?.whereType<String>().take(10).toList() ?? const <String>[];
+        payload['co_hosts'] = hosts;
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    _posts[index] = post.copyWith(payload: payload);
+    _persistPosts();
+    notifyListeners();
+    return true;
+  }
+
+  /// Add a picture to an event, as anyone in its sphere may.
+  Future<void> addEventPhoto(String postId, String localPath, {String caption = ''}) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1 || !_posts[index].isEvent) return;
+    final id = const Uuid().v4();
+    _applyEventPhoto(index, id: id, by: me, ref: localPath, caption: caption);
+    final ref = await MediaService.prepareForRelay(localPath);
+    if (ref == null) {
+      DebugLogService().warn('Feed', 'Event photo could not be uploaded; kept here only');
+      return;
+    }
+    final json = {'type': 'event_photo', 'post_id': postId, 'id': id, 'ref': ref, 'caption': caption};
+    for (final sphereId in _posts[index].sphereIds) {
+      await _publishToSphere(sphereId: sphereId, type: 'event_photo', payloadJson: jsonEncode(json));
+    }
+  }
+
+  void _applyEventPhoto(int index,
+      {required String id, required String by, required String ref, String caption = ''}) {
+    final post = _posts[index];
+    final payload = Map<String, dynamic>.from(post.payload ?? {});
+    final photos = List<dynamic>.from(payload['photos'] as List? ?? const []);
+    if (photos.any((p) => p is Map && p['id'] == id)) return;
+    if (photos.length >= 60) return;
+    photos.add({
+      'id': id,
+      'by': by,
+      'ref': ref,
+      'caption': caption.length > 200 ? caption.substring(0, 200) : caption,
+      'at': DateTime.now().toIso8601String(),
+    });
+    payload['photos'] = photos;
+    _posts[index] = post.copyWith(payload: payload);
+    _persistPosts();
+    notifyListeners();
+  }
+
+  /// Events still to come, soonest first; a recurring event by its next
+  /// occurrence.
+  List<Post> get upcomingEvents {
+    final now = DateTime.now();
+    final entries = <(DateTime, Post)>[];
+    for (final p in posts.where((p) => p.isEvent)) {
+      final starts = DateTime.tryParse(p.payload?['starts_at'] as String? ?? '');
+      if (starts == null) continue;
+      final ends = DateTime.tryParse(p.payload?['ends_at'] as String? ?? '');
+      final recurrence = p.payload?['recurrence'] as String? ?? 'none';
+      if (EventTime.isPast(starts: starts, ends: ends, recurrence: recurrence, now: now)) continue;
+      final next = EventTime.occurrence(starts: starts, ends: ends, recurrence: recurrence, now: now);
+      entries.add((next.starts, p));
+    }
+    entries.sort((a, b) => a.$1.compareTo(b.$1));
+    return [for (final e in entries) e.$2];
   }
 
   // ── Recommendations ───────────────────────────────────────────────────

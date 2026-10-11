@@ -90,7 +90,8 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   `profile`, `devices`, `contacts`; sphere-side equivalents are `sphere_msg_*` items and the
   feed carries `post_edit`, `post_pin`, `post_settings` (comments off), `post_delete`,
   `post_suggest`, `event_rsvp`, `post_vote`, `coauthor_accept`, `report`, `comment`,
-  `reaction`, and on comments
+  `reaction`, `event_update` (details by the author or a named co-host; the co-host list by
+  the author only), `event_photo` (any member, deduplicated by id), and on comments
   `comment_edit` (earlier text kept), `comment_delete`, `comment_hide`, `comment_pin`,
   `comment_react`. Who may do what is decided by who signed: edits by the comment's
   author, hide and pin by the post's author or a sphere admin, delete by either, a
@@ -108,6 +109,13 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   as the sender's whole view and drops any field it no longer carries, while a malformed
   field is ignored. Only the legacy contact is told they are one. "View as" on the
   profile screen renders exactly that cut. Photos travel as encrypted blobs.
+- **Events** are posts of kind `event`; `EventTime` (pure) decides the next occurrence
+  of a repeating one, whether it is over, and writes the `.ics`. Reminders are local:
+  the choice lives in `LibraryService`, the alarms in the device's notification
+  scheduler (`NotificationSink.schedule`, UTC instants, inexact), re-set at every start
+  by `EventReminders.resync`. "Add to calendar" and `.ics` export go through the
+  `spheres/calendar` platform channel in `MainActivity.kt` (Android only; elsewhere the
+  bridge throws and the UI shows the message).
 - **Invite links** are `spheres://join?s=&t=&via=&n=`; the request goes to the admin's open
   inbox and approval makes the requester a contact and a member in one step.
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
@@ -153,7 +161,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 700 tests in 60 files under test/{crypto,models,screens,services}
+flutter test                       # 711 tests in 61 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug
