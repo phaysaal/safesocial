@@ -673,8 +673,18 @@ class FeedService extends ChangeNotifier {
   Future<void> connectOwnDevices() async {
     final sessions = _sessions;
     final me = _myPublicKey;
-    if (sessions == null || me == null) return;
-    for (final device in sessions.devicesOf(me)) {
+    if (sessions == null || me == null) {
+      // A stub that returns quietly here is how posts stopped reaching a
+      // linked phone after every restart; say so instead.
+      DebugLogService().warn('Feed', 'Cannot open own-device channels before initSync');
+      return;
+    }
+    final others = sessions.devicesOf(me);
+    DebugLogService().info('Feed',
+        others.isEmpty
+            ? 'No other devices of ours to listen for'
+            : 'Listening for ${others.length} other device(s) of ours');
+    for (final device in others) {
       try {
         final mailbox = await sessions.mailboxFor(
           peerIdentityKey: me,

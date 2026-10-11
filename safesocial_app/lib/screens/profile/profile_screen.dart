@@ -95,7 +95,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 viewAs.isEmpty
                     ? 'This is what a contact who shares none of your spheres sees.'
                     : 'This is what a contact in ${viewAs.map((id) => spheres.sphere(id)?.name ?? id).join(', ')} sees.',
-                style: theme.textTheme.bodySmall,
+                style: theme.textTheme.bodySmall?.copyWith(color: cs.onTertiaryContainer),
               ),
             ),
           Expanded(

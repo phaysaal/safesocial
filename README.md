@@ -132,7 +132,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 684 tests in 57 files
+flutter test                       # 691 tests in 59 files
 flutter run
 ```
 

@@ -1506,10 +1506,21 @@ class SphereService extends ChangeNotifier {
           return;
         }
 
-        final refusal = _authorityRefusal(existing, op);
-        if (refusal != null) {
-          DebugLogService().warn('Sphere', 'Rejecting op: $refusal');
-          return;
+        // An operation our own identity signed on another of our devices is
+        // ours: nobody else can produce that signature, and the member list
+        // in it is the state we decided on there. Judging it against what
+        // this device holds is wrong when this device missed a step; the
+        // second phone was stuck a version behind for good, refusing every
+        // later change as "may not change the member list".
+        if (op.by == _myIdentityKey) {
+          DebugLogService().info('Sphere',
+              'Adopting a change our identity made on another device (epoch ${op.epoch})');
+        } else {
+          final refusal = _authorityRefusal(existing, op);
+          if (refusal != null) {
+            DebugLogService().warn('Sphere', 'Rejecting op: $refusal');
+            return;
+          }
         }
       }
 

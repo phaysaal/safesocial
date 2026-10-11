@@ -159,16 +159,15 @@ Future<void> wireIdentity({
         coverRef: cover,
         featuredRefs: featured,
       ),
-      everything: ProfileSharing.payloadFor(
-        profile: profile,
-        peer: me ?? '',
-        sharedSpheres: {for (final s in sphereService.spheres) s.id},
+      everything: identityService.profileForOwnDevices(
         avatarRef: avatar,
         coverRef: cover,
         featuredRefs: featured,
       ),
     );
   };
+  chatService.onOwnProfile = (json) =>
+      identityService.adoptFromOwnDevice(json, materialise: MediaService.decodeAndSaveImage);
   // A temporary picture whose time ran out while the app was closed.
   unawaited(identityService.expireTemporaryAvatar());
   // Invite links: a request lands in our inbox; approving makes them a
@@ -330,6 +329,10 @@ Future<void> wireIdentity({
   }
 
   contactService.onContactReady = wireContact;
+  // The feed needs our key before it can open anything, including the channel
+  // to our own other devices; opening that first left every post after a
+  // restart on this device only.
+  feedService.initSync(publicKey, secretKey, contactService.contacts);
   await chatService.connectOwnDevices();
   await feedService.connectOwnDevices();
 
@@ -342,7 +345,6 @@ Future<void> wireIdentity({
   // Polls the handshake inbox and backfills any missing exchange keys.
   contactService.startInboxPolling();
 
-  feedService.initSync(publicKey, secretKey, contactService.contacts);
   albumService.initSync(publicKey, secretKey);
 
   DebugLogService().success(

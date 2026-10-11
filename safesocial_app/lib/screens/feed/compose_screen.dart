@@ -712,6 +712,11 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 SafeArea(
                   child: Row(
                     children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
                       IconButton(
                         tooltip: 'Add a photo',
                         icon: Icon(Icons.photo_library_outlined,
@@ -765,7 +770,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
                         icon: Icon(Icons.group_add_outlined, color: cs.primary),
                         onPressed: _posting || _targets.isEmpty ? null : _pickCoAuthors,
                       ),
-                      const Spacer(),
+                            ],
+                          ),
+                        ),
+                      ),
                       if (_media.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(right: 16),

@@ -84,6 +84,55 @@ void main() {
     });
   });
 
+  group('our other devices', () {
+    test('a newer profile from another of our devices is adopted without a broadcast',
+        () async {
+      final here = IdentityService();
+      await here.createIdentity('Fai');
+      var broadcasts = 0;
+      here.onProfileChanged = (_) async => broadcasts++;
+
+      final there = IdentityService();
+      await there.createIdentity('Fai');
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      await there.updateProfile(bio: 'from the tablet');
+      await there.updateAbout(const ProfileAbout(pronouns: 'he/him'));
+      await there.setFieldAudience(ProfileField.work, FieldAudience.me);
+
+      await here.adoptFromOwnDevice(
+        there.profileForOwnDevices(avatarRef: 'blob:a'),
+        materialise: (ref) async => '/local/$ref',
+      );
+      final p = here.currentIdentity!;
+      expect(p.bio, 'from the tablet');
+      expect(p.about.pronouns, 'he/him');
+      expect(p.audience[ProfileField.work], FieldAudience.me);
+      expect(p.avatarRef, '/local/blob:a');
+      expect(p.publicKey, isNot(there.publicKey), reason: 'our key stays ours');
+      expect(broadcasts, 0);
+    });
+
+    test('an older copy is ignored', () async {
+      final here = IdentityService();
+      await here.createIdentity('Fai');
+      final stale = IdentityService();
+      await stale.createIdentity('Fai');
+      await stale.updateProfile(bio: 'old');
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      await here.updateProfile(bio: 'new');
+      await here.adoptFromOwnDevice(stale.profileForOwnDevices());
+      expect(here.currentIdentity!.bio, 'new');
+    });
+
+    test('garbage from a device is ignored', () async {
+      final here = IdentityService();
+      await here.createIdentity('Fai');
+      await here.adoptFromOwnDevice({'own': 'nope'});
+      await here.adoptFromOwnDevice({'own': {'displayName': 7}});
+      expect(here.currentIdentity!.displayName, 'Fai');
+    });
+  });
+
   group('a contact\'s profile', () {
     test('about, cover, featured and the legacy flag are taken in', () async {
       final contacts = ContactService();

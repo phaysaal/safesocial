@@ -473,6 +473,77 @@ class IdentityService extends ChangeNotifier {
     await onProfileChanged?.call(_currentIdentity!);
   }
 
+  /// What our other devices need to show the same profile: everything local
+  /// except file paths, which are replaced by the relay references the
+  /// caller uploaded.
+  Map<String, dynamic> profileForOwnDevices({
+    String? avatarRef,
+    String? coverRef,
+    List<String> featuredRefs = const [],
+  }) {
+    final p = _currentIdentity;
+    if (p == null) return {};
+    final own = p.toJson()
+      ..remove('avatarRef')
+      ..remove('coverRef')
+      ..remove('featuredRefs')
+      ..remove('avatarBefore');
+    return {
+      'own': own,
+      if (avatarRef != null) 'avatar': avatarRef,
+      if (coverRef != null) 'cover': coverRef,
+      if (featuredRefs.isNotEmpty) 'featured': featuredRefs,
+    };
+  }
+
+  /// Our profile as another of our devices has it. Taken when it is newer
+  /// than ours; nothing is broadcast back, or the two devices would trade
+  /// the same profile forever.
+  Future<void> adoptFromOwnDevice(
+    Map<String, dynamic> json, {
+    Future<String?> Function(String reference)? materialise,
+  }) async {
+    final current = _currentIdentity;
+    final own = json['own'];
+    if (current == null || own is! Map) return;
+    final UserProfile incoming;
+    try {
+      incoming = UserProfile.fromJson({
+        ...own.cast<String, dynamic>(),
+        'publicKey': current.publicKey,
+        'keyExchangePublicKey': current.keyExchangePublicKey,
+      });
+    } catch (_) {
+      return;
+    }
+    if (!incoming.updatedAt.isAfter(current.updatedAt)) return;
+
+    Future<String?> fetch(Object? ref) async {
+      if (ref is! String || ref.isEmpty || materialise == null) return null;
+      return materialise(ref);
+    }
+
+    final avatar = await fetch(json['avatar']);
+    final cover = await fetch(json['cover']);
+    final featured = <String>[];
+    for (final ref in (json['featured'] as List?)?.whereType<String>() ?? const <String>[]) {
+      final local = await fetch(ref);
+      if (local != null) featured.add(local);
+    }
+    _currentIdentity = incoming.copyWith(
+      avatarRef: avatar ?? current.avatarRef,
+      coverRef: cover,
+      clearCover: cover == null,
+      featuredRefs: featured,
+      // The timer's "before" picture is a path on the other device; a
+      // temporary picture adopted here simply becomes the picture.
+      clearTemporaryAvatar: true,
+    );
+    await _persistIdentity();
+    notifyListeners();
+    DebugLogService().info('Identity', 'Profile adopted from another of our devices');
+  }
+
   /// Pin or unpin one of our posts on our profile. At most ten.
   Future<void> setPinnedToProfile(String postId, bool pinned) async {
     if (_currentIdentity == null) return;

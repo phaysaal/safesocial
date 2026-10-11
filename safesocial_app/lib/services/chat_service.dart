@@ -238,6 +238,9 @@ class ChatService extends ChangeNotifier {
   /// whatever fields our shared spheres put us in the audience for.
   Future<void> Function(String from, Map<String, dynamic> profile)? onProfile;
 
+  /// One of our own other devices changed our profile; adopt it here.
+  Future<void> Function(Map<String, dynamic> profile)? onOwnProfile;
+
   /// Tell every contact, and our other devices, how we look now. Wrapped, so
   /// it never consumes a ratchet step.
   ///
@@ -955,8 +958,13 @@ class ChatService extends ChangeNotifier {
 
       if (opened.type == 'profile') {
         final json = jsonDecode(opened.plaintext);
-        if (json is Map<String, dynamic> && opened.from != _myPublicKey) {
-          await onProfile?.call(opened.from, json);
+        if (json is Map<String, dynamic>) {
+          if (opened.from == _myPublicKey) {
+            // Edited on another of our devices: the same profile, here too.
+            await onOwnProfile?.call(json);
+          } else {
+            await onProfile?.call(opened.from, json);
+          }
         }
         return;
       }

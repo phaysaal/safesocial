@@ -133,7 +133,12 @@ both and a reply from either reaching the third and the sibling). Direct
 chat, media, offline delivery, spheres, posts and sphere chat worked; the first call
 crashed the receiver and a half-dead socket lost sphere messages, both fixed the same
 day. A ntfy wake brought a stopped app back with a notification, and an encrypted
-backup restored from Settings (which had never asked for the passphrase; fixed). When a change touches the message path, say so in the commit and prefer changes
+backup restored from Settings (which had never asked for the passphrase; fixed). The
+evening's two-phone pass on one identity found that the feed opened its channel to our
+own devices before it had our key, so after any restart a post never reached the linked
+phone (fixed, with a log line where the quiet return was), and that a sibling that missed
+one membership op refused every later one for good (fixed: an op our own identity signed
+on another device is adopted as it stands). When a change touches the message path, say so in the commit and prefer changes
 that a test can cover. Emulator pairs cannot
 scan QR codes; debug builds print the invite link instead (see `identity_service.dart`).
 
@@ -143,7 +148,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 684 tests in 57 files under test/{crypto,models,screens,services}
+flutter test                       # 691 tests in 59 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug
