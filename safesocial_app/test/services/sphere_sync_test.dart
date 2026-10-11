@@ -213,6 +213,72 @@ void main() {
       expect(payload['items'], ['sealed-e2']);
     });
 
+    test('never hands over what its author hid from the asker', () async {
+      // Found on hardware: a story hidden from the tablet was never sent to
+      // it, and then arrived from a sync round, which only knew that the
+      // tablet lacked it.
+      final (spheres, sync, sphere, _) = await deviceFor();
+      await sync.remember(sphereId: sphere.id, envelopeId: 'story', sealed: 'sealed-story', notFor: {bob});
+      await keep(sync, sphere.id, 'e2');
+
+      final sent = <String>[];
+      sync.sendToPeer = (peer, payload) async {
+        sent.add(payload);
+        return true;
+      };
+      await sync.handleDigest(bob, sphere.id, {'type': 'sync_digest', 'have': []});
+      var payload = jsonDecode((await spheres.openContent(sent.single)).plaintext) as Map;
+      expect(payload['items'], ['sealed-e2']);
+
+      sent.clear();
+      await sync.handleDigest(carol, sphere.id, {'type': 'sync_digest', 'have': []});
+      payload = jsonDecode((await spheres.openContent(sent.single)).plaintext) as Map;
+      expect(payload['items'], containsAll(['sealed-story', 'sealed-e2']), reason: 'Carol was not hidden from');
+
+      // The exclusion survives a restart.
+      final again = SphereSyncService(spheres, random: Random(1));
+      await again.load();
+      sent.clear();
+      again.sendToPeer = (peer, payload) async {
+        sent.add(payload);
+        return true;
+      };
+      await again.handleDigest(bob, sphere.id, {'type': 'sync_digest', 'have': []});
+      payload = jsonDecode((await spheres.openContent(sent.single)).plaintext) as Map;
+      expect(payload['items'], ['sealed-e2']);
+    });
+
+    test('skips what was sealed before the asker could read, and says so in its own digest', () async {
+      final (spheres, sync, sphere, asked) = await deviceFor();
+      final early = await spheres.sealContent(sphereId: sphere.id, type: 'feed', plaintext: '{}');
+      await spheres.rename(sphere.id, description: 'later');
+      final late = await spheres.sealContent(sphereId: sphere.id, type: 'feed', plaintext: '{}');
+      await sync.remember(sphereId: sphere.id, envelopeId: 'early', sealed: early);
+      await sync.remember(sphereId: sphere.id, envelopeId: 'late', sealed: late);
+
+      final sent = <String>[];
+      sync.sendToPeer = (peer, payload) async {
+        sent.add(payload);
+        return true;
+      };
+      final current = spheres.sphere(sphere.id)!.epoch;
+      await sync.handleDigest(bob, sphere.id, {'type': 'sync_digest', 'have': [], 'since': current});
+      var payload = jsonDecode((await spheres.openContent(sent.single)).plaintext) as Map;
+      expect(payload['items'], [late]);
+
+      sent.clear();
+      await sync.handleDigest(bob, sphere.id, {'type': 'sync_digest', 'have': []});
+      payload = jsonDecode((await spheres.openContent(sent.single)).plaintext) as Map;
+      expect(payload['items'], containsAll([early, late]), reason: 'no since: everything');
+
+      // Our own digest names the oldest epoch we hold.
+      sent.clear();
+      await sync.syncSphere(sphere.id);
+      final digest = jsonDecode((await spheres.openContent(sent.first)).plaintext) as Map;
+      expect(digest['since'], spheres.keyring.earliestEpoch(sphere.id));
+      expect(asked, isEmpty, reason: 'the original hook was replaced');
+    });
+
     test('says nothing when the peer already has everything', () async {
       final (_, sync, sphere, _) = await deviceFor();
       await keep(sync, sphere.id, 'e1');

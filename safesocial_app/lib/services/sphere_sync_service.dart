@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../crypto/envelope.dart';
 import 'debug_log_service.dart';
 import 'secure_store.dart';
 import 'sphere_service.dart';
@@ -77,15 +78,25 @@ class SphereSyncService extends ChangeNotifier {
   // ── Keeping ────────────────────────────────────────────────────────────────
 
   /// Remember an envelope so it can be offered to somebody who missed it.
+  ///
+  /// [notFor] names members this envelope must never be handed to: a story
+  /// its author hid from them. Found on hardware: the hidden member was
+  /// never sent the story, and then received it from a sync round anyway.
   Future<void> remember({
     required String sphereId,
     required String envelopeId,
     required String sealed,
     DateTime? at,
+    Set<String> notFor = const {},
   }) async {
     final held = _archive.putIfAbsent(sphereId, () => {});
     if (held.containsKey(envelopeId)) return;
-    held[envelopeId] = _Held(sealed: sealed, at: at ?? DateTime.now());
+    held[envelopeId] = _Held(
+      sealed: sealed,
+      at: at ?? DateTime.now(),
+      epoch: _Held.epochOf(sealed),
+      notFor: notFor,
+    );
     await _persist(sphereId);
   }
 
@@ -123,13 +134,21 @@ class SphereSyncService extends ChangeNotifier {
     if (peers.isEmpty) return;
 
     final digest = _digestFor(sphereId);
+    // The oldest epoch we can read. A peer need not send what was sealed
+    // before we joined: we could not open it, and asking round after round
+    // for the key of a time before our membership helps nobody.
+    final since = _spheres.keyring.earliestEpoch(sphereId);
     var asked = 0;
     for (final peer in peers.take(peersPerRound)) {
       try {
         final sealed = await _spheres.sealContent(
           sphereId: sphereId,
           type: 'sphere_content',
-          plaintext: jsonEncode({'type': 'sync_digest', 'have': digest}),
+          plaintext: jsonEncode({
+            'type': 'sync_digest',
+            'have': digest,
+            if (since != null) 'since': since,
+          }),
         );
         // Not queued: a digest describes what we held a moment ago, so a stale
         // one is worse than none. The next round is never far away.
@@ -179,12 +198,17 @@ class SphereSyncService extends ChangeNotifier {
     final theirs = (payload['have'] as List<dynamic>? ?? const [])
         .whereType<String>()
         .toSet();
+    final since = payload['since'];
     final held = _archive[sphereId];
     if (held == null || held.isEmpty) return;
 
     // Newest first: what somebody missed most recently is what they most want.
+    // Never what was hidden from them, nor what was sealed before they could
+    // read it.
     final missing = held.entries
         .where((e) => !theirs.contains(e.key))
+        .where((e) => !e.value.notFor.contains(from))
+        .where((e) => since is! int || e.value.epoch < 0 || e.value.epoch >= since)
         .toList()
       ..sort((a, b) => b.value.at.compareTo(a.value.at));
     if (missing.isEmpty) return;
@@ -279,13 +303,38 @@ class _Held {
   final String sealed;
   final DateTime at;
 
-  const _Held({required this.sealed, required this.at});
+  /// The sphere epoch the envelope was sealed under, or -1 when unknown.
+  final int epoch;
 
-  Map<String, dynamic> toJson() =>
-      {'s': sealed, 'at': at.toIso8601String()};
+  /// Members this must never be offered to.
+  final Set<String> notFor;
+
+  const _Held({
+    required this.sealed,
+    required this.at,
+    this.epoch = -1,
+    this.notFor = const {},
+  });
+
+  static int epochOf(String sealed) {
+    try {
+      return Envelope.decode(sealed).sphereEpoch;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+        's': sealed,
+        'at': at.toIso8601String(),
+        if (epoch >= 0) 'e': epoch,
+        if (notFor.isNotEmpty) 'nf': notFor.toList(),
+      };
 
   static _Held fromJson(Map<String, dynamic> json) => _Held(
         sealed: json['s'] as String,
         at: DateTime.parse(json['at'] as String),
+        epoch: json['e'] is int ? json['e'] as int : epochOf(json['s'] as String),
+        notFor: (json['nf'] as List?)?.whereType<String>().toSet() ?? const {},
       );
 }

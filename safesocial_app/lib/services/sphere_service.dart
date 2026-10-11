@@ -167,6 +167,11 @@ class MembershipOp {
   static const opTransfer = 'transfer';
   static const opRename = 'rename';
 
+  /// An admin's signed snapshot of the current state, sent to one member who
+  /// asked for the key they are missing. Not a change: it carries the epoch
+  /// the admin is at, not a new one, and is never recorded in the log.
+  static const opSync = 'sync';
+
   final String sphereId;
 
   /// Epoch this operation produces. Must be exactly one past the last applied
@@ -1367,6 +1372,160 @@ class SphereService extends ChangeNotifier {
     }
   }
 
+  /// Seal an operation payload for every device of one member.
+  Future<void> _sendOpPayloadTo(String peer, String payload, String what) async {
+    final send = sendToPeer;
+    final sessions = _sessions;
+    if (send == null || sessions == null) return;
+    try {
+      final sealed = await sessions.sealForDevices(
+        peerIdentityKey: peer,
+        fallbackExchangeKey: _resolveExchangeKey?.call(peer),
+        type: 'sphere_op',
+        plaintext: payload,
+        mode: SealMode.wrap,
+      );
+      for (final item in sealed) {
+        await send(peer, item.sealed, deviceKey: item.deviceKey);
+      }
+    } on NoSessionException {
+      DebugLogService().warn('Sphere', 'No encryption key for $peer yet; could not send $what');
+    } catch (e) {
+      DebugLogService().error('Sphere', 'Could not send $what: $e');
+    }
+  }
+
+  // ── Missing keys ───────────────────────────────────────────────────────────
+  //
+  // Found on hardware: the tablet missed two membership changes (it was
+  // offline, or had no session with the phone yet when they were sent) and
+  // from then on could read nothing in the sphere: every post was "No key for
+  // epoch 4" and nothing would ever bring the key. A member who meets content
+  // for an epoch it does not hold now asks the sphere's admins; an admin
+  // answers that one member with a signed snapshot of the current state that
+  // carries the key.
+
+  final Map<String, DateTime> _keyAskedAt = {};
+  final Map<String, DateTime> _keyAnsweredAt = {};
+
+  /// How often one sphere is asked about, and one member answered.
+  static const keyRequestInterval = Duration(minutes: 5);
+  static const keyAnswerInterval = Duration(minutes: 1);
+
+  /// Ask every admin of [sphereId] for the keys we lack. Throttled per sphere.
+  /// Returns the admins asked (empty when nothing was sent). [epoch] is the
+  /// one we met and could not open; one from before we joined is not asked
+  /// about, since content sealed then was never ours to read.
+  Future<List<String>> requestKey(String sphereId, {int? epoch, DateTime? now}) async {
+    final sphere = _spheres[sphereId];
+    final me = _myIdentityKey;
+    if (sphere == null || me == null) return const [];
+    if (epoch != null) {
+      final earliest = keyring.earliestEpoch(sphereId);
+      if (earliest != null && epoch < earliest) return const [];
+      if (keyring.hasKey(sphereId, epoch)) return const [];
+    }
+    final at = now ?? DateTime.now();
+    final last = _keyAskedAt[sphereId];
+    if (last != null && at.difference(last) < keyRequestInterval) return const [];
+    _keyAskedAt[sphereId] = at;
+    final admins = sphere.members
+        .where((m) => m.isAdmin && m.identityKey != me)
+        .map((m) => m.identityKey)
+        .toList();
+    if (admins.isEmpty) return const [];
+    final payload = jsonEncode({
+      'key_request': {'sphereId': sphereId, 'epoch': sphere.epoch},
+    });
+    DebugLogService().info('Sphere',
+        'Asking ${admins.length} admin(s) for the key of "${sphere.name}" (we hold epoch ${sphere.epoch})');
+    for (final admin in admins) {
+      await _sendOpPayloadTo(admin, payload, 'key request');
+    }
+    return admins;
+  }
+
+  /// The signed snapshot an admin sends [member] who asked, or null when the
+  /// request is not ours to answer: an unknown sphere, a sphere we do not
+  /// administer, someone who is not a member, someone ahead of us, or the same
+  /// member within a minute.
+  @visibleForTesting
+  Future<String?> keyAnswerFor(String member, String sphereId, int theirEpoch,
+      {DateTime? now}) async {
+    final sphere = _spheres[sphereId];
+    final me = _myIdentityKey;
+    final secret = _myIdentitySecret;
+    if (sphere == null || me == null || secret == null) return null;
+    if (!sphere.isAdmin(me)) return null;
+    if (!sphere.contains(member) || member == me) return null;
+    if (theirEpoch > sphere.epoch) return null;
+    final key = keyring.keyFor(sphere.id, sphere.epoch);
+    if (key == null) return null;
+    final at = now ?? DateTime.now();
+    final last = _keyAnsweredAt['$sphereId:$member'];
+    if (last != null && at.difference(last) < keyAnswerInterval) return null;
+    _keyAnsweredAt['$sphereId:$member'] = at;
+    final op = MembershipOp(
+      sphereId: sphere.id,
+      epoch: sphere.epoch,
+      op: MembershipOp.opSync,
+      target: member,
+      by: me,
+      timestampMs: at.millisecondsSinceEpoch,
+      members: sphere.members,
+      name: sphere.name,
+      description: sphere.description,
+      kind: sphere.kind,
+    );
+    final signature = ed.sign(ed.PrivateKey(hex.decode(secret)), op.signedBytes());
+    // Every key from the one they hold to ours: content from the epochs they
+    // missed must become readable too, not only what comes next.
+    final keys = <String, String>{};
+    for (var e = theirEpoch; e <= sphere.epoch; e++) {
+      final k = keyring.keyFor(sphere.id, e);
+      if (k != null) keys['$e'] = base64Encode(k);
+    }
+    return jsonEncode({
+      'op': op.toJson(),
+      'signature': hex.encode(signature),
+      'sphereKey': base64Encode(key),
+      'sphereKeys': keys,
+    });
+  }
+
+  /// Keep every key an admin's answer carries that we lack, up to [upTo].
+  Future<bool> _storeOfferedKeys(String sphereId, Map<String, dynamic> payload, int upTo) async {
+    final offered = payload['sphereKeys'];
+    var stored = false;
+    if (offered is Map) {
+      for (final entry in offered.entries) {
+        final epoch = int.tryParse('${entry.key}');
+        final b64 = entry.value;
+        if (epoch == null || epoch > upTo || b64 is! String) continue;
+        if (keyring.hasKey(sphereId, epoch)) continue;
+        try {
+          keyring.store(sphereId, epoch, Uint8List.fromList(base64Decode(b64)));
+          stored = true;
+        } catch (e) {
+          DebugLogService().error('Sphere', 'Bad sphere key in answer: $e');
+        }
+      }
+    }
+    if (stored) await keyring.persist();
+    return stored;
+  }
+
+  Future<void> _handleKeyRequest(String sender, Map<String, dynamic> request) async {
+    final sphereId = request['sphereId'];
+    final epoch = request['epoch'];
+    if (sphereId is! String || epoch is! int) return;
+    final answer = await keyAnswerFor(sender, sphereId, epoch);
+    if (answer == null) return;
+    DebugLogService().info('Sphere',
+        'Sending ${_spheres[sphereId]?.name ?? sphereId}\'s key (epoch ${_spheres[sphereId]?.epoch}) to a member who asked');
+    await _sendOpPayloadTo(sender, answer, 'key answer');
+  }
+
   /// Send a signed membership operation, and optionally the new epoch key,
   /// to every current member.
   Future<void> _broadcastOp(
@@ -1440,6 +1599,11 @@ class SphereService extends ChangeNotifier {
         await _handleIncomingStatement(senderIdentityKey, statementJson);
         return;
       }
+      final keyRequest = payload['key_request'];
+      if (keyRequest is Map<String, dynamic>) {
+        await _handleKeyRequest(senderIdentityKey, keyRequest);
+        return;
+      }
 
       final op = MembershipOp.fromJson(payload['op'] as Map<String, dynamic>);
 
@@ -1459,6 +1623,39 @@ class SphereService extends ChangeNotifier {
       // Authority check. For a sphere we already know, the author must be an
       // admin as of the state we hold. For a new one, only a create we are
       // named in is accepted.
+      if (op.op == MembershipOp.opSync) {
+        // Only an answer to a member who asked. It never introduces a sphere,
+        // and only an admin as of the state we hold may send one.
+        if (existing == null) return;
+        if (!existing.isAdmin(op.by)) {
+          DebugLogService().warn('Sphere', 'Rejecting key answer: ${op.by} is not an admin');
+          return;
+        }
+        if (op.epoch < existing.epoch) return;
+        final gotKeys = await _storeOfferedKeys(op.sphereId, payload, op.epoch);
+        if (op.epoch == existing.epoch) {
+          final keyB64 = payload['sphereKey'];
+          var got = gotKeys;
+          if (keyB64 is String && keyring.keyFor(op.sphereId, op.epoch) == null) {
+            try {
+              keyring.store(op.sphereId, op.epoch, Uint8List.fromList(base64Decode(keyB64)));
+              await keyring.persist();
+              got = true;
+            } catch (e) {
+              DebugLogService().error('Sphere', 'Bad sphere key in answer: $e');
+            }
+          }
+          if (got) {
+            DebugLogService().info('Sphere', 'Received keys for "${existing.name}" (up to epoch ${op.epoch})');
+            notifyListeners();
+          }
+          return;
+        }
+        // Ahead of us: fall through and adopt the admin's state, key and all.
+        DebugLogService().info('Sphere',
+            'Catching up "${existing.name}" from epoch ${existing.epoch} to ${op.epoch} on an admin\'s answer');
+      }
+
       if (existing == null) {
         if (!op.members.any((m) => m.identityKey == _myIdentityKey)) return;
 
@@ -1573,9 +1770,11 @@ class SphereService extends ChangeNotifier {
         op: op,
         previous: existing,
       );
-      await _record(updated, op.op, op.target, op.by,
-          detail: op.op == MembershipOp.opRename ? op.name : '',
-          at: DateTime.fromMillisecondsSinceEpoch(op.timestampMs));
+      if (op.op != MembershipOp.opSync) {
+        await _record(updated, op.op, op.target, op.by,
+            detail: op.op == MembershipOp.opRename ? op.name : '',
+            at: DateTime.fromMillisecondsSinceEpoch(op.timestampMs));
+      }
       await _persist();
       notifyListeners();
     } catch (e) {
@@ -1667,6 +1866,9 @@ class SphereService extends ChangeNotifier {
         // themselves to a decision that was not theirs.
         if (existing.isAdmin(op.by)) return null;
         return _removalVoteRefusal(existing, op);
+
+      case MembershipOp.opSync:
+        return existing.isAdmin(op.by) ? null : '${op.by} is not an admin';
 
       default:
         if (!existing.isAdmin(op.by)) return '${op.by} is not an admin';

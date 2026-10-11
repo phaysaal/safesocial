@@ -164,7 +164,16 @@ evening's two-phone pass on one identity found that the feed opened its channel 
 own devices before it had our key, so after any restart a post never reached the linked
 phone (fixed, with a log line where the quiet return was), and that a sibling that missed
 one membership op refused every later one for good (fixed: an op our own identity signed
-on another device is adopted as it stands). When a change touches the message path, say so in the commit and prefer changes
+on another device is adopted as it stands). The P4 pass found the tablet two membership
+changes behind and deaf to the whole sphere ("No key for epoch 4" on every post, with
+nothing that would ever bring the key); a member now asks the admins for the key when
+content arrives for an epoch it lacks, and an admin answers that member with a signed
+`sync` snapshot carrying every key from the member's epoch to the admin's
+(`SphereService.requestKey` / `keyAnswerFor`, throttled, never logged as a change). A key
+from before we joined is never asked for, and a sync digest says the oldest epoch we can
+read so peers do not keep offering what was sealed before. The same pass found that a
+story hidden from a member reached them through sphere sync anyway; an archived envelope
+now remembers who it is not for (`SphereSyncService.remember(notFor:)`). When a change touches the message path, say so in the commit and prefer changes
 that a test can cover. Emulator pairs cannot
 scan QR codes; debug builds print the invite link instead (see `identity_service.dart`).
 
@@ -174,7 +183,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 724 tests in 62 files under test/{crypto,models,screens,services}
+flutter test                       # 734 tests in 63 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

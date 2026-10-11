@@ -44,6 +44,14 @@ class SphereKeyring {
 
   bool hasKey(String sphereId, int epoch) => keyFor(sphereId, epoch) != null;
 
+  /// The oldest epoch we hold a key for: in effect, when we joined. Content
+  /// sealed before it was never ours to read.
+  int? earliestEpoch(String sphereId) {
+    final epochs = _keys[sphereId]?.keys;
+    if (epochs == null || epochs.isEmpty) return null;
+    return epochs.reduce((a, b) => a < b ? a : b);
+  }
+
   /// Mint a fresh key for an epoch. Used on creation and on every rotation.
   Uint8List rotate(String sphereId, int epoch) {
     final key = SpheresCrypto.randomKey();

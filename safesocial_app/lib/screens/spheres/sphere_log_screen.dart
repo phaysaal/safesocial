@@ -131,6 +131,8 @@ class SphereLogScreen extends StatelessWidget {
         return '$target became the owner';
       case 'transfer-offer':
         return '$by offered ownership to $target';
+      case 'sync':
+        return '$by sent $target the current key';
       case 'rename':
         return e.detail.isEmpty
             ? '$by changed the sphere details'

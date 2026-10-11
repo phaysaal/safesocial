@@ -531,6 +531,7 @@ class FeedService extends ChangeNotifier {
     required String envelopeId,
     required String sealed,
     DateTime? at,
+    Set<String> notFor,
   })? archiveEnvelope;
 
   /// Handles the two messages that make up a sync round.
@@ -602,6 +603,7 @@ class FeedService extends ChangeNotifier {
         id: '$type:$stamp:$member',
         member: member,
         sealed: sealed,
+        notFor: exclude,
       );
     }
   }
@@ -612,6 +614,7 @@ class FeedService extends ChangeNotifier {
     required String id,
     required String member,
     required String sealed,
+    Set<String> notFor = const {},
   }) async {
     // Archived here rather than at each caller, because this is the single
     // point everything addressed to a sphere leaves by — posts, group
@@ -626,6 +629,7 @@ class FeedService extends ChangeNotifier {
           sphereId: sphereId,
           envelopeId: envelope.id,
           sealed: sealed,
+          notFor: notFor,
         );
       }
     } catch (_) {
@@ -967,6 +971,10 @@ class FeedService extends ChangeNotifier {
 
   // Returns a future so a recovered item can be awaited; the live path still
   // fires and forgets.
+  /// Called with the sphere id and the epoch when an item arrives for a key
+  /// this device does not hold; wired to [SphereService.requestKey].
+  Future<void> Function(String sphereId, int epoch)? onMissingKey;
+
   Future<void> _handleIncomingFeedItem(String contactKey, String data) async {
     final spheres = _spheres;
     if (spheres == null) return;
@@ -1006,7 +1014,16 @@ class FeedService extends ChangeNotifier {
       );
     } catch (e) {
       DebugLogService().warn('Feed', 'Rejected feed item from $contactKey: $e');
-
+      if (e is EnvelopeException && e.message.startsWith('No key for epoch')) {
+        String? sphereId;
+        var epoch = -1;
+        try {
+          final header = Envelope.decode(data);
+          sphereId = header.sphereId;
+          epoch = header.sphereEpoch;
+        } catch (_) {}
+        if (sphereId != null) await onMissingKey?.call(sphereId, epoch);
+      }
     }
   }
 

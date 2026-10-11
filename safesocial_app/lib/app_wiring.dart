@@ -243,6 +243,7 @@ Future<void> wireIdentity({
   // Membership changes and sphere keys travel over the pairwise chat channels
   // that already exist, so there is no separate transport to keep alive.
   sphereService.sendToPeer = chatService.sendRawToPeer;
+  feedService.onMissingKey = (sphereId, epoch) => sphereService.requestKey(sphereId, epoch: epoch);
 
   // Group chat is addressed to the sphere, so it travels the same per-member
   // channels as anything else a sphere sees, and arrives through the feed.
