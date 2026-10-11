@@ -387,6 +387,12 @@ class ContactService extends ChangeNotifier {
       relayHost: request.relayHost,
       announce: false,
     );
+    // The request carried their exchange key, so addContact skipped the
+    // bundle; their device list is only in the bundle. Best effort: without
+    // it the exchange key stands in as their one device.
+    try {
+      await refreshBundle(publicKey);
+    } catch (_) {}
     // Only now do they hear anything back.
     _sendHandshake(publicKey, 'contact_accept');
     notifyListeners();

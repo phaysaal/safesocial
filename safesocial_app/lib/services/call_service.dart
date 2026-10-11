@@ -470,7 +470,9 @@ class CallService extends ChangeNotifier {
     };
 
     pc.onIceCandidate = (candidate) {
-      DebugLogService().info('Call', 'ICE candidate → $peerKey: ${candidate.candidate?.substring(0, candidate.candidate!.length > 60 ? 60 : candidate.candidate!.length)}...');
+      // Type only: the full line carries this phone's addresses.
+      final kind = RegExp(r'typ (\w+)').firstMatch(candidate.candidate ?? '')?.group(1) ?? '?';
+      DebugLogService().info('Call', 'ICE candidate ($kind) → ${peerKey.substring(0, 8)}…');
       _sendSignal(peerKey, {
         'type': 'ice_candidate',
         'candidate': candidate.candidate,
@@ -513,6 +515,20 @@ class CallService extends ChangeNotifier {
 
   static const _ringsAllDevices = {'call_offer', 'group_call_invite', 'group_call_join'};
 
+  /// How old a ring may be and still ring. Longer than any relay hop, shorter
+  /// than the gap between a missed call and the next app start.
+  static const Duration ringWindow = Duration(seconds: 45);
+
+  /// Whether a ring is too old to act on. A ring with no stamp (an older
+  /// client) is treated as current.
+  @visibleForTesting
+  static bool isStaleRing(Map<String, dynamic> data, {DateTime? now}) {
+    final at = data['at'];
+    if (at is! num) return false;
+    final sent = DateTime.fromMillisecondsSinceEpoch(at.toInt());
+    return (now ?? DateTime.now()).difference(sent) > ringWindow;
+  }
+
   Future<void> _sendSignal(String contactKey, Map<String, dynamic> data) async {
     final sessions = _sessions;
     if (sessions == null) {
@@ -531,7 +547,8 @@ class CallService extends ChangeNotifier {
         peerIdentityKey: contactKey,
         fallbackExchangeKey: _resolveExchangeKey?.call(contactKey),
         type: 'call',
-        plaintext: jsonEncode(data),
+        // Stamped so a receiver can tell a ring from a replay.
+        plaintext: jsonEncode({...data, 'at': DateTime.now().millisecondsSinceEpoch}),
         mode: SealMode.wrap,
         onlyDevice: onlyDevice,
       );
@@ -565,6 +582,12 @@ class CallService extends ChangeNotifier {
       final senderKey = opened.from;
       final data = jsonDecode(opened.plaintext) as Map<String, dynamic>;
       final type = data['type'];
+      if (_ringsAllDevices.contains(type) && isStaleRing(data)) {
+        // Signalling is never acknowledged by the live path, so the mailbox
+        // hands an old offer back on the next restart. Nobody is calling.
+        DebugLogService().info('Call', 'Ignoring a $type from the past');
+        return;
+      }
       DebugLogService().info('Call', 'handleSignaling: received [$type] from $senderKey — currentState=$_state');
 
       switch (type) {

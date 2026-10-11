@@ -24,14 +24,23 @@ class _CallScreenState extends State<CallScreen> {
   final Map<String, RendererGate<MediaStream>> _remote = {};
 
   bool _listenerAdded = false;
+  bool _gone = false;
+  CallService? _callService;
 
   @override
   void initState() {
     super.initState();
-    _local.onReady = () {
-      if (mounted) setState(() {});
-    };
+    _local.onReady = _rebuildIfAlive;
     _local.start();
+  }
+
+  /// A renderer may finish initialising after this screen has been popped,
+  /// which happens when a call ends within a second of arriving. Rebuilding
+  /// a disposed State is an assertion failure, so every late callback goes
+  /// through here.
+  void _rebuildIfAlive() {
+    if (_gone || !mounted) return;
+    setState(() {});
   }
 
   @override
@@ -39,6 +48,7 @@ class _CallScreenState extends State<CallScreen> {
     super.didChangeDependencies();
     if (!_listenerAdded) {
       final cs = context.read<CallService>();
+      _callService = cs;
       cs.addListener(_onCallServiceChanged);
       _listenerAdded = true;
       // The call may already be ringing with streams in place (the receiving
@@ -50,9 +60,10 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
-    if (_listenerAdded) {
-      context.read<CallService>().removeListener(_onCallServiceChanged);
-    }
+    _gone = true;
+    // Looked up once in didChangeDependencies: the context must not be used
+    // here, and the gates must be released whatever else happens.
+    _callService?.removeListener(_onCallServiceChanged);
     _local.dispose();
     for (final gate in _remote.values) {
       gate.dispose();
@@ -61,8 +72,8 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   void _onCallServiceChanged() {
-    if (!mounted) return;
-    final cs = context.read<CallService>();
+    if (_gone || !mounted) return;
+    final cs = _callService ?? context.read<CallService>();
 
     // Auto-dismiss when call ends
     if (cs.state == CallState.idle) {
@@ -84,9 +95,7 @@ class _CallScreenState extends State<CallScreen> {
       }
       final renderer = RTCVideoRenderer();
       final gate = RendererGate<MediaStream>(RtcVideoSink(renderer))
-        ..onReady = () {
-          if (mounted) setState(() {});
-        };
+        ..onReady = _rebuildIfAlive;
       _remoteRenderers[entry.key] = renderer;
       _remote[entry.key] = gate;
       gate.attach(entry.value);
@@ -97,7 +106,7 @@ class _CallScreenState extends State<CallScreen> {
       _remote.remove(key)?.dispose();
       _remoteRenderers.remove(key);
     }
-    if (mounted) setState(() {});
+    _rebuildIfAlive();
   }
 
   /// Remote renderers that can draw right now.

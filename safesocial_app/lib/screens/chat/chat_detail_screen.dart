@@ -573,8 +573,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Future<void> _attachMedia() async {
     final choice = await showModalBottomSheet<String>(
       context: context,
+      // Scrolls: on shorter screens the last entries ran off the bottom.
       builder: (ctx) => SafeArea(
-        child: Column(
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
@@ -628,6 +630,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               onTap: () => Navigator.pop(ctx, 'contact'),
             ),
           ],
+          ),
         ),
       ),
     );

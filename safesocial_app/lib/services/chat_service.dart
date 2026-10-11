@@ -106,14 +106,23 @@ class ChatService extends ChangeNotifier {
 
 
   void setActiveConversation(String? conversationId) {
+    // Leaving a chat stamps it too: everything that arrived while it was on
+    // screen was seen, and the stamp from opening it would count all of
+    // that as unread after a restart.
+    final previous = _activeConversation;
+    if (previous != null && previous != conversationId) _stampOpened(previous);
     _activeConversation = conversationId;
     if (conversationId != null) {
-      _lastOpened[conversationId] = DateTime.now();
-      SecureStore.instance.setString(_lastOpenedKey,
-          jsonEncode(_lastOpened.map((k, v) => MapEntry(k, v.toIso8601String()))));
+      _stampOpened(conversationId);
       unawaited(markRead(conversationId));
     }
     notifyListeners();
+  }
+
+  void _stampOpened(String conversationId) {
+    _lastOpened[conversationId] = DateTime.now();
+    SecureStore.instance.setString(_lastOpenedKey,
+        jsonEncode(_lastOpened.map((k, v) => MapEntry(k, v.toIso8601String()))));
   }
 
   static const _lastOpenedKey = 'spheres_chat_last_opened_v1';
@@ -1017,6 +1026,11 @@ class ChatService extends ChangeNotifier {
         peer = header.from;
         device = header.fromDevice.isEmpty ? null : header.fromDevice;
       } catch (_) {}
+      if (peer == _myPublicKey) {
+        // Our own message handed back by the shared mailbox. Nothing is
+        // wrong with any session; there is simply nothing here for us.
+        return;
+      }
       await _noteAuthenticationFailure(peer, device);
     } catch (e) {
       DebugLogService().error('Chat', 'Failed to handle relay message: $e');
@@ -1125,6 +1139,9 @@ class ChatService extends ChangeNotifier {
   }
 
   Future<void> _noteAuthenticationFailure(String peerKey, String? deviceKey) async {
+    // A session with ourselves does not exist and must never be "restarted":
+    // doing so failed our own queued mail and announced to nobody.
+    if (peerKey == _myPublicKey) return;
     final device = deviceKey ?? _resolveExchangeKey?.call(peerKey);
     final slot = '$peerKey|$device';
     final count = (_authFailures[slot] ?? 0) + 1;
@@ -1253,6 +1270,8 @@ class ChatService extends ChangeNotifier {
   void _addMessageLocally(String contactKey, Message msg, {bool notify = true}) {
     // Arrived after its own deadline: it was never meant to be seen now.
     if (msg.isExpired) return;
+    // Seen as it arrives when the chat is on screen.
+    if (contactKey == _activeConversation) _stampOpened(contactKey);
     _conversations.putIfAbsent(contactKey, () => []);
     if (!_conversations[contactKey]!.any((m) => m.id == msg.id)) {
       _conversations[contactKey]!.add(msg);

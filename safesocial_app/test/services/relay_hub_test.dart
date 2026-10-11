@@ -415,4 +415,79 @@ void main() {
       expect(await first, isTrue);
     });
   });
+
+  group('a drain delivers nothing twice', () {
+    late RelayService chat;
+    late Mailbox a;
+    late List<String> got;
+
+    setUp(() async {
+      chat = RelayService();
+      a = await mailbox('a');
+      got = [];
+      chat.onMessageReceived = (_, p) => got.add(p);
+      await chat.connectMailbox('alice', a);
+      await settle();
+      sockets.current.receive({'t': 'ok', 'a': a.id});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+
+    test('a message delivered live is acknowledged by a later drain, not redelivered',
+        () async {
+      sockets.current.receive({'t': 'msg', 'a': a.id, 'd': '5:hello'});
+      await settle();
+      expect(got, ['hello']);
+
+      // The relay keeps it queued until acknowledged, so the drain hands it
+      // back along with something genuinely new.
+      var fresh = 0;
+      RelayHub.instance.syncOverride = (_, deliver) async {
+        if (deliver('hello')) fresh++;
+        if (deliver('later')) fresh++;
+        return fresh;
+      };
+      await RelayHub.instance.syncMailbox(RelayHub.instance.debugSubscription(a.id)!);
+
+      expect(got, ['hello', 'later']);
+      expect(fresh, 1, reason: 'only the new one counts as missed by the socket');
+    });
+
+    test('our own publish coming back from the shared mailbox is swallowed',
+        () async {
+      await publishAcked(sockets, chat, 'alice', 'mine');
+      RelayHub.instance.syncOverride = (_, deliver) async => deliver('mine') ? 1 : 0;
+      final fresh = await RelayHub.instance
+          .syncMailbox(RelayHub.instance.debugSubscription(a.id)!);
+
+      expect(fresh, 0);
+      expect(got, isEmpty, reason: 'a listener never sees its own message');
+    });
+
+    test('a live frame repeated by the relay is delivered once', () async {
+      sockets.current.receive({'t': 'msg', 'a': a.id, 'd': '3:one'});
+      sockets.current.receive({'t': 'msg', 'a': a.id, 'd': '3:one'});
+      sockets.current.receive({'t': 'msg', 'a': a.id, 'd': '3:two'});
+      await settle();
+      expect(got, ['one', 'two']);
+    });
+
+    test('a quiet socket is only replaced when the drain finds new mail', () async {
+      sockets.current.receive({'t': 'msg', 'a': a.id, 'd': '4:seen'});
+      await settle();
+      final sub = RelayHub.instance.debugSubscription(a.id)!;
+      sub.lastActivity = DateTime.now().subtract(RelayHub.idleBefore * 2);
+
+      RelayHub.instance.syncOverride = (_, deliver) async => deliver('seen') ? 1 : 0;
+      await RelayHub.instance.verifyIdle();
+      await settle();
+      expect(sockets.created.length, 1, reason: 'nothing was missed; keep the socket');
+
+      sub.lastActivity = DateTime.now().subtract(RelayHub.idleBefore * 2);
+      RelayHub.instance.syncOverride = (_, deliver) async => deliver('missed') ? 1 : 0;
+      await RelayHub.instance.verifyIdle();
+      await settle();
+      expect(sockets.created.length, 2, reason: 'the socket had missed one');
+      expect(got, ['seen', 'missed']);
+    });
+  });
 }

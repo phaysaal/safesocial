@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:collection';
 import 'dart:math';
 
 import 'package:convert/convert.dart';
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -129,10 +131,39 @@ class RelayHub {
   /// Publishes waiting for the relay's `sent` frame, by send id.
   final Map<int, _PendingSend> _pendingSends = {};
 
+  /// Digests of payloads this client has already delivered to a listener or
+  /// published itself.
+  ///
+  /// The relay keeps every message queued until an HTTP sync acknowledges
+  /// it, and a mailbox is shared by both parties, so a drain hands back
+  /// what the socket already delivered and, to the sender, its own
+  /// messages. Both were being passed to listeners again: peers' messages
+  /// were discarded as duplicates, but our own could not be opened and
+  /// looked like a broken session. Now a drain acknowledges them and
+  /// delivers nothing twice, and only genuinely new mail counts as
+  /// evidence that a quiet socket is dead.
+  final Set<String> _seen = {};
+  final Queue<String> _seenOrder = Queue<String>();
+  static const int _seenLimit = 4000;
+
   /// How long a publish may wait for the relay to confirm it took the
   /// message. A socket that is half dead accepts writes and answers nothing;
   /// without this, the outbox marked such messages sent and they were lost.
   static Duration sendAckTimeout = const Duration(seconds: 10);
+
+  static String _digest(String payload) =>
+      sha256.convert(utf8.encode(payload)).toString();
+
+  /// Remember [payload]; true if it was new.
+  bool _remember(String payload) {
+    final digest = _digest(payload);
+    if (!_seen.add(digest)) return false;
+    _seenOrder.add(digest);
+    while (_seenOrder.length > _seenLimit) {
+      _seen.remove(_seenOrder.removeFirst());
+    }
+    return true;
+  }
 
   String _mintHubId() {
     final bytes = Uint8List(32);
@@ -245,6 +276,8 @@ class RelayHub {
     final id = _nextSendId++;
     final pending = _PendingSend(sub.mailbox.id);
     _pendingSends[id] = pending;
+    // A shared mailbox will hand this back to us on the next drain.
+    _remember(payload);
     final written = _send({
       't': 'pub',
       'a': sub.mailbox.id,
@@ -535,6 +568,7 @@ class RelayHub {
       case 'msg':
         final payload = _unpad(frame['d'] as String? ?? '');
         if (payload == null) return;
+        if (!_remember(payload)) return; // already delivered or our own
         if (sub.syncing || !sub.subscribed) {
           sub.buffer.add(payload);
         } else {
@@ -599,16 +633,17 @@ class RelayHub {
     }
   }
 
-  /// Fetch anything waiting in the mailbox over HTTP, returning how many were
-  /// taken.
+  /// Fetch anything waiting in the mailbox over HTTP, acknowledging all of
+  /// it and returning how many were new to this client.
   ///
-  /// The count is what makes a liveness check meaningful: messages found here
-  /// on a supposedly connected socket are messages that socket failed to
-  /// deliver.
+  /// The count is what makes a liveness check meaningful: new messages found
+  /// here on a supposedly connected socket are messages that socket failed
+  /// to deliver. Copies of what it did deliver, and our own messages coming
+  /// back from a shared mailbox, are acknowledged and not counted.
   Future<int> syncMailbox(RelaySubscription sub) async {
     final override = syncOverride;
     if (override != null) {
-      return override(sub.mailbox, (payload) => _deliver(sub, payload));
+      return override(sub.mailbox, (payload) => _acceptFromDrain(sub, payload));
     }
     final host = _host();
     final path = '/mbx/${sub.mailbox.id}';
@@ -634,10 +669,11 @@ class RelayHub {
       if (pending.isEmpty) return 0;
 
       final processed = <String>[];
+      var fresh = 0;
       for (final msg in pending) {
         try {
           final payload = _unpad(msg['data'] as String);
-          if (payload != null) _deliver(sub, payload);
+          if (payload != null && _acceptFromDrain(sub, payload)) fresh++;
           processed.add(msg['id'] as String);
         } catch (e) {
           _log.error('Relay', 'Could not process queued message: $e');
@@ -657,11 +693,19 @@ class RelayHub {
         },
         body: body,
       );
-      return processed.length;
+      return fresh;
     } catch (e) {
       _log.error('Relay', 'Failed to sync mailbox: $e');
       return 0;
     }
+  }
+
+  /// Deliver a drained payload unless it was already delivered live or is
+  /// one of our own. Returns whether it was new.
+  bool _acceptFromDrain(RelaySubscription sub, String payload) {
+    if (!_remember(payload)) return false;
+    _deliver(sub, payload);
+    return true;
   }
 
   // -- Liveness ---------------------------------------------------------------
@@ -737,17 +781,23 @@ class RelayHub {
 
   /// Stand-in for the HTTP mailbox drain, so protocol tests need no network.
   @visibleForTesting
-  Future<int> Function(Mailbox mailbox, void Function(String payload) deliver)?
+  Future<int> Function(Mailbox mailbox, bool Function(String payload) deliver)?
       syncOverride;
 
   /// Feed a frame as if the relay had sent it.
   @visibleForTesting
   void debugReceive(String frame) => _onFrame(frame);
 
+  /// The subscription for a mailbox address, for tests that drain it.
+  @visibleForTesting
+  RelaySubscription? debugSubscription(String address) => _subs[address];
+
   /// Tear everything down. Tests only.
   @visibleForTesting
   void debugReset() {
     _settlePendingSends(ok: false);
+    _seen.clear();
+    _seenOrder.clear();
     _closeIdle();
     _subs.clear();
     _attempt = 0;

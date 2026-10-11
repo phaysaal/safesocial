@@ -25,8 +25,12 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   own other devices.
 - **Transport is one hub socket per client** (`RelayHub` in `relay_service.dart`), with
   mailboxes subscribed over it by signature. Services keep their own `RelayService`
-  facades; all share the hub. A contact on another relay is reached by a signed HTTP post
-  to that relay (federation); the host comes from their bundle.
+  facades; all share the hub. A publish counts as sent only when the relay's `sent` frame
+  comes back. The relay keeps every message until an HTTP drain acknowledges it, and a
+  mailbox is shared by both parties, so the hub remembers digests of what it delivered and
+  published and a drain acknowledges those without delivering them again. A contact on
+  another relay is reached by a signed HTTP post to that relay (federation); the host
+  comes from their bundle.
 - **Local storage is encrypted at rest** (`SecureStore`); new sensitive keys must be added
   to its list. Backups (`backup_service.dart`) cover every store except sessions and
   outboxes, and double as the device-link payload.
@@ -95,7 +99,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 600 tests in 47 files under test/{crypto,models,screens,services}
+flutter test                       # 607 tests in 48 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

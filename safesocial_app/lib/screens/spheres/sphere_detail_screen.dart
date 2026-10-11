@@ -13,6 +13,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../services/feed_service.dart';
 import '../../services/library_service.dart';
 import '../../services/sphere_service.dart';
+import '../../widgets/avatar.dart';
 
 /// Members and settings for one sphere.
 class SphereDetailScreen extends StatelessWidget {
@@ -183,10 +184,7 @@ class SphereDetailScreen extends StatelessWidget {
           ...sphere.members.map((member) {
             final isMe = member.identityKey == me;
             return ListTile(
-              leading: CircleAvatar(
-                backgroundColor: cs.surfaceContainerHighest,
-                child: Text(nameFor(member.identityKey).characters.first.toUpperCase()),
-              ),
+              leading: UserAvatar(displayName: nameFor(member.identityKey)),
               title: Text(nameFor(member.identityKey)),
               subtitle: Builder(builder: (context) {
                 final note = context.watch<LibraryService>().memberNote(sphereId, member.identityKey);

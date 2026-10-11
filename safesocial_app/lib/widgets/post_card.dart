@@ -88,7 +88,9 @@ class _PostCardState extends State<PostCard> {
                             style: theme.textTheme.bodySmall,
                           ),
                           const SizedBox(width: 4),
-                          Icon(Icons.public, size: 12, color: cs.onSurfaceVariant),
+                          // Members only, always; the glyph says so rather
+                          // than hinting at a public audience.
+                          Icon(Icons.lock_outline, size: 12, color: cs.onSurfaceVariant),
                           if (context.watch<FeedService>().isPinned(post.id)) ...[
                             const SizedBox(width: 6),
                             Icon(Icons.push_pin, size: 12, color: cs.primary),
