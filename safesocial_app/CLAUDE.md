@@ -53,6 +53,28 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   renders the sentence and always shows the disclaimer. The in-app camera button yields
   10; a maker's own AI mark yields 0. It never looks at pixels and is not a detector.
   Per-chat and per-sphere "blur media until tapped" lives in `LibraryService`.
+- **Protected media** (`models/media_protection.dart`): a photo or video posted or sent
+  with `payload['protected']` (`{'wm': true}` for a watermark) is shown only in
+  `ProtectedMediaScreen`, while two fingers are on the glass and for ten seconds at a
+  time (`HoldGate`, pure), blurred otherwise; while shown, one band in three is sharp
+  each frame and the rest blurred, rolling down like a CRT scan (`ScanBand`,
+  `ProtectedVeil`: the same sharp area every frame, so the brightness never flickers;
+  plain under reduce motion), so the eye sees a picture and a camera pointed at the
+  screen gets a single frame with one sharp band. Random tiles were tried first on the
+  Motorola and read as a boiling shimmer. The
+  blob is decrypted in memory (a video into a temporary file deleted on the way out) and
+  `_decodePostMedia` / `_decodeMedia` leave it as its reference, so nothing of it is ever
+  in the media cache; the sender's inline thumbnail is twelve pixels wide and blurred
+  (`MediaService.prepareForRelay(protected:)`). The window carries `FLAG_SECURE` while
+  the viewer is up (`ScreenGuard` over the `spheres/screen` channel; Android only, and the
+  answer says whether it took, so iOS and tests show "Screenshots cannot be blocked on
+  this phone"); the iOS runner reports a screenshot or a recording after the fact and
+  the picture hides. Save, share, save-as-sticker, forward (`ChatService.forwardMessage`,
+  `SphereChatService.sendMessage(forwarded:)`) and reshare (`reshareAllowed`, the
+  composer) are refused; the flag rides outside the signed core, so the receiver refuses
+  a reshare of a protected original too. The watermark is the viewer's own name across
+  the middle, drawn only while shown, and only when the sender turned it on. Everything
+  here is enforced by the viewer's app and the composer says so (`MediaProtection.disclaimer`).
 - **Notifications** are built on-device from decrypted content (`notification_service.dart`);
   wakes are content-free through `wake_service.dart` (UnifiedPush on Android, APNs via the
   iOS runner). `main()` has a `--unifiedpush-bg` entry that runs `BackgroundSync` with no UI.
@@ -267,7 +289,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 779 tests in 70 files under test/{crypto,models,screens,services}
+flutter test                       # 789 tests in 72 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

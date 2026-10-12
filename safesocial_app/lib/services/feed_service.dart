@@ -1474,7 +1474,7 @@ class FeedService extends ChangeNotifier {
         provenance.add(claim);
       } else {
         final b64 = await MediaService.prepareForRelay(ref,
-            videoLimit: MediaService.feedVideoLimit);
+            videoLimit: MediaService.feedVideoLimit, protected: post.isProtected);
         if (b64 != null) {
           encoded.add(b64);
           // Kept aligned: a dropped item takes its claim with it.
@@ -1486,8 +1486,12 @@ class FeedService extends ChangeNotifier {
   }
 
   /// Decode base64 data URIs received from relay into local file paths.
+  ///
+  /// Protected media is left as its reference: the viewer decrypts it in
+  /// memory when it is held, and nothing of it is ever written to the cache.
   Future<Post> _decodePostMedia(Post post) async {
     if (post.mediaRefs.isEmpty) return post;
+    if (post.isProtected) return post;
     if (dataSaver?.call() ?? false) return post;
     final decoded = <String>[];
     for (final ref in post.mediaRefs) {
@@ -1790,7 +1794,9 @@ class FeedService extends ChangeNotifier {
     final original = originalOf(reshare);
     if (original == null) return false;
     if (original.authorSig == null) return true;
-    return authorSignatureHolds(original) && original.allowReshare;
+    // Protected media is never carried anywhere; the flag rides outside the
+    // signed core, so it is refused here as well as at the composer.
+    return authorSignatureHolds(original) && original.allowReshare && !original.isProtected;
   }
 
   /// Carry a post we have into other spheres, with its author's signed words.
@@ -1803,6 +1809,9 @@ class FeedService extends ChangeNotifier {
   }) async {
     final original = _posts.where((p) => p.id == postId).firstOrNull;
     if (original == null) return;
+    if (original.isProtected) {
+      throw StateError('Protected media cannot be shared on');
+    }
     if (original.authorSig != null && !original.allowReshare) {
       throw StateError('The author does not allow this post to be reshared');
     }

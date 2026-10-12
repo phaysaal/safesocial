@@ -389,6 +389,7 @@ class MessageBubble extends StatelessWidget {
               mediaRef: message.mediaRefs[i],
               provenance: MediaProvenance.at(message.provenance, i),
               blurred: blurMedia,
+              protection: message.protection,
             ),
         ],
       ));
@@ -535,7 +536,8 @@ class MessageBubble extends StatelessWidget {
                     Clipboard.setData(ClipboardData(text: message.content));
                   },
                 ),
-              if (onForward != null && !message.isDeleted && !message.viewOnce && !message.isLocation)
+              if (onForward != null && !message.isDeleted && !message.viewOnce && !message.isLocation &&
+                  !message.isProtected)
                 ListTile(
                   leading: const Icon(Icons.forward),
                   title: const Text('Forward'),

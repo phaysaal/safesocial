@@ -43,6 +43,30 @@ import UIKit
       }
     }
     apnsChannel = channel
+
+    // Protected media. iOS has no window flag against screenshots, so
+    // "secure" answers false and the viewer says so; what iOS does offer is
+    // word after a screenshot and when recording starts, which hides the
+    // picture at once.
+    let screen = FlutterMethodChannel(
+      name: "spheres/screen",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger())
+    screen.setMethodCallHandler { call, result in
+      switch call.method {
+      case "secure":
+        result(false)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    NotificationCenter.default.addObserver(
+      forName: UIApplication.userDidTakeScreenshotNotification, object: nil, queue: .main
+    ) { _ in screen.invokeMethod("screenshot", arguments: nil) }
+    NotificationCenter.default.addObserver(
+      forName: UIScreen.capturedDidChangeNotification, object: nil, queue: .main
+    ) { _ in
+      if UIScreen.main.isCaptured { screen.invokeMethod("recording", arguments: nil) }
+    }
   }
 
   override func application(

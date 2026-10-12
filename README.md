@@ -66,6 +66,7 @@ platform-side data mining.
 | Albums: sealed per sphere, synced like everything else | Working |
 | Media: per-blob keys, 48 KB encrypted chunks, inline thumbnails, EXIF/GPS stripped | Working; video transcoded on-device to 720p (60 s feed, 3 min chat, 64 MB), poster frames, in-app playback, save to gallery |
 | Media origin score: a 0–10 trust badge on every picture, from the file's own data on the sender's device (camera EXIF, editing tags, Content Credentials and generator marks, name, size); in-app camera capture scores 10; blur-until-tapped per chat or sphere | Working; a reading of the file's claims with a disclaimer, not a detector; untested on hardware |
+| Protected photos and videos: shown only while held with two fingers, ten seconds at a time, blurred otherwise; decrypted in memory and never cached; screenshots blocked on Android; no save, share, forward or reshare; an optional watermark with the viewer's name; a CRT-style scan over the blurred picture against a second camera | Working on Android; iOS cannot block screenshots and the viewer says so; the sender is told the other phone enforces it |
 | Voice/video calls over WebRTC, signalling encrypted | 1:1 working on hardware, direct and through the project's TURN; group (mesh) on emulators only |
 | Local search over messages, posts, comments, spheres, contacts | Working |
 | Edit own posts, pin posts in a sphere (admins), archive chats and spheres, mute a member within a sphere, per-sphere media gallery | Working |
@@ -136,7 +137,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 779 tests in 70 files
+flutter test                       # 789 tests in 72 files
 flutter run
 ```
 

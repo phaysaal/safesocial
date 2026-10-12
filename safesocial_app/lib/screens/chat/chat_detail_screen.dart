@@ -31,6 +31,7 @@ import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_cards.dart';
 import '../../widgets/media_thumb.dart';
+import '../../widgets/protected_sheet.dart';
 
 /// Messenger-style chat conversation detail view.
 class ChatDetailScreen extends StatefulWidget {
@@ -242,6 +243,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _forward(Message msg) async {
+    if (msg.isProtected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Protected media cannot be forwarded.')));
+      return;
+    }
     final contacts = context.read<ContactService>().contacts.where((c) => !c.blocked);
     final spheres = context.read<SphereService>().writable;
     final target = await showForwardSheet(
@@ -467,6 +473,36 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   static String _fmtWhen(DateTime at) =>
       '${at.day}/${at.month} at ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+
+  /// A photo or video shown only while held; see [MediaProtection].
+  Future<void> _sendProtected() async {
+    final choice = await showProtectedMediaSheet(context);
+    if (choice == null || !mounted) return;
+    final media = context.read<MediaService>();
+    final messenger = ScaffoldMessenger.of(context);
+    String? path;
+    try {
+      path = switch (choice.source) {
+        'video' => await media.pickVideo(limit: MediaService.chatVideoLimit),
+        'camera' => await media.captureImage(),
+        _ => await media.pickAndStoreImage(),
+      };
+    } on MediaRejectedException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    } on UnsupportedVideoException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+    if (path == null || !mounted) return;
+    final chosen = path;
+    await _send(() => context.read<ChatService>().sendMessage(
+          widget.conversationId,
+          choice.source == 'video' ? '[Video]' : '[Image]',
+          mediaRefs: [chosen],
+          payload: {'protected': choice.protection.toJson()},
+        ));
+  }
 
   Future<void> _sendViewOnce() async {
     final path = await context.read<MediaService>().pickAndStoreImage();
@@ -712,6 +748,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               onTap: () => Navigator.pop(ctx, 'view_once'),
             ),
             ListTile(
+              leading: const Icon(Icons.lock_outline),
+              title: const Text('Protected photo or video'),
+              subtitle: const Text('Shown only while held, never saved or shared'),
+              onTap: () => Navigator.pop(ctx, 'protected'),
+            ),
+            ListTile(
               leading: const Icon(Icons.poll_outlined),
               title: const Text('Poll'),
               onTap: () => Navigator.pop(ctx, 'poll'),
@@ -750,6 +792,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (choice == 'location') return _shareLocation();
     if (choice == 'contact') return _shareContact();
     if (choice == 'view_once') return _sendViewOnce();
+    if (choice == 'protected') return _sendProtected();
     if (choice == 'video_note') {
       final messenger = ScaffoldMessenger.of(context);
       try {

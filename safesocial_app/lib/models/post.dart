@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:equatable/equatable.dart';
+import 'media_protection.dart';
 import 'media_provenance.dart';
 
 /// A social feed post authored by a peer.
@@ -78,6 +79,10 @@ class Post with EquatableMixin {
   bool get isLifeEvent => kind == 'life_event';
   bool get isRecommend => kind == 'recommend';
   bool get isReshare => kind == 'reshare';
+
+  /// Media shown only while held, never kept; see [MediaProtection].
+  MediaProtection? get protection => MediaProtection.fromPayload(payload);
+  bool get isProtected => protection != null;
 
   /// What the author signs: the identity of the post and its words. Media and
   /// the audience are not in it; media is re-uploaded by a resharer and the

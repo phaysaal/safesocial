@@ -24,6 +24,7 @@ import 'translation_line.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
 import 'media_thumb.dart';
+import 'protected_veil.dart';
 import 'provenance_badge.dart';
 import 'post_extras.dart';
 
@@ -222,7 +223,7 @@ class _PostCardState extends State<PostCard> {
                     if (myKey != null &&
                         (context.read<SphereService>().sphere(post.sphereId)?.isAdmin(myKey) ?? false))
                       const PopupMenuItem(value: 'guide', child: Text('Add to a guide…')),
-                    if (!post.isReshare &&
+                    if (!post.isReshare && !post.isProtected &&
                         (post.authorSig == null || post.allowReshare) &&
                         context.read<SphereService>().spheres.length > 1)
                       const PopupMenuItem(value: 'reshare', child: Text('Share to another sphere')),
@@ -596,24 +597,26 @@ class _PostCardState extends State<PostCard> {
     final provenance = MediaProvenance.at(post.provenance, index);
     final blurred = context.watch<LibraryService>().blursAnyOf(post.sphereIds);
     final pano = (post.payload?['pano'] as List?)?.contains(index) ?? false;
+    final protection = post.protection;
     final image = Semantics(
       label: alt.isEmpty ? null : alt,
       image: true,
       child: GestureDetector(
         onTap: () => context.push(
-            '/media/view?ref=${Uri.encodeComponent(ref)}${pano ? '&pano=1' : ''}'),
+            '/media/view?ref=${Uri.encodeComponent(ref)}${pano ? '&pano=1' : ''}${protection?.query ?? ''}'),
         onLongPress: alt.isEmpty
             ? null
             : () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(alt))),
         child: MediaThumb(ref: ref, width: width, height: height),
       ),
     );
-    final withBadge = provenance == null && !pano
+    final withBadge = provenance == null && !pano && protection == null
         ? image
         : Stack(children: [
             image,
             if (provenance != null)
               Positioned(right: 6, bottom: 6, child: ProvenanceBadge(provenance: provenance)),
+            if (protection != null) const Positioned(right: 6, top: 6, child: ProtectedMark()),
             if (pano)
               Positioned(
                 left: 6,

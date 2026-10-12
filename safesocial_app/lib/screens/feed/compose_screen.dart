@@ -14,7 +14,9 @@ import '../../widgets/avatar.dart';
 import '../../widgets/post_kinds.dart';
 import '../../widgets/trim_video_sheet.dart';
 import '../media/edit_image_screen.dart';
+import '../../models/media_protection.dart';
 import '../../widgets/media_thumb.dart';
+import '../../widgets/protected_veil.dart';
 import '../../widgets/provenance_badge.dart';
 import '../../widgets/message_cards.dart';
 import '../../widgets/post_extras.dart';
@@ -65,6 +67,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
   final Set<String> _tags = {};
   String? _activity;
   bool _allowReshare = true;
+
+  /// Photos and videos shown only while held; see [MediaProtection].
+  MediaProtection? _protection;
   String? _draftId;
 
   @override
@@ -331,6 +336,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
       if (_activity != null) 'activity': _activity,
       if (_topic != null) 'topic': _topic,
       if (_tags.isNotEmpty) 'tags': _tags.toList(),
+      if (_protection != null && _media.isNotEmpty) 'protected': _protection!.toJson(),
     };
     if (_payload == null && extras.isEmpty) return null;
     return {...?_payload, ...extras};
@@ -525,7 +531,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
         kind: _kind,
         payload: _fullPayload,
         altTexts: _altList,
-        allowReshare: _allowReshare,
+        allowReshare: _allowReshare && !(_protection != null && _media.isNotEmpty),
         coAuthors: _coAuthors.toList(),
       );
       if (_draftId != null) await feed.deleteDraft(_draftId!);
@@ -566,6 +572,16 @@ class _ComposeScreenState extends State<ComposeScreen> {
               if (v == 'schedule') _schedule();
               if (v == 'drafts') context.push('/drafts');
               if (v == 'reshare') setState(() => _allowReshare = !_allowReshare);
+              if (v == 'protect') {
+                setState(() {
+                  _protection = _protection == null ? const MediaProtection() : null;
+                  if (_protection != null) _allowReshare = false;
+                });
+              }
+              if (v == 'watermark') {
+                setState(() => _protection =
+                    MediaProtection(watermark: !(_protection?.watermark ?? false)));
+              }
             },
             itemBuilder: (_) => [
               PopupMenuItem(value: 'draft', enabled: _canPost, child: const Text('Save as draft')),
@@ -575,8 +591,21 @@ class _ComposeScreenState extends State<ComposeScreen> {
               CheckedPopupMenuItem(
                 value: 'reshare',
                 checked: _allowReshare,
+                enabled: _protection == null,
                 child: const Text('Others may share this to their spheres'),
               ),
+              CheckedPopupMenuItem(
+                value: 'protect',
+                checked: _protection != null,
+                enabled: _media.isNotEmpty,
+                child: const Text('Protect photos and videos'),
+              ),
+              if (_protection != null)
+                CheckedPopupMenuItem(
+                  value: 'watermark',
+                  checked: _protection!.watermark,
+                  child: const Text("Write the viewer's name across them"),
+                ),
             ],
           ),
           Padding(
@@ -712,6 +741,21 @@ class _ComposeScreenState extends State<ComposeScreen> {
                       if (_media.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         _attachments(cs),
+                        if (_protection != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Icon(Icons.lock_outline, size: 16, color: cs.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Protected. ${MediaProtection.disclaimer}',
+                                  key: const Key('protected-disclaimer'),
+                                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                                ),
+                              ),
+                            ]),
+                          ),
                         Text('Long-press a photo to describe it for screen readers',
                             style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
                       ],
@@ -931,6 +975,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
                       bottom: 4,
                       child: Icon(Icons.closed_caption, color: Colors.white, size: 18),
                     ),
+                  if (_protection != null)
+                    const Positioned(right: 30, top: 4, child: ProtectedMark()),
                   // The score that will travel with this picture, so the
                   // sender sees it before anyone else does.
                   if (MediaService.provenanceFor(path) != null)

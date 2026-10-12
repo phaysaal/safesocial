@@ -48,7 +48,9 @@ import 'services/chat_service.dart';
 import 'services/sphere_chat_service.dart';
 import 'services/sphere_service.dart';
 import 'screens/profile/edit_profile_screen.dart';
+import 'models/media_protection.dart';
 import 'screens/media/media_viewer_screen.dart';
+import 'screens/media/protected_media_screen.dart';
 import 'screens/spheres/sphere_list_screen.dart';
 import 'screens/spheres/create_sphere_screen.dart';
 import 'screens/spheres/sphere_detail_screen.dart';
@@ -298,10 +300,18 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
         ),
         GoRoute(
           path: '/media/view',
-          builder: (context, state) => MediaViewerScreen(
-            mediaRef: state.uri.queryParameters['ref'],
-            panorama: state.uri.queryParameters['pano'] == '1',
-          ),
+          builder: (context, state) {
+            final q = state.uri.queryParameters;
+            final protection = MediaProtection.fromQuery(q);
+            if (protection != null) {
+              return ProtectedMediaScreen(
+                mediaRef: q['ref'] ?? '',
+                protection: protection,
+                viewerName: context.read<IdentityService>().currentIdentity?.displayName,
+              );
+            }
+            return MediaViewerScreen(mediaRef: q['ref'], panorama: q['pano'] == '1');
+          },
         ),
         GoRoute(
           path: '/spheres',

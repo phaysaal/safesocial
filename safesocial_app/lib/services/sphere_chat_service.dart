@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../crypto/blob.dart';
+import '../models/media_protection.dart';
 import '../models/media_provenance.dart';
 import '../models/message.dart';
 import '../models/sphere.dart';
@@ -158,6 +159,9 @@ class SphereChatService extends ChangeNotifier {
     if (isSuspended?.call(sphereId, me) ?? false) {
       throw StateError('You are suspended in "${sphere.name}" for now and cannot write here.');
     }
+    if (forwarded && MediaProtection.fromPayload(payload) != null) {
+      throw StateError('Protected media cannot be forwarded');
+    }
 
     // Local files become encrypted blobs before the message exists, so a
     // forwarded photo reaches the sphere as media and not as a path into the
@@ -173,7 +177,8 @@ class SphereChatService extends ChangeNotifier {
               ? await MediaService.prepareFileForRelay(ref,
                   mimeType: payload?['mime'] as String? ?? 'application/octet-stream')
               : await MediaService.prepareForRelay(ref,
-                  videoLimit: MediaService.chatVideoLimit);
+                  videoLimit: MediaService.chatVideoLimit,
+                  protected: MediaProtection.fromPayload(payload) != null);
       if (data == null) continue;
       encodedRefs.add(data);
       encodedClaims.add(MediaProvenance.at(claims, i));

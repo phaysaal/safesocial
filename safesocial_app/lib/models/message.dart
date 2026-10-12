@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'media_protection.dart';
 import 'media_provenance.dart';
 
 /// One person's reaction to a message.
@@ -122,6 +123,10 @@ class Message with EquatableMixin {
   bool get isLocation => kind == 'location';
   bool get isContactCard => kind == 'contact';
   bool get isSystem => kind == 'system';
+
+  /// Media shown only while held, never kept; see [MediaProtection].
+  MediaProtection? get protection => MediaProtection.fromPayload(payload);
+  bool get isProtected => protection != null;
 
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(

@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.CalendarContract
 import android.provider.OpenableColumns
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -47,6 +48,24 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Protected media: the window refuses screenshots, screen recording
+        // and the recents thumbnail while a protected viewer is open. The
+        // answer says whether the flag took, so Dart never claims a
+        // protection it did not get.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "spheres/screen")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "secure" -> {
+                        if (call.argument<Boolean>("on") == true) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        }
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         // The device's calendar and share sheet, for events. Nothing here
         // talks to the network; it hands data to apps the user picks.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "spheres/calendar")

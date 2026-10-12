@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/media_protection.dart';
 import '../../services/album_service.dart';
 import '../../services/feed_service.dart';
 import '../../services/sphere_chat_service.dart';
 import '../../services/sphere_service.dart';
 import '../../widgets/media_thumb.dart';
+import '../../widgets/protected_veil.dart';
 import '../../widgets/message_cards.dart';
 
 /// Every photo and video that has passed through one sphere: posts, stories
@@ -28,7 +30,7 @@ class SphereMediaScreen extends StatelessWidget {
     final items = <_Item>[];
     for (final post in feed.postsIn(sphereId)) {
       for (final ref in post.mediaRefs) {
-        items.add(_Item(ref, post.createdAt, 'Post by ${post.authorName}'));
+        items.add(_Item(ref, post.createdAt, 'Post by ${post.authorName}', post.protection));
       }
     }
     for (final album in albums.albums.where((a) => a.sphereId == sphereId)) {
@@ -38,7 +40,7 @@ class SphereMediaScreen extends StatelessWidget {
     }
     for (final message in chat.messagesIn(sphereId)) {
       for (final ref in message.mediaRefs) {
-        items.add(_Item(ref, message.timestamp, 'Sphere chat'));
+        items.add(_Item(ref, message.timestamp, 'Sphere chat', message.protection));
       }
     }
     final seen = <String>{};
@@ -94,10 +96,15 @@ class SphereMediaScreen extends StatelessWidget {
                     final item = unique[i];
                     return GestureDetector(
                       onTap: () => context.push(
-                          '/media/view?ref=${Uri.encodeComponent(item.ref)}'),
+                          '/media/view?ref=${Uri.encodeComponent(item.ref)}${item.protection?.query ?? ''}'),
                       onLongPress: () => ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text(item.source), duration: const Duration(seconds: 2))),
-                      child: MediaThumb(ref: item.ref, fit: BoxFit.cover),
+                      child: item.protection == null
+                          ? MediaThumb(ref: item.ref, fit: BoxFit.cover)
+                          : Stack(fit: StackFit.expand, children: [
+                              MediaThumb(ref: item.ref, fit: BoxFit.cover),
+                              const Positioned(right: 4, top: 4, child: ProtectedMark()),
+                            ]),
                     );
                   },
                 ),
@@ -111,5 +118,6 @@ class _Item {
   final String ref;
   final DateTime at;
   final String source;
-  const _Item(this.ref, this.at, this.source);
+  final MediaProtection? protection;
+  const _Item(this.ref, this.at, this.source, [this.protection]);
 }

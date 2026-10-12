@@ -18,6 +18,8 @@ import '../../services/media_service.dart';
 import '../../services/video_transcoder.dart';
 import 'group_call.dart';
 import '../../widgets/avatar.dart';
+import '../../models/media_protection.dart';
+import '../../widgets/protected_sheet.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_cards.dart';
 
@@ -117,7 +119,7 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
   /// Everything that is not words, in one place: pictures and video go the
   /// same way a direct chat sends them (re-encoded, origin score attached).
   Future<void> _attach() async {
-    final choice = await showModalBottomSheet<String>(
+    var choice = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: SingleChildScrollView(
@@ -142,6 +144,12 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
                 onTap: () => Navigator.pop(ctx, 'video'),
               ),
               ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: const Text('Protected photo or video'),
+                subtitle: const Text('Shown only while held, never saved or shared'),
+                onTap: () => Navigator.pop(ctx, 'protected'),
+              ),
+              ListTile(
                 leading: const Icon(Icons.attach_file),
                 title: const Text('File'),
                 subtitle: const Text('Any type, sent as it is'),
@@ -160,6 +168,14 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
     if (choice == null || !mounted) return;
     if (choice == 'file') return _sendFile();
     if (choice == 'poll') return _sendPoll();
+
+    MediaProtection? protection;
+    if (choice == 'protected') {
+      final picked = await showProtectedMediaSheet(context);
+      if (picked == null || !mounted) return;
+      protection = picked.protection;
+      choice = picked.source;
+    }
 
     final media = context.read<MediaService>();
     final messenger = ScaffoldMessenger.of(context);
@@ -187,9 +203,9 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
     final chosen = path;
     setState(() => _sending = true);
     try {
-      await context
-          .read<SphereChatService>()
-          .sendMessage(widget.sphereId, label, mediaRefs: [chosen]);
+      await context.read<SphereChatService>().sendMessage(widget.sphereId, label,
+          mediaRefs: [chosen],
+          payload: protection == null ? null : {'protected': protection.toJson()});
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Could not send: $e')));
     } finally {

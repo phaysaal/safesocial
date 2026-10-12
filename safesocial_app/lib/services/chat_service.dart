@@ -610,8 +610,11 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Send a copy of a message into another conversation.
-  Future<Message> forwardMessage(String toContactKey, Message source) =>
-      sendMessage(
+  Future<Message> forwardMessage(String toContactKey, Message source) {
+    if (source.isProtected) {
+      throw StateError('Protected media cannot be forwarded');
+    }
+    return sendMessage(
         toContactKey,
         source.content,
         mediaRefs: source.mediaRefs,
@@ -624,6 +627,7 @@ class ChatService extends ChangeNotifier {
             : source.payload,
         forwarded: true,
       );
+  }
 
   // ── Pinned message ────────────────────────────────────────────────────────
 
@@ -866,7 +870,8 @@ class ChatService extends ChangeNotifier {
                   mimeType: message.payload?['mime'] as String? ?? 'application/octet-stream'))
           : await MediaService.prepareForRelay(ref,
               videoLimit: MediaService.chatVideoLimit,
-              originalQuality: wantsOriginalQuality?.call() ?? false);
+              originalQuality: wantsOriginalQuality?.call() ?? false,
+              protected: message.isProtected);
       if (data != null) {
         encoded.add(data);
         // Kept aligned with the refs: a dropped item takes its claim with it.
@@ -883,7 +888,9 @@ class ChatService extends ChangeNotifier {
       // Kept as the reference when the fetch fails now; the player retries.
       audio = await MediaService.decodeAndSaveImage(audio) ?? audio;
     }
-    if (message.mediaRefs.isEmpty) {
+    // Protected media stays a reference: decrypted in memory when it is held,
+    // never written to the cache.
+    if (message.mediaRefs.isEmpty || message.isProtected) {
       return audio == message.audioRef ? message : message.copyWith(audioRef: audio);
     }
 

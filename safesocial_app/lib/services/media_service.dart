@@ -479,6 +479,7 @@ class MediaService extends ChangeNotifier {
     String filePath, {
     Duration? videoLimit,
     bool originalQuality = false,
+    bool protected = false,
   }) async {
     final file = File(filePath);
     if (!file.existsSync()) {
@@ -502,7 +503,7 @@ class MediaService extends ChangeNotifier {
       }
       payload = await File(out.path).readAsBytes();
       mimeType = 'video/mp4';
-      thumbnail = _thumbnailFromJpeg(out.posterJpeg);
+      thumbnail = _thumbnailFromJpeg(out.posterJpeg, protected: protected);
     } else {
       final raw = await file.readAsBytes();
       final image = img.decodeImage(raw);
@@ -516,7 +517,7 @@ class MediaService extends ChangeNotifier {
       final resized = originalQuality ? image : _fit(image, 1600);
       payload = Uint8List.fromList(img.encodeJpg(resized, quality: originalQuality ? 92 : 80));
       mimeType = 'image/jpeg';
-      thumbnail = _thumbnailFor(image);
+      thumbnail = _thumbnailFor(image, protected: protected);
     }
 
     if (payload.length > maxMediaBytes) {
@@ -615,10 +616,16 @@ class MediaService extends ChangeNotifier {
   }
 
   /// A small inline preview, so a feed renders before any blob is fetched.
-  static String? _thumbnailFor(img.Image image) {
+  ///
+  /// For protected media the preview is the only thing a list ever shows
+  /// without two fingers on the glass, so it is a colour smear: twelve pixels
+  /// on the long side, blurred, and nothing in it can be read back.
+  static String? _thumbnailFor(img.Image image, {bool protected = false}) {
     try {
-      final thumb = _fit(image, 320);
-      final bytes = img.encodeJpg(thumb, quality: 55);
+      final thumb = protected
+          ? img.gaussianBlur(_fit(image, protectedThumbSide), radius: 2)
+          : _fit(image, 320);
+      final bytes = img.encodeJpg(thumb, quality: protected ? 40 : 55);
       // Keep it genuinely small — this rides inside every message.
       if (bytes.length > 24 * 1024) return null;
       return 'data:image/jpeg;base64,${base64Encode(bytes)}';
@@ -627,10 +634,13 @@ class MediaService extends ChangeNotifier {
     }
   }
 
-  static String? _thumbnailFromJpeg(Uint8List? jpeg) {
+  /// The long side of a protected item's inline preview, in pixels.
+  static const int protectedThumbSide = 12;
+
+  static String? _thumbnailFromJpeg(Uint8List? jpeg, {bool protected = false}) {
     if (jpeg == null) return null;
     final decoded = img.decodeImage(jpeg);
-    return decoded == null ? null : _thumbnailFor(decoded);
+    return decoded == null ? null : _thumbnailFor(decoded, protected: protected);
   }
 
   static bool looksLikeVideo(String path) {
