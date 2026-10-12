@@ -246,6 +246,7 @@ mounted, `pub get` fails with a permission error rather than a missing-path erro
 ```bash
 ./build_release.sh                 # bumps app_info.dart + pubspec, builds, writes SHA256SUMS.txt
 scripts/verify_build.sh            # rebuilds a release and diffs the bytes
+python3 scripts/make_logo.py       # renders logo.png and every launcher icon (one shaded sphere, three wave bands)
 ```
 
 ### Relay (`relay/`)
