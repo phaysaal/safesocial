@@ -23,6 +23,7 @@ import '../../services/wake_service.dart';
 import '../../services/app_lock_service.dart';
 import '../../services/library_service.dart';
 import '../../services/theme_service.dart';
+import '../../services/translation_service.dart';
 
 /// Settings screen — privacy, appearance, identity, backup.
 class SettingsScreen extends StatelessWidget {
@@ -462,6 +463,15 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Language'),
             subtitle: const Text('English is the only language built so far; dates and numbers follow the device.'),
           ),
+          Builder(builder: (context) {
+            final t = context.watch<TranslationService>();
+            return ListTile(
+              leading: Icon(Icons.translate, color: cs.primary),
+              title: const Text('Translation'),
+              subtitle: Text(t.enabled ? 'On, on this device, into ${t.target}' : 'Off. Opt in to translate posts and messages on the device.'),
+              onTap: () => context.push('/settings/translation'),
+            );
+          }),
           const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.storage_outlined, color: cs.primary),

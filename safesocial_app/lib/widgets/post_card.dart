@@ -19,6 +19,8 @@ import '../services/library_service.dart';
 import '../services/identity_service.dart';
 import '../screens/spheres/sphere_settings_screen.dart';
 import '../services/sphere_info_service.dart';
+import '../services/translation_service.dart';
+import 'translation_line.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
 import 'media_thumb.dart';
@@ -214,6 +216,10 @@ class _PostCardState extends State<PostCard> {
                       ),
                     ],
                     const PopupMenuItem(value: 'open', child: Text('Open post and comments')),
+                    if (context.read<TranslationService>().enabled && post.content.isNotEmpty)
+                      PopupMenuItem(
+                          value: 'translate',
+                          child: Text(context.read<TranslationService>().of('post:${post.id}') == null ? 'Translate' : 'Show original')),
                     if (myKey != null &&
                         (context.read<SphereService>().sphere(post.sphereId)?.isAdmin(myKey) ?? false))
                       const PopupMenuItem(value: 'guide', child: Text('Add to a guide…')),
@@ -327,7 +333,10 @@ class _PostCardState extends State<PostCard> {
               }
               return Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: Text(post.content, style: theme.textTheme.bodyMedium),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(post.content, style: theme.textTheme.bodyMedium),
+                  TranslationLine(id: 'post:${post.id}'),
+                ]),
               );
             }),
           if (post.isLifeEvent) LifeEventCard(post: post),
@@ -626,6 +635,10 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _handlePostMenu(BuildContext context, String action, Post post) {
+    if (action == 'translate') {
+      translateInline(context, 'post:${post.id}', post.content);
+      return;
+    }
     if (action == 'guide') {
       showAddToGuideDialog(context, post.sphereId, post.id);
       return;
@@ -1255,6 +1268,7 @@ class _CommentThread extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(comment.text,
                               style: theme.textTheme.bodyMedium),
+                          TranslationLine(id: 'comment:${comment.id}', text: comment.text),
                         ],
                       ),
                     ),

@@ -152,10 +152,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             subtitle: const Text('The current one comes back when the time is up'),
             onTap: () => Navigator.pop(ctx, 'temporary'),
           ),
+          ListTile(
+            leading: const Icon(Icons.face_outlined),
+            title: const Text('Draw an avatar'),
+            subtitle: const Text('A cartoon you, with stickers to match'),
+            onTap: () => Navigator.pop(ctx, 'avatar'),
+          ),
         ]),
       ),
     );
     if (choice == null || !mounted) return;
+    if (choice == 'avatar') {
+      context.push('/profile/avatar');
+      return;
+    }
     Duration? temporaryFor;
     if (choice == 'temporary') {
       temporaryFor = await showModalBottomSheet<Duration>(

@@ -8,6 +8,8 @@ import 'services/album_service.dart';
 import 'services/bubble_bridge.dart';
 import 'services/sphere_info_service.dart';
 import 'services/wellbeing_service.dart';
+import 'services/mlkit_translator.dart';
+import 'services/translation_service.dart';
 import 'services/app_lock_service.dart';
 import 'services/call_config.dart';
 import 'services/call_service.dart';
@@ -60,6 +62,7 @@ class AppServices {
   late final sphereSyncService = SphereSyncService(sphereService);
   late final sphereInfoService = SphereInfoService(sphereService);
   final wellbeingService = WellbeingService();
+  final translationService = TranslationService(MlKitTranslator());
   final callConfig = CallConfig();
   final notificationService = NotificationService();
   final appLockService = AppLockService();
@@ -105,6 +108,7 @@ class AppServices {
     await libraryService.load();
     await notificationService.load();
     await wellbeingService.load();
+    await translationService.load();
     notificationService.inQuietHours = wellbeingService.inQuietHours;
     wellbeingService.onPauseChanged = (paused) async {
       if (paused) {
@@ -214,6 +218,7 @@ class AppServices {
         ChangeNotifierProvider.value(value: sphereSyncService),
         ChangeNotifierProvider.value(value: sphereInfoService),
         ChangeNotifierProvider.value(value: wellbeingService),
+        ChangeNotifierProvider.value(value: translationService),
         ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),
         ChangeNotifierProvider.value(value: callConfig),

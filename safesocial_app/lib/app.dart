@@ -35,6 +35,8 @@ import 'screens/feed/manage_posts_screen.dart';
 import 'screens/feed/story_archive_screen.dart';
 import 'screens/spheres/sphere_guides_screen.dart';
 import 'screens/spheres/sphere_settings_screen.dart';
+import 'screens/profile/avatar_editor_screen.dart';
+import 'screens/settings/translation_screen.dart';
 import 'screens/wellbeing/crisis_screen.dart';
 import 'screens/wellbeing/privacy_checkup_screen.dart';
 import 'screens/wellbeing/wellbeing_screen.dart';
@@ -344,6 +346,14 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           builder: (context, state) => SphereChatScreen(
             sphereId: state.pathParameters['id']!,
           ),
+        ),
+        GoRoute(
+          path: '/profile/avatar',
+          builder: (context, state) => const AvatarEditorScreen(),
+        ),
+        GoRoute(
+          path: '/settings/translation',
+          builder: (context, state) => const TranslationScreen(),
         ),
         GoRoute(
           path: '/wellbeing',

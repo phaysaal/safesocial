@@ -7,6 +7,8 @@ import '../models/media_provenance.dart';
 import '../models/message.dart';
 import '../models/post.dart';
 import '../services/feed_service.dart';
+import '../services/translation_service.dart';
+import 'translation_line.dart';
 import 'emoticon_picker.dart';
 import 'media_preview.dart';
 import 'media_thumb.dart';
@@ -370,6 +372,7 @@ class MessageBubble extends StatelessWidget {
                 message.content, theme.textTheme.bodyMedium?.copyWith(color: textColor, fontSize: 15))
             : _mentionText(message.content, textColor),
       ));
+      widgets.add(TranslationLine(id: 'msg:${message.id}', onDark: true));
     }
     return widgets;
   }
@@ -475,6 +478,16 @@ class MessageBubble extends StatelessWidget {
                   onTap: () {
                     Navigator.pop(ctx);
                     onReply!(message);
+                  },
+                ),
+              if (message.content.isNotEmpty && !message.isDeleted && message.kind == 'text' &&
+                  context.read<TranslationService>().enabled)
+                ListTile(
+                  leading: const Icon(Icons.translate),
+                  title: Text(context.read<TranslationService>().of('msg:${message.id}') == null ? 'Translate' : 'Show original'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    translateInline(context, 'msg:${message.id}', message.content);
                   },
                 ),
               if (message.content.isNotEmpty && !message.isDeleted)

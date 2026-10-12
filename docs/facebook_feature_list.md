@@ -17,7 +17,7 @@ Each item carries one mark for Spheres:
 
 **Profile photo.** Upload from gallery ✓ · take with camera ✓ · pick from own earlier
 photos ○ · crop and zoom ~ · temporary profile picture that expires ✓ · frames and
-filters ○ · cartoon avatar as profile picture ○ · the change becomes a post that friends
+filters ○ · cartoon avatar as profile picture ✓ (drawn on the device) · the change becomes a post that friends
 react to and comment on ✓ (into the spheres you tick) · audience for the photo itself ✗
 by design (a contact who cannot see your picture is not a contact).
 
@@ -96,7 +96,7 @@ emoji ✓ · mention in a comment ✓ · link in a comment ○ · threaded repli
 comment ✓ · edit a comment with history ✓ · delete own comment ✓ · hide a comment ✓
 (post's author or admin; the writer still sees it) · report a comment ✓ (to the sphere)
 · pin a comment ✓ · turn comments off ✓ · sort comments: most relevant ✗, newest ✓, all
-✓ · see translation ✗ (server-side) or ○ (on-device model) · subscribe to a post's
+✓ · see translation ✓ (on the device, opt-in, with a model downloaded from Google when asked; server-side ✗) · subscribe to a post's
 notifications ✓, and mute one ✓ · reaction notifications ✓ · hidden words for comments
 ✓ · keyword moderation for admins ○ · ban someone from a post ○ · hashtags in comments
 ✗.
@@ -119,7 +119,7 @@ disappearing messages ✓ · vanish mode ✓ (a preset: five minutes, and off pu
 unsend ✓ · edit within a window ✓ · voice messages ✓ · video messages ✓ · photos and
 video, HD toggle ✓ (photos at full size, still re-encoded; videos always compressed) ·
 files ✓ (any type, as it is, under its name) · GIFs ✗ · stickers
-✓ (local packs) · avatar stickers ○ (P10) · emoji ✓ · chat themes ✓ (local) · nicknames ✓
+✓ (local packs) · avatar stickers ✓ (six expressions of the drawn avatar) · emoji ✓ · chat themes ✓ (local) · nicknames ✓
 (local) · chat emoji ✓ · polls in groups ✓ · mentions ✓ · pinned messages ✓ · message
 requests ✓ · archive ✓ · mute ✓ · ignore ✓ (no notification, no typing, no receipts) ·
 block ✓ · read receipts and read-by ✓ · typing ✓ · active status ✗
@@ -160,7 +160,7 @@ user's own map app with the place) · upcoming list ✓.
 
 Marketplace ✗ · Dating ✗ · Gaming and instant games ✗ · Fundraisers and donations ✗ ·
 Jobs ✗ · Watch and video ✗ · Live and scheduled live ✗ (by decision) · Stars and tipping
-✗ · fan subscriptions ✗ · Meta Pay ✗ · Avatars ○ · Memories ✓ · Saved with collections ✓
+✗ · fan subscriptions ✗ · Meta Pay ✗ · Avatars ✓ · Memories ✓ · Saved with collections ✓
 · Meta AI assistant ✗ · crisis response and safety check ✗ · blood donations ✗ ·
 community help ✗ · voting and climate information centres ✗ · weather ✗ · Facebook Lite,
 not applicable.
@@ -250,7 +250,7 @@ same commit.
 | P7 ✓ 11 Oct 2026 | **Events** | Co-hosts, recurring events, ticket links, "interested" alongside going, event photos, reminders, ICS export, a map link that opens the user's own map app | `event_rsvp` gains a state; the rest rides existing post kinds | 3 |
 | P8 ✓ 11 Oct 2026 | **Friends and feed** | Restricted contacts (see only named spheres), snooze for 30 days, take a break, friendversary from local history, favourites feed, hide a post, birthday cards, autoplay and data-saver settings | Local, except restricted contacts, which is an audience list on the sender | 3 |
 | P9 ✓ 12 Oct 2026 | **Settings, safety, accessibility** | Privacy checkup walkthrough, tag review before a mention shows on your profile, pause (deactivate) that keeps keys, language, quiet hours, time dashboard, daily reminder, restrict a contact (their comments visible only to them), crisis resources, text size, reduced motion, high contrast, a screen-reader pass over every screen, search history, notification dots, year in review, poke | Restrict is `comment_hide` applied automatically; the rest is local | 5 |
-| P10 | **Avatars and on-device extras** | A cartoon avatar editor with stickers; on-device translation of posts and comments with a downloadable model (opt-in, never bundled, following the nudity-model decision) | Avatar is a blob in `profile`; translation stays on the device | 6 |
+| P10 ✓ 12 Oct 2026 | **Avatars and on-device extras** | A cartoon avatar editor with stickers; on-device translation of posts and comments with a downloadable model (opt-in, never bundled, following the nudity-model decision) | Avatar is a blob in `profile`; translation stays on the device | 6 |
 
 About 50 days in all. P1, P8 and P7 are the cheap, visible wins and go first; P2 and
 P3 are the big ones people notice; P10 is optional.

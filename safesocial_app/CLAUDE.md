@@ -154,6 +154,15 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   refuses to send; `reportsReached` mutes on the admin's device; `inviteLink(maxAge:)`
   retires an old token. Keyword alerts (`LibraryService.adminKeywords`) never leave the
   device. Rules are shown until acknowledged (`spheres_rules_seen_v1`).
+- **Avatars and translation.** `AvatarSpec` + `AvatarPainter` draw a cartoon avatar on the
+  device (`/profile/avatar`); the PNG becomes the profile picture through the usual
+  `updateAvatar` path with provenance "edited with Spheres", and six expression variants
+  can be added as local stickers. Translation is opt-in (`TranslationService`, off by
+  default): `MlKitTranslator` wraps Google ML Kit's on-device translation and language
+  identification; each language model is downloaded from Google only when the person taps
+  download in Settings, Translation, and the text translated never leaves the phone.
+  Translations live in memory by id (`post:`, `comment:`, `msg:`) and show under the
+  original (`TranslationLine`). Tests use a fake `Translator`.
 - **Wellbeing** (`services/wellbeing_service.dart`, local, sealed key `spheres_wellbeing_v1`):
   seconds on screen per day; after twenty minutes in a row `breakActive` dims the whole app
   (`BreakOverlay` in `app.dart`) for twenty seconds with a countdown, and five minutes away
@@ -170,7 +179,9 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   and a member in one step, then posts the welcome line if the sphere has one.
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
   classifier (nudity or AI-image detection; the origin score reads metadata only),
-  communities as spheres of spheres, pending-post approval queues, story drawing.
+  communities as spheres of spheres, pending-post approval queues, story drawing. Every
+  milestone of `docs/facebook_feature_list.md` (P1 to P10) has landed as of 12 October
+  2026; P5 to P10 have not yet run on hardware.
 - **Still open:** APNs, reproducible-build proof, external audit. See the plan's §13.
   The project's coturn and ntfy both run on the Scaleway instance under their own names
   with TLS; a phone whose ntfy app points at `https://ntfy.spheres.dev` is woken through
@@ -220,7 +231,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 761 tests in 66 files under test/{crypto,models,screens,services}
+flutter test                       # 764 tests in 67 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

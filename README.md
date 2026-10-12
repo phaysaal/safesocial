@@ -80,6 +80,7 @@ platform-side data mining.
 | Profile: cover and featured photos, pronouns, nickname, pronunciation, work, education, places, relationship and family, languages, websites, hobbies, quotes, life events, a temporary picture that reverts, a legacy contact, an audience per field and a "view as" that shows exactly what each contact gets | Working; the per-contact cut is covered by tests, untested on hardware |
 | Calls: history, missed-call notifications, screen sharing, join a sphere call from its chat | Working; screen share needs platform support, large calls still mesh |
 | Local sticker packs, app lock and locked chats with biometrics, security notices on key changes, inbox rate limiting | Working |
+| Drawn avatars with matching stickers; opt-in on-device translation of posts, comments and messages through ML Kit models downloaded on request | Working; translation untested on hardware |
 | Wellbeing and accessibility: a twenty-second dimmed break every twenty minutes of use, a time dashboard, daily reminder, quiet hours, pause that keeps the keys, privacy checkup, tag review, restricted contacts' comments hidden on arrival, crisis helplines, text size, high contrast, reduced motion, search history, notification dots, year in review, poke | Working; untested on hardware |
 | Encrypted backup, identity export/import (Argon2id + XChaCha20) | Working; covers every store except sessions and outboxes |
 | Social recovery (Shamir, verified against the public key) | Working |
@@ -135,7 +136,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 761 tests in 66 files
+flutter test                       # 764 tests in 67 files
 flutter run
 ```
 
