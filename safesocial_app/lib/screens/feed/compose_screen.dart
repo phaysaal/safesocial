@@ -7,6 +7,7 @@ import '../../models/sphere.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/media_service.dart';
+import '../../services/sphere_info_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/video_transcoder.dart';
 import '../../widgets/avatar.dart';
@@ -56,6 +57,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
   /// feeling or an activity. Merged into the payload at post time.
   String? _background;
   Map<String, dynamic>? _feeling;
+
+  /// A topic of the one sphere this goes to, when it has topics.
+  String? _topic;
   String? _activity;
   bool _allowReshare = true;
   String? _draftId;
@@ -322,6 +326,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
       if (_background != null && _media.isEmpty) 'bg': _background,
       if (_feeling != null) 'feeling': _feeling,
       if (_activity != null) 'activity': _activity,
+      if (_topic != null) 'topic': _topic,
     };
     if (_payload == null && extras.isEmpty) return null;
     return {...?_payload, ...extras};
@@ -751,6 +756,31 @@ class _ComposeScreenState extends State<ComposeScreen> {
                             color: Colors.red[400]),
                         onPressed: _posting ? null : _addVideo,
                       ),
+                      Builder(builder: (context) {
+                        final topics = _targets.length == 1
+                            ? context.watch<SphereInfoService>().topicsFor(_targets.first)
+                            : const <String>[];
+                        if (topics.isEmpty) return const SizedBox.shrink();
+                        return IconButton(
+                          tooltip: _topic == null ? 'Topic' : 'Topic: $_topic',
+                          icon: Icon(Icons.label_outline, color: _topic == null ? cs.onSurfaceVariant : cs.primary),
+                          onPressed: _posting
+                              ? null
+                              : () async {
+                                  final chosen = await showModalBottomSheet<String>(
+                                    context: context,
+                                    builder: (ctx) => SafeArea(
+                                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                        ListTile(title: const Text('No topic'), onTap: () => Navigator.pop(ctx, '')),
+                                        for (final t in topics) ListTile(leading: const Icon(Icons.label_outline), title: Text(t), onTap: () => Navigator.pop(ctx, t)),
+                                      ]),
+                                    ),
+                                  );
+                                  if (chosen == null) return;
+                                  setState(() => _topic = chosen.isEmpty ? null : chosen);
+                                },
+                        );
+                      }),
                       IconButton(
                         tooltip: 'Event',
                         icon: Icon(Icons.event_outlined, color: cs.primary),

@@ -135,14 +135,18 @@ video notes ✓ · call history and missed calls ✓.
 ## 8. Groups (spheres)
 
 Create ✓ · public ✗ · private visible ✗ · private hidden ✓ (every sphere) · join by
-approval ✓ · membership questions ○ · rules ○ · admins and moderators ✓ (roles) · post
-approval ○ (by decision) · scheduled posts ✓ · announcements and featured posts ✓ (pin) ·
-units and guides ○ · files ○ · events ✓ · polls ✓ · anonymous posts ✗ (everything is
-signed; by design) · badges ○ · member reports ✓ · keyword alerts ○ · mute members ✓ ·
-suspend ○ · remove and ban ✓ · vote to remove ✓ · transfer control ✓ · group chats ✓ ·
-subgroups ○ · admin assist automation ○ · insights ✗ · welcome posts ○ · invite by link
-✓ · group QR ✓ · post topics and tags ○ · expert badges ○ · cover image ✓ · member notes
-✓ (private) · buy and sell groups ✗ · social learning ○.
+approval ✓ · membership questions ✓ (up to three, in the invite link, answered in the
+request) · rules ✓ (shown until acknowledged, and again when they change) · admins and
+moderators ✓ (roles) · post approval ○ (by decision) · scheduled posts ✓ · announcements
+and featured posts ✓ (pin) · units and guides ✓ (ordered sets of posts) · files ✓ (any
+type, in the sphere chat, listed on the media page) · events ✓ · polls ✓ · anonymous
+posts ✗ (everything is signed; by design) · badges ✓ · member reports ✓ · keyword alerts
+✓ (local to the admin's device) · mute members ✓ · suspend ✓ (for a period; dropped on
+every device, refused on their own) · remove and ban ✓ · vote to remove ✓ · transfer
+control ✓ · group chats ✓ · subgroups ○ · admin assist automation ✓ (mute after N
+reports, invite links that expire) · insights ✗ · welcome posts ✓ · invite by link ✓ ·
+group QR ✓ · post topics and tags ✓ · expert badges ✓ · cover image ✓ · member notes ✓
+(private) · buy and sell groups ✗ · social learning ○.
 
 ## 9. Pages, events, and the other surfaces
 
@@ -239,7 +243,7 @@ same commit.
 | P3 ✓ 11 Oct 2026 | **Composer and media** | Coloured text backgrounds, feeling and activity, crop, rotate, filters, text and stickers on photos, video trim and thumbnail choice, life events, "ask for recommendations" as a poll variant, reshare a post into another sphere with attribution (author's signature travels; the author can forbid resharing), pin to profile, trash with 30-day restore, bulk archive and trash | `post_reshare` with the original envelope embedded; `post.allowReshare` | 7 |
 | P4 ✓ 11 Oct 2026 | **Stories** | Loop clip (forward only, called a loop and not a boomerang), collage layouts, selfie mode, quiz and slider stickers, feeling sticker, link sticker (no preview), hide from named contacts, archive, highlights on the profile | Story payload gains sticker kinds and `loop`; hiding is an exclusion at send time; highlights are a `profile` field under their own audience | 4 |
 | P5 ✓ 12 Oct 2026 | **Messaging comforts** | Files of any type, chat themes and nicknames (local), chat emoji, ignore, scheduled messages, original-quality media toggle, chat bubbles on Android, profile notes, a vanish-mode preset over disappearing messages, avatar stickers once avatars exist | Files are blobs with a name and type; the rest is local or reuses existing kinds | 5 |
-| P6 | **Sphere governance** | Membership questions answered in the join request, rules shown on join, units and guides, files, badges and expert marks, keyword alerts for admins (local), suspend for a period, welcome posts, post topics, admin automation for the rules already built (auto-mute on N reports, auto-expire invites) | `sphere_join` carries answers; rules, units and topics are signed sphere items | 6 |
+| P6 ✓ 12 Oct 2026 | **Sphere governance** | Membership questions answered in the join request, rules shown on join, units and guides, files, badges and expert marks, keyword alerts for admins (local), suspend for a period, welcome posts, post topics, admin automation for the rules already built (auto-mute on N reports, auto-expire invites) | `sphere_join` carries answers; rules, units and topics are signed sphere items | 6 |
 | P7 ✓ 11 Oct 2026 | **Events** | Co-hosts, recurring events, ticket links, "interested" alongside going, event photos, reminders, ICS export, a map link that opens the user's own map app | `event_rsvp` gains a state; the rest rides existing post kinds | 3 |
 | P8 ✓ 11 Oct 2026 | **Friends and feed** | Restricted contacts (see only named spheres), snooze for 30 days, take a break, friendversary from local history, favourites feed, hide a post, birthday cards, autoplay and data-saver settings | Local, except restricted contacts, which is an audience list on the sender | 3 |
 | P9 | **Settings, safety, accessibility** | Privacy checkup walkthrough, tag review before a mention shows on your profile, pause (deactivate) that keeps keys, language, quiet hours, time dashboard, daily reminder, restrict a contact (their comments visible only to them), crisis resources, text size, reduced motion, high contrast, a screen-reader pass over every screen, search history, notification dots, year in review, poke | Restrict is `comment_hide` applied automatically; the rest is local | 5 |

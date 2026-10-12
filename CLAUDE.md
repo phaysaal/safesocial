@@ -144,8 +144,19 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   by `EventReminders.resync`. "Add to calendar" and `.ics` export go through the
   `spheres/calendar` platform channel in `MainActivity.kt` (Android only; elsewhere the
   bridge throws and the UI shows the message).
-- **Invite links** are `spheres://join?s=&t=&via=&n=`; the request goes to the admin's open
-  inbox and approval makes the requester a contact and a member in one step.
+- **Sphere info** (`models/sphere_info.dart`, `services/sphere_info_service.dart`): rules,
+  up to three join questions, post topics, a welcome line, guides (ordered post ids),
+  badges, suspensions, and two automation settings (mute after N reports, invite links
+  that expire). An admin publishes the whole thing as one `sphere_info` feed item with a
+  version; a member keeps the newest from a signer who is an admin as of the membership it
+  holds, and nothing else. Every rule is enforced locally from the copy held: a suspended
+  member's post, comment or chat message is dropped on receipt and their own device
+  refuses to send; `reportsReached` mutes on the admin's device; `inviteLink(maxAge:)`
+  retires an old token. Keyword alerts (`LibraryService.adminKeywords`) never leave the
+  device. Rules are shown until acknowledged (`spheres_rules_seen_v1`).
+- **Invite links** are `spheres://join?s=&t=&via=&n=&q=`; `q` carries the sphere's join
+  questions, the request carries the answers, and approval makes the requester a contact
+  and a member in one step, then posts the welcome line if the sphere has one.
 - **Not built, by decision:** an SFU for large group calls (mesh only), any pixel-level
   classifier (nudity or AI-image detection; the origin score reads metadata only),
   communities as spheres of spheres, pending-post approval queues, story drawing.
@@ -198,7 +209,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 742 tests in 64 files under test/{crypto,models,screens,services}
+flutter test                       # 749 tests in 65 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

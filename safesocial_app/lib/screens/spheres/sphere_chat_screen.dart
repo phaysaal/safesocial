@@ -12,6 +12,7 @@ import '../../services/call_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/sphere_chat_service.dart';
 import '../../services/sphere_service.dart';
+import '../../services/file_bridge.dart';
 import '../../services/library_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_cards.dart';
@@ -108,6 +109,33 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
     _scrollController.dispose();
     super.dispose();
   }
+
+  Future<void> _sendFile() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final PickedFile? picked;
+    try {
+      picked = await FileBridge.pick();
+    } on UnsupportedError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not available here')));
+      return;
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not pick a file: $e')));
+      return;
+    }
+    if (picked == null || !mounted) return;
+    final file = picked;
+    setState(() => _sending = true);
+    try {
+      await context.read<SphereChatService>().sendFile(widget.sphereId,
+          path: file.path, name: file.name, mime: file.mime, size: file.size);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not send: $e')));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _openFile(Message m) => openFileMessage(context, m);
 
   Future<void> _send() async {
     final text = _controller.text.trim();
@@ -270,6 +298,7 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
                             ),
                           MessageBubble(
                             message: message,
+                            onOpenFile: _openFile,
                             isMine: isMe,
                             myKey: me,
                             nameFor: nameFor,
@@ -386,6 +415,11 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
                           tooltip: 'Poll',
                           icon: Icon(Icons.poll_outlined, color: cs.primary),
                           onPressed: _sending ? null : _sendPoll,
+                        ),
+                        IconButton(
+                          tooltip: 'File',
+                          icon: Icon(Icons.attach_file, color: cs.primary),
+                          onPressed: _sending ? null : _sendFile,
                         ),
                         Expanded(
                           child: TextField(

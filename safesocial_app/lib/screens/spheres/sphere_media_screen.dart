@@ -7,6 +7,7 @@ import '../../services/feed_service.dart';
 import '../../services/sphere_chat_service.dart';
 import '../../services/sphere_service.dart';
 import '../../widgets/media_thumb.dart';
+import '../../widgets/message_cards.dart';
 
 /// Every photo and video that has passed through one sphere: posts, stories
 /// still live, album items and chat attachments, newest first.
@@ -43,12 +44,13 @@ class SphereMediaScreen extends StatelessWidget {
     final seen = <String>{};
     final unique = items.where((i) => seen.add(i.ref)).toList()
       ..sort((a, b) => b.at.compareTo(a.at));
+    final files = chat.filesIn(sphereId);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(sphere == null ? 'Media' : '${sphere.name} · media'),
       ),
-      body: unique.isEmpty
+      body: unique.isEmpty && files.isEmpty
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
@@ -60,24 +62,46 @@ class SphereMediaScreen extends StatelessWidget {
                 ),
               ),
             )
-          : GridView.builder(
-              padding: const EdgeInsets.all(2),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 2,
-                mainAxisSpacing: 2,
-              ),
-              itemCount: unique.length,
-              itemBuilder: (context, i) {
-                final item = unique[i];
-                return GestureDetector(
-                  onTap: () => context.push(
-                      '/media/view?ref=${Uri.encodeComponent(item.ref)}'),
-                  onLongPress: () => ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(item.source), duration: const Duration(seconds: 2))),
-                  child: MediaThumb(ref: item.ref, fit: BoxFit.cover),
-                );
-              },
+          : ListView(
+              children: [
+                if (files.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Text('Files', style: Theme.of(context).textTheme.titleMedium),
+                  ),
+                  for (final f in files)
+                    ListTile(
+                      leading: Icon(FileCard.iconFor(f.payload?['mime'] as String? ?? '')),
+                      title: Text(f.payload?['name'] as String? ?? f.content, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(
+                          '${FileCard.describeSize(f.payload?['size'] is int ? f.payload!['size'] as int : 0)} · ${f.timestamp.day}/${f.timestamp.month}'),
+                      trailing: const Icon(Icons.open_in_new, size: 18),
+                      onTap: () => openFileMessage(context, f),
+                    ),
+                  const Divider(),
+                ],
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(2),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 2,
+                    mainAxisSpacing: 2,
+                  ),
+                  itemCount: unique.length,
+                  itemBuilder: (context, i) {
+                    final item = unique[i];
+                    return GestureDetector(
+                      onTap: () => context.push(
+                          '/media/view?ref=${Uri.encodeComponent(item.ref)}'),
+                      onLongPress: () => ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(item.source), duration: const Duration(seconds: 2))),
+                      child: MediaThumb(ref: item.ref, fit: BoxFit.cover),
+                    );
+                  },
+                ),
+              ],
             ),
     );
   }

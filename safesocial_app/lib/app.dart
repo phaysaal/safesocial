@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -32,6 +33,8 @@ import 'screens/profile/profile_screen.dart';
 import 'screens/contacts/contact_profile_screen.dart';
 import 'screens/feed/manage_posts_screen.dart';
 import 'screens/feed/story_archive_screen.dart';
+import 'screens/spheres/sphere_guides_screen.dart';
+import 'screens/spheres/sphere_settings_screen.dart';
 import 'services/bubble_bridge.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
@@ -132,15 +135,31 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     final via = uri.queryParameters['via'];
     final name = uri.queryParameters['n'] ?? 'a sphere';
     if (sphereId == null || token == null || via == null) return;
+    List<String> questions = const [];
+    try {
+      final q = uri.queryParameters['q'];
+      if (q != null) questions = (jsonDecode(q) as List).whereType<String>().take(3).toList();
+    } catch (_) {}
+    final answers = List.generate(questions.length, (_) => TextEditingController());
     final ctx = _router.routerDelegate.navigatorKey.currentContext;
     if (ctx == null) return;
     final ok = await showDialog<bool>(
       context: ctx,
       builder: (c) => AlertDialog(
         title: Text('Ask to join $name?'),
-        content: const Text(
-            'Your name and key are sent to the admin who made this link. If they say yes, '
-            'you become a member and a contact of theirs.'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text(
+                'Your name and key are sent to the admin who made this link. If they say yes, '
+                'you become a member and a contact of theirs.'),
+            if (questions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('The sphere asks:', style: TextStyle(fontWeight: FontWeight.w600)),
+              for (final (i, q) in questions.indexed)
+                TextField(controller: answers[i], decoration: InputDecoration(labelText: q), maxLength: 300),
+            ],
+          ]),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Ask')),
@@ -149,7 +168,8 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     );
     if (ok != true || !mounted) return;
     try {
-      await context.read<ContactService>().sendJoinRequest(adminKey: via, sphereId: sphereId, token: token);
+      await context.read<ContactService>().sendJoinRequest(
+          adminKey: via, sphereId: sphereId, token: token, answers: answers.map((a) => a.text.trim()).toList());
       ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Asked. The admin decides.')));
     } catch (e) {
       ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('$e')));
@@ -309,6 +329,14 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           builder: (context, state) => SphereChatScreen(
             sphereId: state.pathParameters['id']!,
           ),
+        ),
+        GoRoute(
+          path: '/sphere/:id/settings',
+          builder: (context, state) => SphereSettingsScreen(sphereId: state.pathParameters['id']!),
+        ),
+        GoRoute(
+          path: '/sphere/:id/guides',
+          builder: (context, state) => SphereGuidesScreen(sphereId: state.pathParameters['id']!),
         ),
         GoRoute(
           path: '/sphere/:id/log',

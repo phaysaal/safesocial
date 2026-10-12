@@ -562,6 +562,31 @@ class FeedService extends ChangeNotifier {
   @visibleForTesting
   void Function(String member)? onMemberQueued;
 
+  /// Show only posts with this topic; local and transient.
+  String? topicFilter;
+  void setTopicFilter(String? topic) {
+    topicFilter = topic;
+    notifyListeners();
+  }
+
+  /// Rules, topics, guides and the rest of a sphere's info; see
+  /// `SphereInfoService`.
+  Future<void> Function(String authorId, String sphereId, Map<String, dynamic> json)? onSphereInfo;
+
+  /// Whether a member is suspended in a sphere right now. Set by the app.
+  bool Function(String sphereId, String member)? isSuspended;
+
+  /// Words from others in a sphere, for admins' keyword alerts.
+  void Function(String sphereId, String authorId, String text, String route)? onSphereText;
+
+  /// Reports on one author's posts in a sphere reached a count.
+  Future<void> Function(String sphereId, String author, int count)? onReportsFor;
+
+  /// Send one sealed item to every member of a sphere, through the usual
+  /// per-member channels.
+  Future<void> publishSphereItem({required String sphereId, required String type, required String payloadJson}) =>
+      _publishToSphere(sphereId: sphereId, type: type, payloadJson: payloadJson);
+
   Future<void> _publishToSphere({
     required String sphereId,
     required String type,
@@ -866,6 +891,13 @@ class FeedService extends ChangeNotifier {
     Set<String> hideFrom = const {},
   }) async {
     final targets = {...?sphereIds, if (sphereId != null) sphereId};
+    final me = _myPublicKey;
+    for (final target in targets) {
+      if (me != null && (isSuspended?.call(target, me) ?? false)) {
+        final name = _spheres?.sphere(target)?.name ?? 'this sphere';
+        throw StateError('You are suspended in "$name" for now and cannot post there.');
+      }
+    }
     if (targets.isEmpty) {
       throw StateError('A post has to be addressed to at least one sphere');
     }
@@ -1055,8 +1087,22 @@ class FeedService extends ChangeNotifier {
       return;
     }
 
+    if (json['type'] == 'sphere_info') {
+      await onSphereInfo?.call(authorId, sphereId, json);
+      return;
+    }
+
+    // A suspended member's words are not shown while the suspension lasts;
+    // their own device refuses to send them in the first place.
+    if ((json['type'] == 'post' || json['type'] == 'comment') &&
+        (isSuspended?.call(sphereId, authorId) ?? false)) {
+      DebugLogService().info('Feed', 'Dropping ${json['type']} from a suspended member');
+      return;
+    }
+
     if (json['type'] == 'post') {
       final post = await _decodePostMedia(Post.fromJson(json['post']));
+      onSphereText?.call(sphereId, authorId, post.content, '/post/${post.id}');
 
       // Authorship and audience both come from the verified envelope, not
       // from fields in the payload that the sender could set freely.
@@ -1115,6 +1161,13 @@ class FeedService extends ChangeNotifier {
         });
         await SecureStore.instance.setString(_reportsKey, jsonEncode(_reports));
         notifyListeners();
+        // How many distinct members have reported posts by this author here.
+        final reported = _posts.where((p) => p.id == json['post_id']).firstOrNull;
+        if (reported != null) {
+          final ids = _posts.where((p) => p.authorId == reported.authorId).map((p) => p.id).toSet();
+          final reporters = list.where((r) => ids.contains(r['post_id'])).map((r) => r['by']).toSet();
+          await onReportsFor?.call(sphereId, reported.authorId, reporters.length);
+        }
         InboundEvents.emit(InboundEvent(
           kind: InboundKind.post,
           id: 'report:${json['post_id']}:$authorId',
@@ -1187,6 +1240,7 @@ class FeedService extends ChangeNotifier {
       }
       final postId = json['post_id'] as String;
       final target = _posts.where((p) => p.id == postId).firstOrNull;
+      onSphereText?.call(sphereId, authorId, comment.text, '/post/$postId');
       // A closed post takes no new comments from anyone but its author; a
       // peer that missed the setting still cannot get one in.
       if (target != null && target.commentsOff && target.authorId != authorId) {

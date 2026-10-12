@@ -6,6 +6,7 @@ import '../../models/sphere.dart';
 import '../../services/feed_service.dart';
 import '../../services/library_service.dart';
 import '../../services/contact_service.dart';
+import '../../services/sphere_info_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/identity_service.dart';
@@ -116,11 +117,13 @@ class _FeedScreenState extends State<FeedScreen> {
     final contacts = context.watch<ContactService>();
     final myKey = context.read<IdentityService>().publicKey;
     final favourites = contacts.favouriteKeys();
-    final posts = library.favouritesFeed
-        ? feedService.posts
-            .where((p) => p.authorId == myKey || favourites.contains(p.authorId))
-            .toList()
-        : feedService.posts;
+    final topic = feedService.topicFilter;
+    final posts = (library.favouritesFeed
+            ? feedService.posts
+                .where((p) => p.authorId == myKey || favourites.contains(p.authorId))
+            : feedService.posts)
+        .where((p) => topic == null || p.payload?['topic'] == topic)
+        .toList();
     final memories = feedService.memories;
 
     return Scaffold(
@@ -643,24 +646,43 @@ class _FeedFilterRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final library = context.watch<LibraryService>();
+    final feed = context.watch<FeedService>();
+    final info = context.watch<SphereInfoService>();
     final hasFavourites = context.watch<ContactService>().favouriteKeys().isNotEmpty;
-    if (!hasFavourites && !library.favouritesFeed) return const SizedBox.shrink();
-    return Padding(
+    final topics = <String>{
+      for (final s in context.watch<SphereService>().spheres) ...info.topicsFor(s.id),
+    }.toList()..sort();
+    if (!hasFavourites && !library.favouritesFeed && topics.isEmpty) return const SizedBox.shrink();
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Row(
         children: [
           ChoiceChip(
             label: const Text('All'),
-            selected: !library.favouritesFeed,
-            onSelected: (_) => library.setFavouritesFeed(false),
+            selected: !library.favouritesFeed && feed.topicFilter == null,
+            onSelected: (_) {
+              library.setFavouritesFeed(false);
+              feed.setTopicFilter(null);
+            },
           ),
-          const SizedBox(width: 8),
-          ChoiceChip(
-            avatar: const Icon(Icons.star, size: 16),
-            label: const Text('Favourites'),
-            selected: library.favouritesFeed,
-            onSelected: (_) => library.setFavouritesFeed(true),
-          ),
+          if (hasFavourites || library.favouritesFeed) ...[
+            const SizedBox(width: 8),
+            ChoiceChip(
+              avatar: const Icon(Icons.star, size: 16),
+              label: const Text('Favourites'),
+              selected: library.favouritesFeed,
+              onSelected: (_) => library.setFavouritesFeed(true),
+            ),
+          ],
+          for (final t in topics) ...[
+            const SizedBox(width: 8),
+            ChoiceChip(
+              label: Text('#$t'),
+              selected: feed.topicFilter == t,
+              onSelected: (on) => feed.setTopicFilter(on ? t : null),
+            ),
+          ],
         ],
       ),
     );

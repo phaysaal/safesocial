@@ -436,6 +436,24 @@ class LibraryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Admin keyword alerts, local ────────────────────────────────────────────
+
+  static const _adminKeywordsKey = 'spheres_admin_keywords_v1';
+  final Map<String, List<String>> _adminKeywords = {};
+
+  List<String> adminKeywords(String sphereId) => List.unmodifiable(_adminKeywords[sphereId] ?? const []);
+
+  Future<void> setAdminKeywords(String sphereId, List<String> words) async {
+    final clean = words.map((w) => w.trim()).where((w) => w.isNotEmpty).take(50).toList();
+    if (clean.isEmpty) {
+      _adminKeywords.remove(sphereId);
+    } else {
+      _adminKeywords[sphereId] = clean;
+    }
+    await SecureStore.instance.setString(_adminKeywordsKey, jsonEncode(_adminKeywords));
+    notifyListeners();
+  }
+
   /// Android chat bubbles for direct messages.
   bool get chatBubbles => _chatBubbles;
   Future<void> setChatBubbles(bool on) async {
@@ -451,6 +469,15 @@ class LibraryService extends ChangeNotifier {
     _ignoredChats
       ..clear()
       ..addAll(await store.getStringList(_ignoredChatsKey) ?? const []);
+    _adminKeywords.clear();
+    final kwRaw = await store.getString(_adminKeywordsKey);
+    if (kwRaw != null) {
+      try {
+        (jsonDecode(kwRaw) as Map).forEach((k, v) {
+          if (v is List) _adminKeywords['$k'] = v.whereType<String>().toList();
+        });
+      } catch (_) {}
+    }
     _chatLooks.clear();
     final looksRaw = await store.getString(_chatLooksKey);
     if (looksRaw != null) {

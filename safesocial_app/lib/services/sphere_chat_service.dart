@@ -80,6 +80,12 @@ class SphereChatService extends ChangeNotifier {
   /// Members muted within a sphere, by sphere id. Set by the app.
   Set<String> Function(String sphereId)? mutedMembers;
 
+  /// Whether a member is suspended in a sphere right now. Set by the app.
+  bool Function(String sphereId, String member)? isSuspended;
+
+  /// Words from others in a sphere, for admins' keyword alerts.
+  void Function(String sphereId, String authorId, String text, String route)? onSphereText;
+
   /// The user's hidden-words filter. Set by the app.
   bool Function(String text)? hidesText;
 
@@ -149,6 +155,9 @@ class SphereChatService extends ChangeNotifier {
     if (sphere.kind == SphereKind.broadcast && !sphere.isAdmin(me)) {
       throw StateError('Only admins post in this sphere');
     }
+    if (isSuspended?.call(sphereId, me) ?? false) {
+      throw StateError('You are suspended in "${sphere.name}" for now and cannot write here.');
+    }
 
     // Local files become encrypted blobs before the message exists, so a
     // forwarded photo reaches the sphere as media and not as a path into the
@@ -160,8 +169,11 @@ class SphereChatService extends ChangeNotifier {
       final ref = mediaRefs[i];
       final data = BlobRef.tryDecode(ref) != null
           ? ref
-          : await MediaService.prepareForRelay(ref,
-              videoLimit: MediaService.chatVideoLimit);
+          : kind == 'file'
+              ? await MediaService.prepareFileForRelay(ref,
+                  mimeType: payload?['mime'] as String? ?? 'application/octet-stream')
+              : await MediaService.prepareForRelay(ref,
+                  videoLimit: MediaService.chatVideoLimit);
       if (data == null) continue;
       encodedRefs.add(data);
       encodedClaims.add(MediaProvenance.at(claims, i));
@@ -342,6 +354,15 @@ class SphereChatService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Any file into the sphere chat, as it is, under its name.
+  Future<Message> sendFile(String sphereId,
+          {required String path, required String name, required String mime, required int size}) =>
+      sendMessage(sphereId, name, kind: 'file', mediaRefs: [path], payload: {'name': name, 'mime': mime, 'size': size});
+
+  /// Every file shared in the chat, newest first.
+  List<Message> filesIn(String sphereId) =>
+      messagesIn(sphereId).where((m) => m.kind == 'file' && !m.isDeleted).toList().reversed.toList();
+
   Future<Message> sendPoll(String sphereId, String question, List<String> options,
           {bool multiple = false, bool anonymous = false}) =>
       sendMessage(sphereId, question, kind: 'poll', payload: {
@@ -454,6 +475,13 @@ class SphereChatService extends ChangeNotifier {
         DebugLogService().warn(
             'SphereChat', 'Dropping a message from a non-admin in a broadcast');
         return;
+      }
+      if (isSuspended?.call(sphereId, authorId) ?? false) {
+        DebugLogService().info('SphereChat', 'Dropping a message from a suspended member');
+        return;
+      }
+      if (message.kind == 'text' || message.kind == 'file') {
+        onSphereText?.call(sphereId, authorId, message.content, '/sphere/$sphereId/chat');
       }
 
       final thread = _threads[sphereId];

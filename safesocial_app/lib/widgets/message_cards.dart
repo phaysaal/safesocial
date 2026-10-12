@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../crypto/blob.dart';
+import '../services/file_bridge.dart';
+import '../services/media_service.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -448,11 +450,35 @@ class FileCard extends StatelessWidget {
         const SizedBox(height: 6),
         ActionChip(
           avatar: Icon(fetched ? Icons.open_in_new : Icons.downloading, size: 16),
-          label: Text(fetched ? 'Open' : 'Not fetched yet', style: const TextStyle(fontSize: 12)),
-          onPressed: fetched ? onOpen : null,
+          label: Text(fetched ? 'Open' : 'Fetch and open', style: const TextStyle(fontSize: 12)),
+          onPressed: onOpen,
           visualDensity: VisualDensity.compact,
         ),
       ],
     );
+  }
+}
+
+/// Fetch a file message's bytes if they are still a blob reference, then
+/// hand the file to the device. Errors are shown, never swallowed.
+Future<void> openFileMessage(BuildContext context, Message m) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final p = m.payload ?? const {};
+  final name = p['name'] as String? ?? 'file';
+  final mime = p['mime'] as String? ?? 'application/octet-stream';
+  if (m.mediaRefs.isEmpty) return;
+  try {
+    var path = m.mediaRefs.first;
+    if (BlobRef.tryDecode(path) != null) {
+      messenger.showSnackBar(const SnackBar(content: Text('Fetching…'), duration: Duration(seconds: 1)));
+      final local = await MediaService.decodeAndSaveFile(path, name: name);
+      if (local == null) throw StateError('could not fetch it from the relay');
+      path = local;
+    }
+    await FileBridge.open(path, name: name, mime: mime);
+  } on UnsupportedError catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not available here')));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('Could not open the file: $e')));
   }
 }

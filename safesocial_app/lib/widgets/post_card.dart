@@ -17,6 +17,8 @@ import '../services/calendar_bridge.dart';
 import '../models/event_time.dart';
 import '../services/library_service.dart';
 import '../services/identity_service.dart';
+import '../screens/spheres/sphere_settings_screen.dart';
+import '../services/sphere_info_service.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
 import 'media_thumb.dart';
@@ -85,10 +87,26 @@ class _PostCardState extends State<PostCard> {
                       Builder(builder: (context) {
                         final feeling = Feelings.line(post.payload);
                         final shared = post.isReshare;
+                        final badges = context.watch<SphereInfoService>().badgesFor(post.sphereId, post.authorId);
+                        final topic = post.payload?['topic'];
                         if (feeling.isEmpty && !shared) {
-                          return Text(authorName,
-                              style: theme.textTheme.bodyLarge
-                                  ?.copyWith(fontWeight: FontWeight.w600));
+                          return Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, children: [
+                            Text(authorName,
+                                style: theme.textTheme.bodyLarge
+                                    ?.copyWith(fontWeight: FontWeight.w600)),
+                            if (badges.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(color: cs.tertiaryContainer, borderRadius: BorderRadius.circular(8)),
+                                child: Text(badges.first, style: TextStyle(fontSize: 10, color: cs.onTertiaryContainer)),
+                              ),
+                            if (topic is String && topic.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(color: cs.secondaryContainer, borderRadius: BorderRadius.circular(8)),
+                                child: Text('#$topic', style: TextStyle(fontSize: 10, color: cs.onSecondaryContainer)),
+                              ),
+                          ]);
                         }
                         return RichText(
                           text: TextSpan(
@@ -191,6 +209,9 @@ class _PostCardState extends State<PostCard> {
                       ),
                     ],
                     const PopupMenuItem(value: 'open', child: Text('Open post and comments')),
+                    if (myKey != null &&
+                        (context.read<SphereService>().sphere(post.sphereId)?.isAdmin(myKey) ?? false))
+                      const PopupMenuItem(value: 'guide', child: Text('Add to a guide…')),
                     if (!post.isReshare &&
                         (post.authorSig == null || post.allowReshare) &&
                         context.read<SphereService>().spheres.length > 1)
@@ -600,6 +621,10 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _handlePostMenu(BuildContext context, String action, Post post) {
+    if (action == 'guide') {
+      showAddToGuideDialog(context, post.sphereId, post.id);
+      return;
+    }
     if (action == 'reshare') {
       _reshare(context, post);
       return;

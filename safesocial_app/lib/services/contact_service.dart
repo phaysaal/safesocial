@@ -588,11 +588,13 @@ class ContactService extends ChangeNotifier {
     required String adminKey,
     required String sphereId,
     required String token,
+    List<String> answers = const [],
   }) async {
     final payload = jsonEncode({
       'type': 'sphere_join_request',
       'sphere_id': sphereId,
       'token': token,
+      if (answers.isNotEmpty) 'answers': answers.take(3).map((a) => ProfileAbout.text(a, 300)).toList(),
       'name': _myDisplayName ?? 'User',
       'publicKey': _myPublicKey,
       'keyExchangePublicKey': _myExchangeKey,
@@ -650,6 +652,8 @@ class ContactService extends ChangeNotifier {
             if (exchangeKey is String) 'keyExchangePublicKey': exchangeKey,
             if (json['relay'] is String) 'relay': json['relay'],
             if (devices != null) 'devices': devices,
+            if (json['answers'] is List)
+              'answers': (json['answers'] as List).whereType<String>().take(3).map((a) => ProfileAbout.text(a, 300)).toList(),
           },
         );
         return;

@@ -6,6 +6,7 @@ import 'app_wiring.dart';
 import 'crypto/session_manager.dart';
 import 'services/album_service.dart';
 import 'services/bubble_bridge.dart';
+import 'services/sphere_info_service.dart';
 import 'services/app_lock_service.dart';
 import 'services/call_config.dart';
 import 'services/call_service.dart';
@@ -56,6 +57,7 @@ class AppServices {
   final libraryService = LibraryService();
   late final sphereChatService = SphereChatService(sphereService);
   late final sphereSyncService = SphereSyncService(sphereService);
+  late final sphereInfoService = SphereInfoService(sphereService);
   final callConfig = CallConfig();
   final notificationService = NotificationService();
   final appLockService = AppLockService();
@@ -155,6 +157,7 @@ class AppServices {
         libraryService: libraryService,
         sphereChatService: sphereChatService,
         sphereSyncService: sphereSyncService,
+        sphereInfoService: sphereInfoService,
         feedOutboxService: feedOutboxService,
         relayService: relayService,
       );
@@ -195,6 +198,7 @@ class AppServices {
         ChangeNotifierProvider.value(value: libraryService),
         ChangeNotifierProvider.value(value: sphereChatService),
         ChangeNotifierProvider.value(value: sphereSyncService),
+        ChangeNotifierProvider.value(value: sphereInfoService),
         ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),
         ChangeNotifierProvider.value(value: callConfig),

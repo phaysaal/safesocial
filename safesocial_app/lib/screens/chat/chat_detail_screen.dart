@@ -386,18 +386,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         path: file.path, name: file.name, mime: file.mime, size: file.size));
   }
 
-  Future<void> _openFile(Message m) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final p = m.payload ?? const {};
-    try {
-      await FileBridge.open(m.mediaRefs.first,
-          name: p['name'] as String? ?? 'file', mime: p['mime'] as String? ?? 'application/octet-stream');
-    } on UnsupportedError catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not available here')));
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Nothing on this device opens that: $e')));
-    }
-  }
+  Future<void> _openFile(Message m) => openFileMessage(context, m);
 
   Future<void> _chatLook() async {
     final library = context.read<LibraryService>();

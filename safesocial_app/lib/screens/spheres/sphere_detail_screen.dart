@@ -12,7 +12,9 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../services/feed_service.dart';
 import '../../services/library_service.dart';
+import '../../services/sphere_info_service.dart';
 import '../../services/sphere_service.dart';
+import 'sphere_settings_screen.dart';
 import '../../widgets/avatar.dart';
 
 /// Members and settings for one sphere.
@@ -38,6 +40,10 @@ class SphereDetailScreen extends StatelessWidget {
     final iAmAdmin = me != null && sphere.isAdmin(me);
     final iAmOwner = me != null && sphere.isOwner(me);
     final contacts = context.watch<ContactService>();
+    final infoService = context.watch<SphereInfoService>();
+    final info = infoService.infoFor(sphereId);
+    final unseenRules = infoService.unseenRules(sphereId);
+    final mySuspension = me == null ? null : infoService.suspendedUntil(sphereId, me);
     final offer = sphereService.ownershipOfferFor(sphereId);
     final proposals = sphereService
         .proposalsFor(sphereId)
@@ -84,10 +90,62 @@ class SphereDetailScreen extends StatelessWidget {
             tooltip: 'Activity',
             onPressed: () => context.push('/sphere/$sphereId/log'),
           ),
+          IconButton(
+            icon: const Icon(Icons.menu_book_outlined),
+            tooltip: 'Guides',
+            onPressed: () => context.push('/sphere/$sphereId/guides'),
+          ),
+          if (iAmAdmin)
+            IconButton(
+              icon: const Icon(Icons.tune),
+              tooltip: 'Rules, questions, topics, automation',
+              onPressed: () => context.push('/sphere/$sphereId/settings'),
+            ),
         ],
       ),
       body: ListView(
         children: [
+          if (mySuspension != null)
+            Container(
+              width: double.infinity,
+              color: cs.errorContainer,
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                'You are suspended here until ${mySuspension.day}/${mySuspension.month} ${mySuspension.hour}:${mySuspension.minute.toString().padLeft(2, '0')}. Your posts and messages are not sent or shown meanwhile.',
+                style: TextStyle(color: cs.onErrorContainer),
+              ),
+            ),
+          if (unseenRules.isNotEmpty)
+            Card(
+              margin: const EdgeInsets.all(12),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Rules of ${sphere.name}', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  for (final (i, r) in unseenRules.indexed) Text('${i + 1}. $r'),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: () => infoService.markRulesSeen(sphereId),
+                      child: const Text('I have read them'),
+                    ),
+                  ),
+                ]),
+              ),
+            )
+          else if (info.rules.isNotEmpty)
+            ExpansionTile(
+              leading: Icon(Icons.gavel_outlined, color: cs.primary),
+              title: Text('${info.rules.length} rule${info.rules.length == 1 ? '' : 's'}'),
+              children: [for (final (i, r) in info.rules.indexed) ListTile(dense: true, title: Text('${i + 1}. $r'))],
+            ),
+          if (info.topics.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Wrap(spacing: 6, children: [for (final t in info.topics) Chip(label: Text(t), visualDensity: VisualDensity.compact)]),
+            ),
           if (offer != null)
             _OwnershipOfferBanner(
               sphere: sphere,
@@ -116,7 +174,13 @@ class SphereDetailScreen extends StatelessWidget {
             ...sphereService.joinRequestsFor(sphereId).map((r) => ListTile(
                   leading: Icon(Icons.person_add_alt_1, color: cs.primary),
                   title: Text('${r['name'] ?? 'Someone'} asked to join'),
-                  subtitle: const Text('Came through your invite link'),
+                  subtitle: Text(r['answers'] is List && (r['answers'] as List).isNotEmpty
+                      ? [
+                          for (final (i, a) in (r['answers'] as List).indexed)
+                            '${i < info.questions.length ? info.questions[i] : 'Q${i + 1}'}: $a'
+                        ].join('\n')
+                      : 'Came through your invite link'),
+                  isThreeLine: r['answers'] is List && (r['answers'] as List).isNotEmpty,
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     IconButton(
                       icon: const Icon(Icons.close),
@@ -188,7 +252,14 @@ class SphereDetailScreen extends StatelessWidget {
               title: Text(nameFor(member.identityKey)),
               subtitle: Builder(builder: (context) {
                 final note = context.watch<LibraryService>().memberNote(sphereId, member.identityKey);
-                return Text(note == null ? _roleLabel(member.role) : '${_roleLabel(member.role)} · $note');
+                final badges = info.badgesOf(member.identityKey);
+                final until = infoService.suspendedUntil(sphereId, member.identityKey);
+                return Text([
+                  _roleLabel(member.role),
+                  if (badges.isNotEmpty) badges.join(', '),
+                  if (until != null) 'suspended until ${until.day}/${until.month}',
+                  if (note != null) note,
+                ].join(' · '));
               }),
               trailing: _memberMenu(
                 context: context,
@@ -329,7 +400,8 @@ class SphereDetailScreen extends StatelessWidget {
         !canRemove &&
         !canHandOver &&
         !canPropose &&
-        !canMute) {
+        !canMute &&
+        !iAmAdmin) {
       return null;
     }
 
@@ -341,6 +413,8 @@ class SphereDetailScreen extends StatelessWidget {
               value: 'mute',
               child: Text(muted ? 'Unmute in this sphere' : 'Mute in this sphere')),
         if (!isMe) const PopupMenuItem(value: 'note', child: Text('Private note…')),
+        if (iAmAdmin) const PopupMenuItem(value: 'badges', child: Text('Badges…')),
+        if (iAmAdmin && !isMe) const PopupMenuItem(value: 'suspend', child: Text('Suspend…')),
         if (canPromote)
           const PopupMenuItem(value: 'promote', child: Text('Make admin')),
         if (canDemoteThem)
@@ -364,7 +438,10 @@ class SphereDetailScreen extends StatelessWidget {
     final messenger = ScaffoldMessenger.of(context);
     String link;
     try {
-      link = service.inviteLink(sphereId);
+      final info = context.read<SphereInfoService>().infoFor(sphereId);
+      link = service.inviteLink(sphereId,
+          questions: info.questions,
+          maxAge: info.inviteDays == 0 ? null : Duration(days: info.inviteDays));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
       return;
@@ -441,6 +518,16 @@ class SphereDetailScreen extends StatelessWidget {
         ),
       );
       if (text != null) await library.setMemberNote(sphere.id, member.identityKey, text);
+      return;
+    }
+    if (action == 'badges') {
+      await showBadgesDialog(context, sphere.id, member.identityKey,
+          context.read<ContactService>().getContact(member.identityKey)?.displayName ?? 'this member');
+      return;
+    }
+    if (action == 'suspend') {
+      await showSuspendDialog(context, sphere.id, member.identityKey,
+          context.read<ContactService>().getContact(member.identityKey)?.displayName ?? 'this member');
       return;
     }
     if (action == 'mute') {

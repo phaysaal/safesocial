@@ -407,13 +407,24 @@ class SphereService extends ChangeNotifier {
 
   /// The link to share. Carries the sphere id, this admin's identity key (so
   /// the request can be posted to our inbox) and a token only our device knows.
-  String inviteLink(String sphereId) {
+  /// [questions] ride in the link so the joiner can answer them in the
+  /// request; [maxAge] retires a token older than that before it is shown.
+  String inviteLink(String sphereId, {List<String> questions = const [], Duration? maxAge, DateTime? now}) {
     final sphere = _requireAdmin(sphereId);
     var token = _inviteTokens[sphereId];
+    final at = now ?? DateTime.now();
+    final minted = _inviteTokenTimes[sphereId];
+    if (token != null && maxAge != null && minted != null && at.difference(minted) > maxAge) {
+      DebugLogService().info('Sphere', 'Invite link for "${sphere.name}" was older than ${maxAge.inDays} day(s); retired');
+      token = null;
+    }
     if (token == null) {
       token = hex.encode(SpheresCrypto.randomBytes(16));
       _inviteTokens[sphereId] = token;
+      _inviteTokenTimes[sphereId] = at;
       SecureStore.instance.setString(_prefsInviteTokensKey, jsonEncode(_inviteTokens));
+      SecureStore.instance.setString(_prefsInviteTimesKey,
+          jsonEncode(_inviteTokenTimes.map((k, v) => MapEntry(k, v.toIso8601String()))));
     }
     return Uri(
       scheme: 'spheres',
@@ -423,13 +434,25 @@ class SphereService extends ChangeNotifier {
         't': token,
         'via': _myIdentityKey!,
         'n': sphere.name,
+        if (questions.isNotEmpty) 'q': jsonEncode(questions.take(3).toList()),
       },
     ).toString();
   }
 
+  static const _prefsInviteTimesKey = 'spheres_invite_token_times_v1';
+  final Map<String, DateTime> _inviteTokenTimes = {};
+
+  /// When the current invite token was minted, if known.
+  DateTime? inviteTokenMintedAt(String sphereId) => _inviteTokenTimes[sphereId];
+
+  /// Called after a join was approved, with the newcomer; the app posts the
+  /// sphere's welcome line through it.
+  Future<void> Function(String sphereId, String publicKey, String name)? onMemberJoined;
+
   Future<void> rotateInviteLink(String sphereId) async {
     _requireAdmin(sphereId);
     _inviteTokens.remove(sphereId);
+    _inviteTokenTimes.remove(sphereId);
     await SecureStore.instance.setString(_prefsInviteTokensKey, jsonEncode(_inviteTokens));
     notifyListeners();
   }
@@ -471,6 +494,11 @@ class SphereService extends ChangeNotifier {
     list!.removeWhere((r) => r['publicKey'] == publicKey);
     await SecureStore.instance.setString(_prefsJoinRequestsKey, jsonEncode(_joinRequests));
     notifyListeners();
+    try {
+      await onMemberJoined?.call(sphereId, publicKey, request['name'] as String? ?? 'Someone');
+    } catch (e) {
+      DebugLogService().warn('Sphere', 'Could not post the welcome: $e');
+    }
   }
 
   Future<void> rejectJoin(String sphereId, String publicKey) async {
@@ -481,6 +509,13 @@ class SphereService extends ChangeNotifier {
 
   Future<void> _loadInviteState() async {
     try {
+      final times = await SecureStore.instance.getString(_prefsInviteTimesKey);
+      if (times != null) {
+        (jsonDecode(times) as Map).forEach((k, v) {
+          final at = DateTime.tryParse('$v');
+          if (at != null) _inviteTokenTimes['$k'] = at;
+        });
+      }
       final tokens = await SecureStore.instance.getString(_prefsInviteTokensKey);
       if (tokens != null) {
         (jsonDecode(tokens) as Map<String, dynamic>).forEach((k, v) {
@@ -641,6 +676,7 @@ class SphereService extends ChangeNotifier {
   }
 
   bool get isReady => _sessions != null && _myIdentityKey != null;
+  String? get myIdentityKey => _myIdentityKey;
 
   // ── Creation and membership ────────────────────────────────────────────────
 

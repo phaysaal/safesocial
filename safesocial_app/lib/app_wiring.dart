@@ -1,5 +1,6 @@
 import 'crypto/session_manager.dart';
 import 'services/album_service.dart';
+import 'services/sphere_info_service.dart';
 import 'services/call_service.dart';
 import 'services/chat_service.dart';
 import 'services/contact_service.dart';
@@ -41,6 +42,7 @@ Future<void> wireIdentity({
   required LibraryService libraryService,
   required SphereChatService sphereChatService,
   required SphereSyncService sphereSyncService,
+  required SphereInfoService sphereInfoService,
   required FeedOutboxService feedOutboxService,
   required RelayService relayService,
 }) async {
@@ -286,6 +288,39 @@ Future<void> wireIdentity({
   feedService.onSyncDigest = sphereSyncService.handleDigest;
   feedService.onSyncItems = sphereSyncService.handleItems;
   await sphereSyncService.prune();
+
+  // Rules, topics, guides, badges, suspensions and admin automation: one
+  // signed item per sphere from an admin, enforced locally from the copy held.
+  await sphereInfoService.load();
+  sphereInfoService.publish = feedService.publishSphereItem;
+  sphereInfoService.keywordsFor = libraryService.adminKeywords;
+  sphereInfoService.muteLocally = (sphereId, member) async {
+    if (!libraryService.isMemberMuted(sphereId, member)) {
+      await libraryService.toggleMuteMember(sphereId, member);
+    }
+  };
+  sphereInfoService.isMutedLocally = libraryService.isMemberMuted;
+  feedService.onSphereInfo = sphereInfoService.handleIncoming;
+  feedService.isSuspended = sphereInfoService.isSuspended;
+  feedService.onSphereText = (sphereId, author, text, route) =>
+      sphereInfoService.keywordAlert(sphereId, author, text, route: route);
+  feedService.onReportsFor = (sphereId, author, count) async {
+    await sphereInfoService.reportsReached(sphereId, author, count);
+  };
+  sphereChatService.isSuspended = sphereInfoService.isSuspended;
+  sphereChatService.onSphereText = (sphereId, author, text, route) =>
+      sphereInfoService.keywordAlert(sphereId, author, text, route: route);
+  sphereService.onMemberJoined = (sphereId, publicKey, name) async {
+    final welcome = sphereInfoService.infoFor(sphereId).welcome;
+    final sphere = sphereService.sphere(sphereId);
+    if (welcome.isEmpty || sphere == null) return;
+    await feedService.createPost(
+      welcome.replaceAll('{name}', name),
+      sphereId: sphereId,
+      audienceMembers: sphere.members.map((m) => m.identityKey).toList(),
+      authorName: identityService.currentIdentity?.displayName ?? 'You',
+    );
+  };
   // Not immediately: the mailbox sockets are still being established at this
   // point, and a digest sent before there is a route to send it on is simply
   // dropped. Delayed once, then on a timer — cheap when there is nothing to

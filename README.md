@@ -58,7 +58,7 @@ platform-side data mining.
 | Identity (Ed25519 signing + X25519 exchange keys, platform keystore) | Working |
 | Contacts: QR exchange, approval before adding, blocking | Working |
 | Spheres: create, invite, accept, leave, remove with key rotation | Working |
-| Sphere governance: owner/admin roles, transfer, removal by vote, audit log | Working |
+| Sphere governance: owner/admin roles, transfer, removal by vote, audit log, rules, membership questions, topics, welcome posts, guides, badges, suspensions, keyword alerts, mute after N reports, expiring invite links | Working; the sphere-info item untested on hardware |
 | Direct chat: ratcheted sessions per device pair, durable outbox, receipts, session repair | Working |
 | Sphere chat: group conversation owned by a sphere | Working |
 | Feed: posts to one or several spheres, comments, replies, reactions, saves | Working |
@@ -134,7 +134,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 742 tests in 64 files
+flutter test                       # 749 tests in 65 files
 flutter run
 ```
 
