@@ -71,6 +71,7 @@ class SecureStore {
     'spheres_story_archive_v1',
     'spheres_chat_looks_v1',
     'spheres_scheduled_messages_v1',
+    'spheres_profile_sent_v1',
     'spheres_vanish_v1',
     'spheres_ignored_chats_v1',
     'spheres_sphere_info_v1',

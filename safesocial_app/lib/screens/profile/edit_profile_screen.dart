@@ -142,8 +142,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Take a photo'),
+            onTap: () => Navigator.pop(ctx, 'camera'),
+          ),
+          ListTile(
             leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('New picture'),
+            title: const Text('Choose a picture'),
             onTap: () => Navigator.pop(ctx, 'permanent'),
           ),
           ListTile(
@@ -184,7 +189,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
       if (temporaryFor == null || !mounted) return;
     }
-    final picked = await context.read<MediaService>().pickAndStoreImage();
+    final picked = choice == 'camera'
+        ? await context.read<MediaService>().captureImage(front: true)
+        : choice == 'temporary'
+            ? await _pickPicture(front: true)
+            : await context.read<MediaService>().pickAndStoreImage();
     if (picked == null || !mounted) return;
     final identity = context.read<IdentityService>();
     await identity.updateAvatar(picked, temporaryFor: temporaryFor);
@@ -192,6 +201,31 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     await identity.publishProfileToRelay(context.read<RelayService>());
     if (!mounted) return;
     await _offerPicturePost(picked);
+  }
+
+  /// Camera or gallery, the person's choice; null when they back out.
+  /// [front] starts the camera on the selfie side.
+  Future<String?> _pickPicture({bool front = false}) async {
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Take a photo'),
+            onTap: () => Navigator.pop(ctx, 'camera'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Choose a picture'),
+            onTap: () => Navigator.pop(ctx, 'gallery'),
+          ),
+        ]),
+      ),
+    );
+    if (source == null || !mounted) return null;
+    final media = context.read<MediaService>();
+    return source == 'camera' ? media.captureImage(front: front) : media.pickAndStoreImage();
   }
 
   /// "Updated their profile picture", as a post, into the spheres chosen.
@@ -260,6 +294,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Take a photo'),
+            onTap: () => Navigator.pop(ctx, 'camera'),
+          ),
+          ListTile(
             leading: const Icon(Icons.photo_library_outlined),
             title: const Text('Choose a cover photo'),
             onTap: () => Navigator.pop(ctx, 'pick'),
@@ -278,7 +317,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       await identity.updateCover(null);
       return;
     }
-    final picked = await context.read<MediaService>().pickAndStoreImage();
+    final media = context.read<MediaService>();
+    final picked = action == 'camera' ? await media.captureImage() : await media.pickAndStoreImage();
     if (picked != null) await identity.updateCover(picked);
   }
 
@@ -290,7 +330,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           const SnackBar(content: Text('Six featured photos is the most')));
       return;
     }
-    final picked = await context.read<MediaService>().pickAndStoreImage();
+    final picked = await _pickPicture();
     if (picked != null) await identity.updateFeatured([...current, picked]);
   }
 

@@ -273,39 +273,29 @@ class _QuickAccessRow extends StatelessWidget {
       (Icons.settings_outlined, 'Settings', '/settings'),
     ];
 
+    // One scrolling row of tonal chips, so the tools take one line instead
+    // of a grid of tiles above the fold.
     return Container(
       color: cs.surface,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: items.map((item) {
-          return InkWell(
-            onTap: () => GoRouter.of(context).push(item.$3),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: cs.primaryContainer,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(item.$1, color: cs.onPrimaryContainer, size: 24),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    item.$2,
-                    style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
-                  ),
-                ],
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            for (final item in items)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ActionChip(
+                  avatar: Icon(item.$1, size: 18, color: cs.primary),
+                  label: Text(item.$2),
+                  backgroundColor: cs.primaryContainer.withValues(alpha: 0.45),
+                  side: BorderSide.none,
+                  onPressed: () => GoRouter.of(context).push(item.$3),
+                ),
               ),
-            ),
-          );
-        }).toList(),
+          ],
+        ),
       ),
     );
   }
@@ -393,8 +383,9 @@ class _StoriesRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         children: [
           _StoryItem(
-            label: 'Your story',
+            label: myStories.isEmpty ? 'Add story' : 'Your story',
             displayName: myName,
+            identityKey: myPubKey,
             isAddStory: myStories.isEmpty,
             hasActiveStory: myStories.isNotEmpty,
             onTap: () async {
@@ -453,6 +444,7 @@ class _StoriesRow extends StatelessWidget {
                 return _StoryItem(
                   label: authorName.split(' ').first,
                   displayName: authorName,
+                  identityKey: authorId,
                   hasActiveStory: true,
                   onTap: () {
                     Navigator.of(context).push(
@@ -477,6 +469,7 @@ class _StoriesRow extends StatelessWidget {
 class _StoryItem extends StatelessWidget {
   final String label;
   final String displayName;
+  final String? identityKey;
   final bool isAddStory;
   final bool hasActiveStory;
   final VoidCallback? onTap;
@@ -484,6 +477,7 @@ class _StoryItem extends StatelessWidget {
   const _StoryItem({
     required this.label,
     required this.displayName,
+    this.identityKey,
     this.isAddStory = false,
     this.hasActiveStory = false,
     this.onTap,
@@ -520,9 +514,13 @@ class _StoryItem extends StatelessWidget {
                   padding: const EdgeInsets.all(2.5),
                   child: CircleAvatar(
                     backgroundColor: cs.surface,
-                    child: UserAvatar(
-                      displayName: displayName,
-                      size: AvatarSize.medium,
+                    child: Hero(
+                      tag: 'story:$displayName',
+                      child: UserAvatar(
+                        displayName: displayName,
+                        identityKey: identityKey,
+                        size: AvatarSize.medium,
+                      ),
                     ),
                   ),
                 ),
@@ -545,7 +543,7 @@ class _StoryItem extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             SizedBox(
-              width: 64,
+              width: 76,
               child: Text(
                 label,
                 textAlign: TextAlign.center,
@@ -575,7 +573,7 @@ class _CreatePostBar extends StatelessWidget {
       margin: const EdgeInsets.only(top: 8),
       child: Row(
         children: [
-          UserAvatar(displayName: name, size: AvatarSize.small),
+          UserAvatar(displayName: name, imageRef: identity.currentIdentity?.avatarRef, size: AvatarSize.small),
           const SizedBox(width: 10),
           Expanded(
             child: GestureDetector(

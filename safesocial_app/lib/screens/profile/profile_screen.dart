@@ -133,27 +133,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            OutlinedButton.icon(
+                            IconButton.filledTonal(
+                              tooltip: 'Albums',
                               onPressed: () => context.push('/albums'),
-                              icon: const Icon(Icons.photo_library_outlined, size: 18),
-                              label: const Text('Albums'),
+                              icon: const Icon(Icons.photo_library_outlined),
                             ),
-                            const SizedBox(width: 8),
-                            OutlinedButton.icon(
+                            const SizedBox(width: 4),
+                            IconButton.filledTonal(
+                              tooltip: 'Share your contact code',
                               onPressed: () => context.push('/contacts/add'),
-                              icon: const Icon(Icons.qr_code_2, size: 18),
-                              label: const Text('Share'),
+                              icon: const Icon(Icons.qr_code_2),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        TextButton.icon(
-                          onPressed: () => context.push('/posts/manage'),
-                          icon: const Icon(Icons.inventory_2_outlined, size: 18),
-                          label: const Text('Manage posts: archive, trash, delete in bulk'),
+                        const SizedBox(height: 12),
+                        _ProfileTile(
+                          icon: Icons.inventory_2_outlined,
+                          label: 'Manage posts',
+                          hint: 'Archive, trash, delete in bulk',
+                          onTap: () => context.push('/posts/manage'),
                         ),
-                        TextButton.icon(
-                          onPressed: () async {
+                        _ProfileTile(
+                          icon: Icons.chat_bubble_outline,
+                          label: (profile.activeNote).isEmpty ? 'Share a note for a day' : 'Note: ${profile.activeNote}',
+                          hint: 'A line your contacts see for 24 hours',
+                          onTap: () async {
                             final identity = context.read<IdentityService>();
                             final c = TextEditingController(text: identity.currentIdentity?.activeNote ?? '');
                             final text = await showDialog<String>(
@@ -177,10 +181,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             if (text == null) return;
                             await identity.setNote(text);
                           },
-                          icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                          label: Text((profile.activeNote).isEmpty
-                              ? 'Share a note for a day'
-                              : 'Note: ${profile.activeNote}'),
                         ),
                         if (pendingTags.isNotEmpty)
                           Card(
@@ -202,21 +202,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                             ]),
                           ),
-                        TextButton.icon(
-                          onPressed: () => context.push('/stories/archive'),
-                          icon: const Icon(Icons.history_outlined, size: 18),
-                          label: const Text('Story archive and highlights'),
+                        _ProfileTile(
+                          icon: Icons.history_outlined,
+                          label: 'Story archive and highlights',
+                          hint: 'Your stories, kept here; pick some for the profile',
+                          onTap: () => context.push('/stories/archive'),
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Identity key',
-                          style: theme.textTheme.labelSmall
-                              ?.copyWith(color: cs.onSurfaceVariant),
-                        ),
-                        SelectableText(
-                          profile.publicKey,
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(fontFamily: 'monospace', fontSize: 11),
+                        const SizedBox(height: 4),
+                        Theme(
+                          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                          child: ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            leading: Icon(Icons.key_outlined, color: cs.onSurfaceVariant, size: 20),
+                            title: Text('Identity key', style: theme.textTheme.bodyMedium),
+                            subtitle: Text('${profile.publicKey.substring(0, 12)}…  tap to show',
+                                style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                            children: [
+                              SelectableText(
+                                profile.publicKey,
+                                style: theme.textTheme.bodySmall
+                                    ?.copyWith(fontFamily: 'monospace', color: cs.onSurfaceVariant),
+                              ),
+                            ],
+                          ),
                         ),
                         if (profile.legacyContact != null)
                           Padding(
@@ -263,5 +271,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
     if (choice != null && mounted) setState(() => _viewAs = choice);
+  }
+}
+
+/// One of the profile's own tools: a soft tile, not a red text link.
+class _ProfileTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String hint;
+  final VoidCallback onTap;
+  const _ProfileTile({required this.icon, required this.label, required this.hint, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(color: cs.primaryContainer.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, size: 20, color: cs.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(label, style: const TextStyle(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(hint, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+                ]),
+              ),
+              Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }

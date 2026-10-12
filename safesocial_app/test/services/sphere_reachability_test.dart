@@ -1,11 +1,14 @@
 import 'dart:convert';
 
 import 'package:convert/convert.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spheres_app/crypto/session_manager.dart';
+import 'package:spheres_app/crypto/spheres_crypto.dart';
+import 'package:spheres_app/services/feed_service.dart';
 import 'package:spheres_app/models/sphere.dart';
 import 'package:spheres_app/services/secure_store.dart';
 import 'package:spheres_app/services/sphere_service.dart';
@@ -140,6 +143,55 @@ void main() {
     });
   });
 
+  group('the feed channel', () {
+    test('is opened to a member who is not a contact', () async {
+      // Found with three phones: a newcomer approved by the admin could reach
+      // the admin (a contact) and nobody else in the sphere. No channel was
+      // ever opened to the other members, so posts, sphere messages and sync
+      // requests to them were refused by the hub without a word.
+      Future<String> realKey(SimpleKeyPair pair) async =>
+          hex.encode((await pair.extractPublicKey()).bytes);
+      final carolPair = await SpheresCrypto.newKeyExchangeKeyPair();
+      final carolKeys = ed.generateKey();
+      final carolId = hex.encode(carolKeys.publicKey.bytes);
+      final carolSecret = hex.encode(carolKeys.privateKey.bytes);
+      final sessions = SessionManager();
+      await sessions.configure(
+          keyExchangeKeyPair: carolPair, identityKey: carolId, identitySecret: carolSecret);
+      final aliceReal = await realKey(await SpheresCrypto.newKeyExchangeKeyPair());
+      final bobReal = await realKey(await SpheresCrypto.newKeyExchangeKeyPair());
+
+      final service = SphereService();
+      service.configure(
+        sessions: sessions,
+        identityKey: carolId,
+        identitySecret: carolSecret,
+        resolveExchangeKey: (_) => null, // an empty address book
+        myExchangeKey: await realKey(carolPair),
+      );
+      await service.handleIncomingOp(
+        alice,
+        signedCreate([
+          member(alice, SphereRole.owner, exchange: aliceReal),
+          member(bob, SphereRole.member, exchange: bobReal),
+          member(carolId, SphereRole.member, exchange: await realKey(carolPair)),
+        ]),
+      );
+      await service.acceptInvite(sphereId);
+
+      final feed = FeedService();
+      feed.attachCrypto(sessions, (_) => null, spheres: service);
+      feed.initSync(carolId, carolSecret, const []);
+      expect(feed.memberChannels, isEmpty);
+
+      await feed.connectSphereMembers();
+      expect(feed.memberChannels, {alice, bob}, reason: 'everyone but herself');
+
+      await feed.connectSphereMembers();
+      expect(feed.memberChannels, {alice, bob}, reason: 'a second call opens nothing twice');
+    });
+  });
+
   group('reaching a peer', () {
     /// Carol's device, which knows nobody: everything must come from the
     /// member list.
@@ -156,6 +208,27 @@ void main() {
       await service.acceptInvite(sphereId);
       return service;
     }
+
+    test('joining asks the app to sync the sphere at once', () async {
+      // Seen on hardware: the welcome post and the rules, published while
+      // the invitation was still unanswered, were dropped as "not a member"
+      // and only the next scheduled sync would have brought them back.
+      final service = serviceFor(carol, aliceSecret);
+      final synced = <String>[];
+      service.onJoined = synced.add;
+      await service.handleIncomingOp(
+        alice,
+        signedCreate([
+          member(alice, SphereRole.owner, exchange: aliceX),
+          member(carol, SphereRole.member, exchange: carolX),
+        ]),
+      );
+      expect(synced, isEmpty, reason: 'an invitation is not a membership');
+
+      await service.acceptInvite(sphereId);
+
+      expect(synced, [sphereId]);
+    });
 
     test('a member can reach someone who never invited them', () async {
       // Bob did not add Carol and is not in her address book. Before this she

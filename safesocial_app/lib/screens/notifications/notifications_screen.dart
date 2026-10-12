@@ -36,6 +36,7 @@ class NotificationsScreen extends StatelessWidget {
         if (r.reactorId != me) {
           notifications.add(_NotificationItem(
             actorName: nameFor(r.reactorId),
+            actorKey: r.reactorId,
             action: 'reacted ${r.emoji} to your post',
             postPreview: post.content,
             timestamp: r.timestamp,
@@ -49,6 +50,7 @@ class NotificationsScreen extends StatelessWidget {
           notifications.add(_NotificationItem(
             actorName:
                 c.authorName.isNotEmpty ? c.authorName : nameFor(c.authorId),
+            actorKey: c.authorId,
             action: 'commented on your post',
             postPreview: c.text,
             timestamp: c.createdAt,
@@ -61,6 +63,7 @@ class NotificationsScreen extends StatelessWidget {
         if (like != me) {
           notifications.add(_NotificationItem(
             actorName: nameFor(like),
+            actorKey: like,
             action: 'liked your post',
             postPreview: post.content,
             timestamp: post.createdAt,
@@ -123,6 +126,7 @@ class NotificationsScreen extends StatelessWidget {
 
 class _NotificationItem {
   final String actorName;
+  final String actorKey;
   final String action;
   final String postPreview;
   final DateTime timestamp;
@@ -131,6 +135,7 @@ class _NotificationItem {
 
   _NotificationItem({
     required this.actorName,
+    required this.actorKey,
     required this.action,
     required this.postPreview,
     required this.timestamp,
@@ -169,6 +174,7 @@ class _NotificationTile extends StatelessWidget {
               children: [
                 UserAvatar(
                   displayName: item.actorName,
+                  identityKey: item.actorKey,
                   size: AvatarSize.medium,
                 ),
                 Positioned(

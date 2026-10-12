@@ -9,14 +9,24 @@ import '../../services/contact_service.dart';
 import '../../widgets/avatar.dart';
 
 /// Screen displaying the user's address book.
-class ContactListScreen extends StatelessWidget {
+class ContactListScreen extends StatefulWidget {
   const ContactListScreen({super.key});
+
+  @override
+  State<ContactListScreen> createState() => _ContactListScreenState();
+}
+
+class _ContactListScreenState extends State<ContactListScreen> {
+  String _query = '';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final contactService = context.watch<ContactService>();
-    final contacts = contactService.contacts;
+    final q = _query.trim().toLowerCase();
+    final contacts = contactService.contacts
+        .where((c) => q.isEmpty || c.displayName.toLowerCase().contains(q) || (c.nickname?.toLowerCase().contains(q) ?? false))
+        .toList();
     // Requests sit above the address book: they are the thing waiting on you.
     final requests = contactService.requests;
 
@@ -38,21 +48,43 @@ class ContactListScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: contacts.isEmpty && requests.isEmpty
-          ? _buildEmptyState(theme)
-          : ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: requests.length + contacts.length,
-              separatorBuilder: (context, index) =>
-                  const Divider(indent: 72, height: 1),
-              itemBuilder: (context, index) {
-                if (index < requests.length) {
-                  return _RequestTile(request: requests[index]);
-                }
-                return _ContactListTile(
-                    contact: contacts[index - requests.length]);
-              },
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: TextField(
+              onChanged: (v) => setState(() => _query = v),
+              decoration: const InputDecoration(
+                hintText: 'Search contacts',
+                prefixIcon: Icon(Icons.search),
+                isDense: true,
+              ),
             ),
+          ),
+          Expanded(
+            child: contacts.isEmpty && requests.isEmpty
+                ? (q.isEmpty ? _buildEmptyState(theme) : const Center(child: Text('Nobody by that name')))
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: requests.length + contacts.length + (requests.isNotEmpty ? 1 : 0),
+                    separatorBuilder: (context, index) => const SizedBox(height: 2),
+                    itemBuilder: (context, index) {
+                      if (requests.isNotEmpty && index == 0) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                          child: Text('Waiting for you', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary)),
+                        );
+                      }
+                      final i = requests.isNotEmpty ? index - 1 : index;
+                      if (i < requests.length) {
+                        return _RequestTile(request: requests[i]);
+                      }
+                      return _ContactListTile(contact: contacts[i - requests.length]);
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 

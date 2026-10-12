@@ -890,11 +890,16 @@ class ContactService extends ChangeNotifier {
     _emitSync({'op': 'upsert', 'contact': _contacts[index].toJson()});
   }
 
+  /// A contact was removed on this device. The app forgets what it had sent
+  /// them, so adding them again starts afresh.
+  void Function(String publicKey)? onContactRemoved;
+
   Future<void> removeContact(String publicKey) async {
     _contacts.removeWhere((c) => c.publicKey == publicKey);
     await _persistContacts();
     notifyListeners();
     _emitSync({'op': 'remove', 'publicKey': publicKey});
+    onContactRemoved?.call(publicKey);
   }
 
   Future<void> renameContact(String publicKey, String newName) async {
@@ -979,6 +984,18 @@ class ContactService extends ChangeNotifier {
       await _persistContacts();
       notifyListeners();
     }
+  }
+
+  /// A sealed message from [publicKey] arrived. If we were still showing
+  /// them as waiting to approve us, they are not: their acceptance was lost
+  /// but they are sealing to our keys, which only an accepted contact does.
+  Future<void> heardFrom(String publicKey) async {
+    final index = _contacts.indexWhere((c) => c.publicKey == publicKey);
+    if (index == -1 || !_contacts[index].isPending) return;
+    _contacts[index] = _contacts[index].copyWith(isPending: false);
+    await _persistContacts();
+    notifyListeners();
+    _emitSync({'op': 'upsert', 'contact': _contacts[index].toJson()});
   }
 
   void _updateContactInfo(String publicKey, String name, {required bool isPending}) {

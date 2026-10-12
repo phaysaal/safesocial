@@ -71,6 +71,20 @@ class FeedService extends ChangeNotifier {
   /// device — after leaving a sphere its content disappears from the feed
   /// rather than lingering because it happens to be in local storage. The
   /// feed used to display whatever arrived, with no scoping at all.
+  /// The name a member signs their posts and comments with, for someone who
+  /// is not a contact of ours: a sphere's member list is otherwise a list of
+  /// keys for everyone we did not add ourselves. Newest first, so a rename
+  /// shows. Null when they have written nothing we hold.
+  String? authorNameFor(String identityKey) {
+    for (final p in _posts) {
+      if (p.authorId == identityKey && p.authorName.isNotEmpty) return p.authorName;
+      for (final c in p.comments) {
+        if (c.authorId == identityKey && c.authorName.isNotEmpty) return c.authorName;
+      }
+    }
+    return null;
+  }
+
   List<Post> get posts =>
       _visible(_posts.where((p) => !p.isStory && !_archivedIds.contains(p.id)));
 
@@ -723,7 +737,7 @@ class FeedService extends ChangeNotifier {
     final sessions = _sessions;
     if (sessions == null) return const [];
     return sessions.devicesOf(member,
-        fallback: member == _myPublicKey ? null : _resolveExchangeKey?.call(member));
+        fallback: member == _myPublicKey ? null : _exchangeKeyFor(member));
   }
 
   /// Apply an envelope a peer sent back because we were missing it.
@@ -797,12 +811,11 @@ class FeedService extends ChangeNotifier {
     await _connectFeedMailbox(contact.publicKey);
   }
 
-  Future<void> _connectFeedMailbox(String contactKey) async {
+  Future<bool> _connectFeedMailbox(String contactKey) async {
     final sessions = _sessions;
-    if (sessions == null) return;
+    if (sessions == null) return false;
     try {
-      final devices = sessions.devicesOf(contactKey,
-          fallback: _resolveExchangeKey?.call(contactKey));
+      final devices = sessions.devicesOf(contactKey, fallback: _exchangeKeyFor(contactKey));
       if (devices.isEmpty) throw NoSessionException(contactKey);
       for (final device in devices) {
         final mailbox = await sessions.mailboxFor(
@@ -812,8 +825,59 @@ class FeedService extends ChangeNotifier {
         );
         await _feedRelay.connectMailbox(contactKey, mailbox, deviceKey: device);
       }
+      return true;
     } on NoSessionException {
       // Nothing to connect to until the contact publishes an encryption key.
+      return false;
+    }
+  }
+
+  /// A key to reach [identityKey] with: a contact's, or failing that the one
+  /// their sphere membership records. Without the second, a member nobody
+  /// here had added was unreachable: no channel was ever opened to them, so
+  /// our posts, sphere messages and sync requests to them were refused by the
+  /// hub as "no subscription", and quietly (found with three phones, 12
+  /// October 2026: the newcomer could reach only the admin who approved it).
+  String? _exchangeKeyFor(String identityKey) {
+    final direct = _resolveExchangeKey?.call(identityKey);
+    if (direct != null) return direct;
+    final spheres = _spheres;
+    if (spheres == null) return null;
+    for (final s in spheres.spheres) {
+      final k = spheres.memberExchangeKey(s.id, identityKey);
+      if (k != null) return k;
+    }
+    return null;
+  }
+
+  /// Sphere members we opened a feed channel to although they are not
+  /// contacts.
+  final Set<String> _memberChannels = {};
+
+  @visibleForTesting
+  Set<String> get memberChannels => Set.unmodifiable(_memberChannels);
+
+  /// Open a feed channel to every member of every sphere we are in who is not
+  /// a contact (contacts are connected by [connectContact]). Safe to call on
+  /// every membership change: a member already connected costs a set lookup.
+  Future<void> connectSphereMembers() async {
+    final spheres = _spheres;
+    final me = _myPublicKey;
+    if (spheres == null || me == null) return;
+    var opened = 0;
+    for (final s in spheres.spheres) {
+      for (final m in s.members) {
+        final key = m.identityKey;
+        if (key == me || _memberChannels.contains(key)) continue;
+        if (_contacts.any((c) => c.publicKey == key)) continue;
+        if (await _connectFeedMailbox(key)) {
+          _memberChannels.add(key);
+          opened++;
+        }
+      }
+    }
+    if (opened > 0) {
+      DebugLogService().info('Feed', 'Listening for $opened sphere member(s) who are not contacts');
     }
   }
 

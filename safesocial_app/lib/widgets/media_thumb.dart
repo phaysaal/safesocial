@@ -69,6 +69,13 @@ class MediaThumb extends StatelessWidget {
               height: height,
               fit: fit,
               gaplessPlayback: true,
+              frameBuilder: (_, child, frame, syncLoaded) => syncLoaded
+                  ? child
+                  : AnimatedOpacity(
+                      opacity: frame == null ? 0 : 1,
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut,
+                      child: child),
               errorBuilder: (_, __, ___) => _placeholder(cs, video),
             );
     } else {

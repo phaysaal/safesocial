@@ -145,7 +145,7 @@ class AlbumDetailScreen extends StatelessWidget {
               itemBuilder: (ctx, i) {
                 final c = contactService.contacts[i];
                 return ListTile(
-                  leading: UserAvatar(displayName: c.displayName, size: AvatarSize.small),
+                  leading: UserAvatar(displayName: c.displayName, imageRef: c.avatarRef, size: AvatarSize.small),
                   title: Text(c.displayName),
                   onTap: () {
                     // FUTURE: Implement album invitation handshake

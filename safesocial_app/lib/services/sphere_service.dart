@@ -449,6 +449,12 @@ class SphereService extends ChangeNotifier {
   /// sphere's welcome line through it.
   Future<void> Function(String sphereId, String publicKey, String name)? onMemberJoined;
 
+  /// We just accepted an invitation. Set by the app to pull what the sphere
+  /// already holds: a welcome post made at approval reaches the newcomer
+  /// before they have joined and is rightly dropped, so without this they
+  /// would wait for the next scheduled sync to see it.
+  void Function(String sphereId)? onJoined;
+
   Future<void> rotateInviteLink(String sphereId) async {
     _requireAdmin(sphereId);
     _inviteTokens.remove(sphereId);
@@ -620,6 +626,7 @@ class SphereService extends ChangeNotifier {
     await _persistInvites();
     notifyListeners();
     DebugLogService().success('Sphere', 'Joined "${invite.sphere.name}"');
+    onJoined?.call(sphereId);
   }
 
   /// Decline, discarding the key we were sent along with it.

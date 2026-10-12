@@ -532,7 +532,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
       navigator.pop();
     } catch (e) {
       if (mounted) setState(() => _posting = false);
-      messenger.showSnackBar(SnackBar(content: Text('Could not post: $e')));
+      // A StateError is a sentence written for the person (suspended here,
+      // sphere gone); anything else is a fault and is shown as one.
+      messenger.showSnackBar(SnackBar(
+          content: Text(e is StateError ? e.message.toString() : 'Could not post: $e')));
     }
   }
 
@@ -603,6 +606,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                           UserAvatar(
                             displayName:
                                 identity.currentIdentity?.displayName ?? 'You',
+                            imageRef: identity.currentIdentity?.avatarRef,
                             size: AvatarSize.medium,
                           ),
                           const SizedBox(width: 10),

@@ -384,7 +384,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
             ...viewers.map((key) => ListTile(
                   dense: true,
                   leading: UserAvatar(
-                      displayName: nameFor(key), size: AvatarSize.small),
+                      displayName: nameFor(key), identityKey: key, size: AvatarSize.small),
                   title: Text(nameFor(key)),
                 )),
           ],
@@ -435,7 +435,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                UserAvatar(displayName: widget.authorName, size: AvatarSize.small),
+                Hero(tag: 'story:${widget.authorName}', child: UserAvatar(displayName: widget.authorName, identityKey: _current.authorId, size: AvatarSize.small)),
                 const SizedBox(width: 8),
                 Text(
                   widget.authorName,

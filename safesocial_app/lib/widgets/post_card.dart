@@ -69,9 +69,8 @@ class _PostCardState extends State<PostCard> {
         ? 'You'
         : (post.authorName.isNotEmpty ? post.authorName : post.authorId);
 
-    return Container(
-      color: cs.surface,
-      margin: const EdgeInsets.only(bottom: 8),
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -80,7 +79,7 @@ class _PostCardState extends State<PostCard> {
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
             child: Row(
               children: [
-                UserAvatar(displayName: authorName, size: AvatarSize.medium),
+                UserAvatar(displayName: authorName, identityKey: post.authorId, size: AvatarSize.medium),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -444,20 +443,15 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
 
-          // ── Divider ────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Divider(color: cs.outline, height: 20),
-          ),
+          const SizedBox(height: 8),
 
           // ── Like / Comment / Share action row ──────────────
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Row(
               children: [
                 // Like button — tap to react 👍, long-press for full picker
-                Expanded(
-                  child: GestureDetector(
+                GestureDetector(
                     onLongPress: () => showReactionPicker(context,
                         current: post.reactions
                             .where((r) => r.reactorId == myKey)
@@ -467,6 +461,7 @@ class _PostCardState extends State<PostCard> {
                     child: _ActionButton(
                       icon: _selfReactionIcon(post, myKey),
                       label: _selfReactionLabel(post, myKey),
+                      count: post.reactions.isNotEmpty ? post.reactions.length : post.likes.length,
                       color: _hasSelfReaction(post, myKey)
                           ? cs.primary
                           : cs.onSurfaceVariant,
@@ -484,10 +479,11 @@ class _PostCardState extends State<PostCard> {
                       },
                     ),
                   ),
-                ),
+                const Spacer(),
                 _ActionButton(
                   icon: Icons.chat_bubble_outline,
                   label: 'Comment',
+                  count: post.visibleComments(myKey).length,
                   color: cs.onSurfaceVariant,
                   onTap: () => _showCommentSheet(context, post),
                 ),
@@ -1247,7 +1243,7 @@ class _CommentThread extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              UserAvatar(displayName: name, size: AvatarSize.small),
+              UserAvatar(displayName: name, identityKey: comment.authorId, size: AvatarSize.small),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -1300,6 +1296,7 @@ class _CommentThread extends StatelessWidget {
                     displayName: reply.authorName.isNotEmpty
                         ? reply.authorName
                         : reply.authorId,
+                    identityKey: reply.authorId,
                     size: AvatarSize.small,
                   ),
                   const SizedBox(width: 8),
@@ -1340,38 +1337,50 @@ class _CommentThread extends StatelessWidget {
 
 class _ActionButton extends StatelessWidget {
   final IconData icon;
+
+  /// Spoken and shown on a long press; drawn only when [count] is given.
   final String label;
   final Color color;
   final VoidCallback onTap;
+  final int? count;
 
   const _ActionButton({
     required this.icon,
     required this.label,
     required this.color,
     required this.onTap,
+    this.count,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 20, color: color),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
+    final cs = Theme.of(context).colorScheme;
+    final active = color == cs.primary;
+    // A compact pill, tinted when it is ours.
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: active ? cs.primary.withValues(alpha: 0.12) : cs.surfaceContainerHighest.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 20, color: color),
+                  if (count != null && count! > 0) ...[
+                    const SizedBox(width: 5),
+                    Text('$count', style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
+                  ],
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

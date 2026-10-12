@@ -9,7 +9,7 @@ import 'services/feed_service.dart';
 import 'services/identity_service.dart';
 import 'services/library_service.dart';
 import 'services/media_service.dart';
-import 'services/profile_sharing.dart';
+import 'services/profile_sync.dart';
 import 'services/location_provider.dart';
 import 'services/sphere_migration.dart';
 import 'dart:async';
@@ -114,12 +114,16 @@ Future<void> wireIdentity({
   // pairing) resolves to null and stays on our relay.
   RelayHub.instance.peerHostResolver = contactService.relayHostFor;
 
+  Future<void> Function() profileSyncOwnDevices = () async {};
   // Devices. A new signed list from a contact updates their entry; one from
   // our own other device updates ours. Changes we make here are published and
   // announced, and the channels to our own devices follow the list.
   chatService.onDeviceList = (from, json) async {
     if (from == publicKey) {
-      await identityService.adoptDeviceList(json);
+      if (await identityService.adoptDeviceList(json)) {
+        // A device we did not know of may hold a profile with no picture.
+        unawaited(profileSyncOwnDevices());
+      }
     } else {
       await contactService.applyDeviceList(from, json);
     }
@@ -128,58 +132,40 @@ Future<void> wireIdentity({
   chatService.onProfile = contactService.applyProfile;
   contactService.materialiseMedia = MediaService.decodeAndSaveImage;
   // Our profile goes to contacts as a sealed message, never to the public
-  // bundle. The avatar travels as an encrypted blob like any photo.
-  identityService.onProfileChanged = (profile) async {
-    Future<String?> upload(String? local) async {
-      if (local == null || local.isEmpty) return null;
-      try {
-        return await MediaService.prepareForRelay(local);
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final avatar = await upload(profile.avatarRef);
-    final cover = await upload(profile.coverRef);
-    final featured = <String>[];
-    for (final ref in profile.featuredRefs) {
-      final up = await upload(ref);
-      if (up != null) featured.add(up);
-    }
-    final highlightRefs = <String, List<String>>{};
-    for (final h in profile.highlights) {
-      final ups = <String>[];
-      for (final ref in h.refs) {
-        final up = await upload(ref);
-        if (up != null) ups.add(up);
-      }
-      highlightRefs[h.id] = ups;
-    }
-    final me = identityService.publicKey;
+  // bundle. The avatar travels as an encrypted blob like any photo. Each
+  // contact gets it when it differs from what they were last sent: on every
+  // edit, when they are added, and at every start.
+  final me = identityService.publicKey;
+  final profileSync = ProfileSync(
+    profile: () => identityService.currentIdentity,
+    peers: () => [
+      for (final c in contactService.contacts)
+        if (!c.blocked && c.keyExchangePublicKey != null) c.publicKey,
+    ],
     // The spheres a contact shares with us decide which fields they get.
-    Set<String> sharedWith(String peer) => {
-          for (final s in sphereService.spheres)
-            if (s.contains(peer) && me != null && s.contains(me)) s.id,
-        };
-    await chatService.broadcastProfile(
-      (peer) => ProfileSharing.payloadFor(
-        profile: profile,
-        peer: peer,
-        sharedSpheres: sharedWith(peer),
-        avatarRef: avatar,
-        coverRef: cover,
-        featuredRefs: featured,
-        restricted: contactService.getContact(peer)?.restricted ?? false,
-        highlightRefs: highlightRefs,
-      ),
-      everything: identityService.profileForOwnDevices(
-        avatarRef: avatar,
-        coverRef: cover,
-        featuredRefs: featured,
-        highlightRefs: highlightRefs,
-      ),
-    );
-  };
+    sharedSpheres: (peer) => {
+      for (final s in sphereService.spheres)
+        if (s.contains(peer) && me != null && s.contains(me)) s.id,
+    },
+    restricted: (peer) => contactService.getContact(peer)?.restricted ?? false,
+    upload: MediaService.prepareForRelay,
+    send: chatService.sendProfileTo,
+    sendOwn: (everything) => chatService.sendToOwnDevices('profile', jsonEncode(everything)),
+    everything: identityService.profileForOwnDevices,
+    ownDevices: () => identityService.deviceList?.devices.map((d) => d.deviceId) ?? const [],
+  );
+  identityService.onProfileChanged = (_) => profileSync.sync(onlyChanged: false);
+  // A send the relay did not take is owed; the moment that contact's channel
+  // comes up (a start without network, a reconnect) it goes, not at the next
+  // start only.
+  chatService.onPeerConnected = (peer) => unawaited(profileSync.sync(to: [peer]).catchError((Object e) {
+        DebugLogService().error('Wiring', 'Could not send our profile to $peer: $e');
+        return const <String>[];
+      }));
+  chatService.onHeardFrom = (peer) => unawaited(contactService.heardFrom(peer));
+  profileSyncOwnDevices = () => profileSync.sync().then((_) {}).catchError((Object e) {
+        DebugLogService().error('Wiring', 'Could not send our profile to our devices: $e');
+      });
   chatService.onOwnProfile = (json) =>
       identityService.adoptFromOwnDevice(json, materialise: MediaService.decodeAndSaveImage);
   // A temporary picture whose time ran out while the app was closed, and a
@@ -216,8 +202,19 @@ Future<void> wireIdentity({
   };
   await callService.loadLog();
   chatService.onUnknownDevice = contactService.refreshBundle;
-  contactService.onContactsChanged =
-      (op) => chatService.sendToOwnDevices('contacts', jsonEncode(op));
+  contactService.onContactsChanged = (op) async {
+    await chatService.sendToOwnDevices('contacts', jsonEncode(op));
+    // Restricting someone, or releasing them, changes the cut of our profile
+    // they get. Send it now rather than at the next start: until then they
+    // held the fuller copy (seen with three phones, 12 October 2026).
+    final key = (op['contact'] as Map?)?['publicKey'];
+    if (op['op'] == 'upsert' && key is String) {
+      unawaited(profileSync.sync(to: [key]).catchError((Object e) {
+        DebugLogService().error('Wiring', 'Could not send our profile to $key: $e');
+        return const <String>[];
+      }));
+    }
+  };
   chatService.contactKeys = () => [
         for (final c in contactService.contacts)
           if (!c.blocked && !c.isPending) c.publicKey,
@@ -227,6 +224,9 @@ Future<void> wireIdentity({
     unawaited(chatService.broadcastDeviceList(list.toJson()));
     unawaited(chatService.connectOwnDevices());
     unawaited(feedService.connectOwnDevices());
+    // The device just linked holds our words from the backup but none of
+    // our pictures; the list changing is what makes the profile due again.
+    unawaited(profileSyncOwnDevices());
   };
   callService.setMyInfo(publicKey, secretKey);
   callService.resolveName = (key) => contactService.getContact(key)?.displayName;
@@ -310,7 +310,17 @@ Future<void> wireIdentity({
   sphereChatService.isSuspended = sphereInfoService.isSuspended;
   sphereChatService.onSphereText = (sphereId, author, text, route) =>
       sphereInfoService.keywordAlert(sphereId, author, text, route: route);
+  // Seen on hardware: the welcome post went out at approval and the newcomer's
+  // device dropped it as "not a member", because the invitation was still
+  // unanswered there. A sync right after joining brings it, and anything else
+  // the sphere already holds, without waiting for the next scheduled one.
+  sphereService.onJoined = (sphereId) => unawaited(sphereSyncService.syncSphere(sphereId).catchError((Object e) {
+        DebugLogService().error('Wiring', 'Could not sync "$sphereId" after joining: $e');
+      }));
   sphereService.onMemberJoined = (sphereId, publicKey, name) async {
+    // The rules, topics and welcome line again, sealed under the epoch the
+    // newcomer holds; the copy sent earlier was sealed before their time.
+    await sphereInfoService.republish(sphereId);
     final welcome = sphereInfoService.infoFor(sphereId).welcome;
     final sphere = sphereService.sphere(sphereId);
     if (welcome.isEmpty || sphere == null) return;
@@ -379,13 +389,24 @@ Future<void> wireIdentity({
     open('chat', () => chatService.connectRelay(key));
     open('call', () => callService.connectSignaling(key));
     open('feed', () => feedService.connectContact(contact));
+    // Someone added after our picture was chosen would otherwise see an
+    // initial until our next edit.
+    unawaited(profileSync.sync(to: [key]).catchError((Object e) {
+      DebugLogService().error('Wiring', 'Could not send our profile to $key: $e');
+      return const <String>[];
+    }));
   }
 
   contactService.onContactReady = wireContact;
+  contactService.onContactRemoved = (key) => unawaited(profileSync.forget(key));
   // The feed needs our key before it can open anything, including the channel
   // to our own other devices; opening that first left every post after a
   // restart on this device only.
   feedService.initSync(publicKey, secretKey, contactService.contacts);
+  // Members of our spheres who are not contacts get a feed channel too, now
+  // and whenever a membership changes.
+  await feedService.connectSphereMembers();
+  sphereService.addListener(() => unawaited(feedService.connectSphereMembers()));
   await chatService.connectOwnDevices();
   await feedService.connectOwnDevices();
 
@@ -397,6 +418,12 @@ Future<void> wireIdentity({
 
   // Polls the handshake inbox and backfills any missing exchange keys.
   contactService.startInboxPolling();
+  // Anyone whose copy of our profile is out of date (never sent, or they
+  // now share a sphere with us and may see more).
+  unawaited(profileSync.sync().catchError((Object e) {
+    DebugLogService().error('Wiring', 'Could not bring profiles up to date: $e');
+    return const <String>[];
+  }));
 
   albumService.initSync(publicKey, secretKey);
 

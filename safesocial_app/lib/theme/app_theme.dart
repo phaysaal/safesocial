@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 // ---------------------------------------------------------------------------
-// Spheres brand palette — sunset coral/rose from the logo
+// Spheres brand palette: the rose and violet of the logo's top two bands
+// (drawn by scripts/make_logo.py)
 // ---------------------------------------------------------------------------
 
 // Light theme colors
-const _lightPrimary = Color(0xFFC93D4E); // Darker sunset rose from logo
+const _lightPrimary = Color(0xFFC93D4E); // the logo's rose, deepened for text
 const _lightOnPrimary = Colors.white;
-const _lightSecondary = Color(0xFF7B3FE4); // Purple accent from logo shield
+const _lightSecondary = Color(0xFF7B3FE4); // the logo's violet
 const _lightBackground = Color(0xFFF5F0EF); // Warm light gray
 const _lightSurface = Colors.white;
 const _lightOnSurface = Color(0xFF1C1E21);
@@ -35,7 +36,11 @@ final ThemeData lightTheme = ThemeData(
   useMaterial3: true,
   brightness: Brightness.light,
   scaffoldBackgroundColor: _lightBackground,
-  colorScheme: const ColorScheme.light(
+  // Seeded from the logo's coral, so containers, chips and badges get tonal
+  // tints instead of the one solid brand red everywhere.
+  colorScheme: ColorScheme.fromSeed(
+    seedColor: _lightPrimary,
+    brightness: Brightness.light,
     primary: _lightPrimary,
     onPrimary: _lightOnPrimary,
     secondary: _lightSecondary,
@@ -71,9 +76,11 @@ final ThemeData lightTheme = ThemeData(
   ),
   cardTheme: CardThemeData(
     color: _lightSurface,
-    elevation: 0,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+    elevation: 1,
+    shadowColor: Colors.black.withValues(alpha: 0.35),
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
   ),
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
@@ -100,8 +107,9 @@ final ThemeData lightTheme = ThemeData(
     centerTitle: false,
     titleTextStyle: TextStyle(
       color: _lightOnSurface,
-      fontSize: 24,
-      fontWeight: FontWeight.w800,
+      fontSize: 22,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.3,
     ),
     iconTheme: IconThemeData(color: _lightOnSurface),
   ),
@@ -132,11 +140,18 @@ final ThemeData lightTheme = ThemeData(
     foregroundColor: Colors.white,
     elevation: 2,
   ),
+  filledButtonTheme: FilledButtonThemeData(
+    style: FilledButton.styleFrom(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+    ),
+  ),
   elevatedButtonTheme: ElevatedButtonThemeData(
     style: ElevatedButton.styleFrom(
       backgroundColor: _lightPrimary,
       foregroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       elevation: 0,
       textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
@@ -146,7 +161,7 @@ final ThemeData lightTheme = ThemeData(
     style: OutlinedButton.styleFrom(
       foregroundColor: _lightOnSurface,
       side: const BorderSide(color: _lightDivider),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
     ),
@@ -158,20 +173,21 @@ final ThemeData lightTheme = ThemeData(
   ),
   bottomSheetTheme: const BottomSheetThemeData(
     backgroundColor: _lightSurface,
+    showDragHandle: true,
     shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
   ),
   dialogTheme: DialogThemeData(
     backgroundColor: _lightSurface,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
   ),
   chipTheme: ChipThemeData(
     backgroundColor: _lightBackground,
-    selectedColor: _lightPrimary.withValues(alpha: 0.12),
-    side: const BorderSide(color: _lightDivider),
+    selectedColor: _lightPrimary.withValues(alpha: 0.14),
+    side: BorderSide.none,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-    labelStyle: const TextStyle(color: _lightOnSurface, fontSize: 13),
+    labelStyle: const TextStyle(color: _lightOnSurface, fontSize: 13, fontWeight: FontWeight.w500),
   ),
   iconTheme: const IconThemeData(color: _lightOnSurfaceVariant),
   listTileTheme: const ListTileThemeData(
@@ -187,7 +203,9 @@ final ThemeData darkTheme = ThemeData(
   useMaterial3: true,
   brightness: Brightness.dark,
   scaffoldBackgroundColor: _darkBackground,
-  colorScheme: const ColorScheme.dark(
+  colorScheme: ColorScheme.fromSeed(
+    seedColor: _darkPrimary,
+    brightness: Brightness.dark,
     primary: _darkPrimary,
     onPrimary: _darkOnPrimary,
     secondary: _darkSecondary,
@@ -224,8 +242,9 @@ final ThemeData darkTheme = ThemeData(
   cardTheme: CardThemeData(
     color: _darkSurface,
     elevation: 0,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
   ),
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
@@ -252,8 +271,9 @@ final ThemeData darkTheme = ThemeData(
     centerTitle: false,
     titleTextStyle: TextStyle(
       color: _darkOnSurface,
-      fontSize: 24,
-      fontWeight: FontWeight.w800,
+      fontSize: 22,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.3,
     ),
     iconTheme: IconThemeData(color: _darkOnSurface),
   ),
@@ -284,11 +304,18 @@ final ThemeData darkTheme = ThemeData(
     foregroundColor: Colors.white,
     elevation: 2,
   ),
+  filledButtonTheme: FilledButtonThemeData(
+    style: FilledButton.styleFrom(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+    ),
+  ),
   elevatedButtonTheme: ElevatedButtonThemeData(
     style: ElevatedButton.styleFrom(
       backgroundColor: _darkPrimary,
       foregroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       elevation: 0,
       textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
@@ -298,7 +325,7 @@ final ThemeData darkTheme = ThemeData(
     style: OutlinedButton.styleFrom(
       foregroundColor: _darkOnSurface,
       side: const BorderSide(color: _darkDivider),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
     ),
@@ -310,20 +337,21 @@ final ThemeData darkTheme = ThemeData(
   ),
   bottomSheetTheme: const BottomSheetThemeData(
     backgroundColor: _darkSurface,
+    showDragHandle: true,
     shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
   ),
   dialogTheme: DialogThemeData(
     backgroundColor: _darkSurface,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
   ),
   chipTheme: ChipThemeData(
     backgroundColor: const Color(0xFF3A3B3C),
-    selectedColor: _darkPrimary.withValues(alpha: 0.15),
-    side: const BorderSide(color: _darkDivider),
+    selectedColor: _darkPrimary.withValues(alpha: 0.18),
+    side: BorderSide.none,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-    labelStyle: const TextStyle(color: _darkOnSurface, fontSize: 13),
+    labelStyle: const TextStyle(color: _darkOnSurface, fontSize: 13, fontWeight: FontWeight.w500),
   ),
   iconTheme: const IconThemeData(color: _darkOnSurfaceVariant),
   listTileTheme: const ListTileThemeData(

@@ -173,14 +173,26 @@ class ProfileView extends StatelessWidget {
                   bottom: 48,
                   child: data.coverRef != null && File(data.coverRef!).existsSync()
                       ? Image.file(File(data.coverRef!), fit: BoxFit.cover)
-                      : Container(color: cs.primaryContainer),
+                      : Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [cs.primary.withValues(alpha: 0.85), cs.secondary.withValues(alpha: 0.75)],
+                            ),
+                          ),
+                        ),
                 ),
                 Positioned(
                   left: 24,
                   bottom: 0,
                   child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(color: cs.surface, shape: BoxShape.circle),
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: cs.surface,
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, 4))],
+                    ),
                     child: UserAvatar(
                       displayName: data.name,
                       imageRef: data.avatarRef,

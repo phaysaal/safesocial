@@ -156,7 +156,10 @@ class ChatService extends ChangeNotifier {
       outbox.send = (peer, payload, {deviceKey}) =>
           _relayService.sendViaRelay(peer, payload, deviceKey: deviceKey);
       // Retry as soon as a room comes back, rather than waiting for the tick.
-      _relayService.onConnected = (peer) => outbox.flush(onlyPeer: peer);
+      _relayService.onConnected = (peer) {
+        outbox.flush(onlyPeer: peer);
+        onPeerConnected?.call(peer);
+      };
     }
 
     _relayService.onMessageReceived = (contactKey, raw) {
@@ -164,6 +167,15 @@ class ChatService extends ChangeNotifier {
     };
     _startTypingSweep();
   }
+
+  /// A contact's channel just became usable (first connection or a
+  /// reconnect), so anything owed to them can go now.
+  void Function(String peer)? onPeerConnected;
+
+  /// A sealed envelope from this contact opened. Whoever can seal to us
+  /// holds our keys and is talking to us, so a request we were still
+  /// waiting on has plainly been accepted.
+  void Function(String peer)? onHeardFrom;
 
   /// Called with (senderIdentityKey, payload) for verified `sphere_op`
   /// envelopes. Set by the app so ChatService need not know about spheres.
@@ -248,6 +260,21 @@ class ChatService extends ChangeNotifier {
   /// Each contact gets their own copy from [payloadFor], because fields have
   /// audiences: what one person may see another may not. [everything] is
   /// what our other devices get, which is all of it.
+  /// Our profile, cut for [peer], as one sealed envelope. True only when the
+  /// relay took it, so the caller can remember what this peer holds.
+  Future<bool> sendProfileTo(String peer, Map<String, dynamic> payload) async {
+    final sessions = _sessions;
+    if (sessions == null || peer == _myPublicKey) return false;
+    final sealed = await sessions.sealForDevices(
+      peerIdentityKey: peer,
+      fallbackExchangeKey: _resolveExchangeKey?.call(peer),
+      type: 'profile',
+      plaintext: jsonEncode(payload),
+      mode: SealMode.wrap,
+    );
+    return _relayService.sendSealed(peer, sealed);
+  }
+
   Future<void> broadcastProfile(
     Map<String, dynamic> Function(String peer) payloadFor, {
     Map<String, dynamic>? everything,
@@ -1093,6 +1120,7 @@ class ChatService extends ChangeNotifier {
 
       // Anything that opens proves the chains agree again.
       _authFailures.remove('${opened.from}|${opened.fromDevice}');
+      if (opened.from != _myPublicKey) onHeardFrom?.call(opened.from);
 
       if (opened.type == 'profile') {
         final json = jsonDecode(opened.plaintext);

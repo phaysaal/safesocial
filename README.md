@@ -58,7 +58,7 @@ platform-side data mining.
 | Identity (Ed25519 signing + X25519 exchange keys, platform keystore) | Working |
 | Contacts: QR exchange, approval before adding, blocking | Working |
 | Spheres: create, invite, accept, leave, remove with key rotation | Working |
-| Sphere governance: owner/admin roles, transfer, removal by vote, audit log, rules, membership questions, topics, welcome posts, guides, badges, suspensions, keyword alerts, mute after N reports, expiring invite links | Working; the sphere-info item untested on hardware |
+| Sphere governance: owner/admin roles, transfer, removal by vote, audit log, rules, membership questions, topics, welcome posts, guides, badges, suspensions, keyword alerts, mute after N reports, expiring invite links | Working; rules, topics, badges, suspension and a keyword alert ran between three phones on 12 October 2026 |
 | Direct chat: ratcheted sessions per device pair, durable outbox, receipts, session repair | Working |
 | Sphere chat: group conversation owned by a sphere | Working |
 | Feed: posts to one or several spheres, comments, replies, reactions, saves | Working |
@@ -70,8 +70,8 @@ platform-side data mining.
 | Local search over messages, posts, comments, spheres, contacts | Working |
 | Edit own posts, pin posts in a sphere (admins), archive chats and spheres, mute a member within a sphere, per-sphere media gallery | Working |
 | Key verification: safety number and QR comparison per contact, with a banner when keys change | Working |
-| Messaging extras: disappearing messages and a vanish-mode preset, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, files of any type, scheduled messages, chat themes, nicknames and a chat emoji, ignore, full-size photos, chat bubbles on Android, a profile note for a day, chat lock, export, filters | Working; untested on hardware |
-| Feed extras: events with RSVP, poll posts, co-authored posts, alt text, drafts and scheduled posts, story captions and stickers, hidden-words filter, report to the sphere | Working; untested on hardware |
+| Messaging extras: disappearing messages and a vanish-mode preset, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, files of any type, scheduled messages, chat themes, nicknames and a chat emoji, ignore, full-size photos, chat bubbles on Android, a profile note for a day, chat lock, export, filters | Working; vanish mode, pokes and notes ran between phones on 12 October 2026; files and scheduling on tests only |
+| Feed extras: events with RSVP, poll posts, co-authored posts, alt text, drafts and scheduled posts, story captions and stickers, hidden-words filter, report to the sphere | Working; an event with a co-host and an RSVP ran between phones on 12 October 2026 |
 | Comments: reply threads, seven reactions on posts and comments, edit with history, delete, hide and pin by the post's author or an admin, comments off per post, follow or mute a post, newest-first | Working; comment, reaction, reply, hide and edit checked between a phone and a tablet |
 | Spheres: invite links with admin approval, private member notes, birthdays and avatars shared with contacts | Working; untested on hardware |
 | Composer: coloured backgrounds for short text, feeling or activity, life events, asking for recommendations, resharing into another sphere with the author's signed words, pin to profile, delete with a thirty-day trash, archive, bulk manage, picture editing (rotate, flip, crop, filters, text, stickers, drawing), 360° photos panned in the viewer, video trim and cover frame | Working; signature, reshare, delete and trim rules covered by tests, untested on hardware |
@@ -136,7 +136,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 764 tests in 67 files
+flutter test                       # 779 tests in 70 files
 flutter run
 ```
 

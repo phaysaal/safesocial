@@ -830,6 +830,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   borderRadius: BorderRadius.circular(20),
                   child: UserAvatar(
                     displayName: displayName,
+                    identityKey: widget.conversationId,
                     size: AvatarSize.small,
                   ),
                 ),
@@ -1065,10 +1066,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           messages[messages.length - 1 - index];
                       final isMine = message.senderId == myPublicKey ||
                           message.senderId == 'self';
+                      final i = messages.length - 1 - index;
+                      final newDay = i == 0 || !DateChip.sameDay(messages[i - 1].timestamp, message.timestamp);
+                      // Their face once per run of their messages, on the
+                      // newest one, like every messenger does it.
+                      final endOfRun = i == messages.length - 1 ||
+                          messages[i + 1].senderId != message.senderId ||
+                          messages[i + 1].isSystem;
 
                       final library = context.watch<LibraryService>();
-                      return MessageBubble(
+                      final bubble = MessageBubble(
                         myKey: myPublicKey,
+                        avatarGutter: !isMine,
+                        avatar: !isMine && endOfRun
+                            ? UserAvatar(
+                                displayName: displayName,
+                                identityKey: widget.conversationId,
+                                size: AvatarSize.small,
+                              )
+                            : null,
                         nameFor: (key) => key == myPublicKey ? 'You' : displayName,
                         resolveMessage: (id) {
                           for (final m in messages) {
@@ -1114,6 +1130,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         onAddContact: _addFromCard,
                         onOpenViewOnce: _openViewOnce,
                       );
+                      return newDay
+                          ? Column(children: [DateChip(day: message.timestamp), bubble])
+                          : bubble;
                     },
                   ),
           ),
@@ -1214,30 +1233,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                  if (!_isRecording) ...[
-                    // Emoticon picker
+                  if (!_isRecording)
+                    // Attachments. The emoticon picker and the chat emoji
+                    // live inside the field, so the field gets the width.
                     IconButton(
-                      icon: Icon(Icons.emoji_emotions_outlined,
-                          color: cs.primary, size: 26),
-                      onPressed: () => _showEmoticonPicker(context),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 36,
-                        minHeight: 36,
-                      ),
-                    ),
-                    // Attachment buttons
-                    IconButton(
+                      tooltip: 'Attach',
                       icon: Icon(Icons.add_circle,
                           color: cs.primary, size: 28),
                       onPressed: _attachMedia,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
-                        minWidth: 36,
-                        minHeight: 36,
+                        minWidth: 40,
+                        minHeight: 40,
                       ),
                     ),
-                  ],
 
                   // Text input or recording state
                   Expanded(
@@ -1251,16 +1260,42 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             ),
                             child: TextField(
                               controller: _messageController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 hintText: 'Aa',
                                 border: InputBorder.none,
                                 enabledBorder: InputBorder.none,
                                 focusedBorder: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(
+                                contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 14,
                                   vertical: 10,
                                 ),
                                 isDense: true,
+                                suffixIcon: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Emoticons',
+                                      icon: Icon(Icons.emoji_emotions_outlined,
+                                          color: cs.onSurfaceVariant, size: 22),
+                                      onPressed: () => _showEmoticonPicker(context),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                    ),
+                                    if (!_hasText)
+                                      IconButton(
+                                        tooltip: 'Send the chat emoji',
+                                        icon: Text(library.chatEmoji(widget.conversationId),
+                                            style: const TextStyle(fontSize: 20)),
+                                        onPressed: () => _send(() => context
+                                            .read<ChatService>()
+                                            .sendMessage(widget.conversationId,
+                                                library.chatEmoji(widget.conversationId))),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                      ),
+                                    const SizedBox(width: 4),
+                                  ],
+                                ),
                               ),
                               textCapitalization: TextCapitalization.sentences,
                               textInputAction: TextInputAction.send,
@@ -1275,16 +1310,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   // press that started a recording still gets its release:
                   // swapping the button out mid-gesture meant letting go did
                   // nothing and the recording ran until "send" was tapped.
-                  if (!_hasText && !_isRecording)
-                    IconButton(
-                      tooltip: 'Send the chat emoji',
-                      icon: Text(library.chatEmoji(widget.conversationId), style: const TextStyle(fontSize: 22)),
-                      onPressed: () => _send(() => context
-                          .read<ChatService>()
-                          .sendMessage(widget.conversationId, library.chatEmoji(widget.conversationId))),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                    ),
                   GestureDetector(
                     onLongPressStart: _hasText ? (_) => _sendLater() : (_) => _startRecording(),
                     onLongPressEnd: _hasText ? null : (_) => _stopRecording(),
@@ -1362,7 +1387,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            UserAvatar(displayName: name, size: AvatarSize.large),
+            UserAvatar(displayName: name, identityKey: widget.conversationId, size: AvatarSize.large),
             const SizedBox(height: 16),
             Text(
               name,

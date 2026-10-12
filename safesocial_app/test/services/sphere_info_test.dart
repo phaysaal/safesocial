@@ -198,4 +198,26 @@ void main() {
     expect(joined, ['Dave@${sphere.id}']);
     expect(spheres.sphere(sphere.id)!.contains(dave), isTrue);
   });
+
+  test('the info goes out again for a newcomer, unchanged, and only from an admin', () async {
+    // The copy that carried the rules was sealed before the newcomer's epoch,
+    // and sync never offers content from before a member's time: without a
+    // resend they would see no rules, topics or welcome line until the next
+    // edit.
+    await info.update(sphere.id, (c) => c.copyWith(rules: ['Be kind'], topics: ['News']));
+    expect(published, hasLength(1));
+
+    await info.republish(sphere.id);
+
+    expect(published, hasLength(2));
+    final again = published.last['json'] as Map<String, dynamic>;
+    expect(again['info']['version'], published.first['json']['info']['version'], reason: 'not a new version');
+    expect(again['info']['rules'], ['Be kind']);
+
+    // A sphere with nothing set sends nothing.
+    published.clear();
+    final other = await spheres.create(name: 'Quiet', kind: SphereKind.group, initialMembers: [bob]);
+    await info.republish(other.id);
+    expect(published, isEmpty);
+  });
 }

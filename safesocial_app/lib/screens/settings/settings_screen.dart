@@ -65,52 +65,52 @@ class SettingsScreen extends StatelessWidget {
           _SectionHeader(title: 'Security Status'),
           const _PreAlphaBanner(),
           const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.lock_outline, color: cs.primary),
-            title: const Text('Message Encryption'),
-            subtitle: const Text(
+          _SecurityRow(
+            icon: Icons.lock_outline,
+            title: 'Message Encryption',
+            summary: 'XChaCha20-Poly1305, X25519, a ratchet for direct messages',
+            colour: cs.secondary,
+            detail: const Text(
               'XChaCha20-Poly1305, keys agreed with X25519. Direct messages '
               'also use a ratchet, so old messages stay closed if this device '
               'is later compromised. Sphere posts do not.',
             ),
-            isThreeLine: true,
-            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
           ),
           const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.visibility_off_outlined, color: cs.primary),
-            title: const Text('Network Privacy'),
-            subtitle: const Text(
+          _SecurityRow(
+            icon: Icons.visibility_off_outlined,
+            title: 'Network Privacy',
+            summary: 'Addresses from shared secrets; the relay sees timing and size only',
+            colour: cs.secondary,
+            detail: const Text(
               'Relay addresses are derived from shared secrets, so the '
               'operator cannot tell who talks to whom. It still sees message '
               'timing and approximate size.',
             ),
-            isThreeLine: true,
-            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
           ),
           const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.lock_outline, color: cs.primary),
-            title: const Text('Storage On This Device'),
-            subtitle: const Text(
+          _SecurityRow(
+            icon: Icons.lock_outline,
+            title: 'Storage On This Device',
+            summary: 'Encrypted at rest under a keystore key',
+            colour: cs.secondary,
+            detail: const Text(
               'Messages, keys and history are encrypted at rest under a key in '
               'the platform keystore. Someone reading this app\'s files still '
               'sees how many conversations exist, but not with whom.',
             ),
-            isThreeLine: true,
-            trailing: Icon(Icons.check_circle, color: cs.secondary, size: 20),
           ),
           const Divider(indent: 56),
-          ListTile(
-            leading: Icon(Icons.devices, color: cs.primary),
-            title: const Text('Multiple Devices'),
-            subtitle: const Text(
+          _SecurityRow(
+            icon: Icons.devices,
+            title: 'Multiple Devices',
+            summary: 'Each device has its own certified key',
+            colour: cs.secondary,
+            detail: const Text(
               'Each linked device has its own key, certified by your identity. '
               'Contacts send to every device; posts and chats reach them all. '
               'Linked once between two phones; not yet audited.',
             ),
-            isThreeLine: true,
-            trailing: Icon(Icons.check_circle, color: cs.tertiary, size: 20),
           ),
           const Divider(indent: 56),
 
@@ -473,6 +473,12 @@ class SettingsScreen extends StatelessWidget {
             );
           }),
           const Divider(indent: 56),
+          ListTile(
+            leading: Icon(Icons.terminal_outlined, color: cs.primary),
+            title: const Text('Developer console'),
+            subtitle: const Text('Logs and relay state, for finding faults'),
+            onTap: () => context.push('/console'),
+          ),
           ListTile(
             leading: Icon(Icons.storage_outlined, color: cs.primary),
             title: const Text('Cached Media'),
@@ -1468,6 +1474,37 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
+/// A security fact as one line, with the full explanation under a tap.
+class _SecurityRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String summary;
+  final Color colour;
+  final Widget detail;
+  const _SecurityRow({required this.icon, required this.title, required this.summary, required this.colour, required this.detail});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        leading: Icon(icon, color: cs.primary),
+        title: Text(title),
+        subtitle: Text(summary, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: Icon(Icons.check_circle, color: colour, size: 20),
+        childrenPadding: const EdgeInsets.fromLTRB(56, 0, 16, 12),
+        children: [
+          DefaultTextStyle(
+            style: Theme.of(context).textTheme.bodySmall!.copyWith(height: 1.4),
+            child: Align(alignment: Alignment.centerLeft, child: detail),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SectionHeader extends StatelessWidget {
   final String title;
   const _SectionHeader({required this.title});
@@ -1496,29 +1533,30 @@ class _PreAlphaBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    // One line, with the rest a tap away: the warning matters, the wall of
+    // red did not help it.
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: cs.errorContainer,
-        borderRadius: BorderRadius.circular(12),
+        color: cs.errorContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.science_outlined, color: cs.onErrorContainer, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Pre-alpha build. Messages, posts, albums and calls are '
-              'encrypted, local data is encrypted at rest, and backups and '
-              'recovery work — but none of this has been independently audited, '
-              'and it has run between real phones only once. Do not rely '
-              'on it if being read would put you at risk.',
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: Icon(Icons.science_outlined, color: cs.onErrorContainer, size: 20),
+          title: Text('Pre-alpha: not audited, tested between real phones once',
+              style: TextStyle(color: cs.onErrorContainer, fontSize: 13, fontWeight: FontWeight.w600)),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          children: [
+            Text(
+              'Messages, posts, albums and calls are encrypted, local data is encrypted at rest, '
+              'and backups and recovery work. None of it has been independently audited. '
+              'Do not rely on it if being read would put you at risk.',
               style: TextStyle(color: cs.onErrorContainer, fontSize: 12, height: 1.4),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

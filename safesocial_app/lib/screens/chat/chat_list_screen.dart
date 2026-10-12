@@ -155,6 +155,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 final lastMessage = messages.isNotEmpty ? messages.last : null;
                 final pinned = library.isPinned(contactKey);
 
+                final unread = chatService.unreadCount(contactKey) > 0;
                 return ListTile(
                   leading: UserAvatar(
                     displayName: displayName,
@@ -168,7 +169,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           displayName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                          style: TextStyle(fontWeight: unread ? FontWeight.w800 : FontWeight.w600),
                         ),
                       ),
                       if (pinned) ...[
@@ -190,9 +191,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           ),
                         )
                       : Text(
-                          lastMessage?.content ?? 'No messages yet',
+                          lastMessage == null
+                              ? 'No messages yet'
+                              : (lastMessage.content.isNotEmpty ? lastMessage.content : ChatService.describeMessage(lastMessage)),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: unread ? FontWeight.w600 : FontWeight.w400,
+                            color: unread ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
                   trailing: Column(
                     mainAxisAlignment: MainAxisAlignment.center,

@@ -480,7 +480,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  static const _routes = ['/', '/chats', '/contacts', '/profile', '/console'];
+  static const _routes = ['/', '/chats', '/contacts', '/profile'];
 
   @override
   void initState() {
@@ -574,11 +574,6 @@ class _HomeScreenState extends State<HomeScreen> {
         icon: Icon(Icons.person_outline),
         selectedIcon: Icon(Icons.person),
         label: 'Profile',
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.terminal_outlined),
-        selectedIcon: Icon(Icons.terminal),
-        label: 'Console',
       ),
     ];
 

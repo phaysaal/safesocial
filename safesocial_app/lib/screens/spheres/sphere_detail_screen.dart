@@ -4,17 +4,17 @@ import 'package:provider/provider.dart';
 
 import '../../models/removal_vote.dart';
 import '../../models/sphere.dart';
-import '../../services/call_service.dart';
+import 'group_call.dart';
 import '../../services/contact_service.dart';
 import '../../services/identity_service.dart';
 import 'package:flutter/services.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../services/feed_service.dart';
 import '../../services/library_service.dart';
 import '../../services/sphere_info_service.dart';
 import '../../services/sphere_service.dart';
 import 'sphere_settings_screen.dart';
+import '../../widgets/qr_box.dart';
 import '../../widgets/avatar.dart';
 
 /// Members and settings for one sphere.
@@ -56,51 +56,28 @@ class SphereDetailScreen extends StatelessWidget {
       for (final contact in contacts.contacts) {
         if (contact.publicKey == key) return contact.displayName;
       }
-      return '${key.substring(0, 8)}…';
+      // Not a contact: the name they sign their posts with, if we hold any.
+      return context.read<FeedService>().authorNameFor(key) ?? '${key.substring(0, 8)}…';
     }
 
     return Scaffold(
       appBar: AppBar(
         title: Text(sphere.name),
         actions: [
-          if (sphere.members.length > 1)
-            IconButton(
-              icon: const Icon(Icons.videocam_outlined),
-              tooltip: 'Start group call',
-              onPressed: () => _startGroupCall(context, sphere),
-            ),
-          if (iAmAdmin)
-            IconButton(
-              icon: const Icon(Icons.person_add_outlined),
-              tooltip: 'Add member',
-              onPressed: () => _showAddMember(context, sphere),
-            ),
-          IconButton(
-            icon: const Icon(Icons.forum_outlined),
-            tooltip: 'Sphere chat',
-            onPressed: () => context.push('/sphere/$sphereId/chat'),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (v) {
+              if (v == 'add') {
+                _showAddMember(context, sphere);
+              } else {
+                context.push('/sphere/$sphereId/$v');
+              }
+            },
+            itemBuilder: (_) => [
+              if (iAmAdmin) const PopupMenuItem(value: 'add', child: ListTile(leading: Icon(Icons.person_add_outlined), title: Text('Add member'))),
+              const PopupMenuItem(value: 'log', child: ListTile(leading: Icon(Icons.history), title: Text('Activity'))),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.photo_library_outlined),
-            tooltip: 'Media',
-            onPressed: () => context.push('/sphere/$sphereId/media'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Activity',
-            onPressed: () => context.push('/sphere/$sphereId/log'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.menu_book_outlined),
-            tooltip: 'Guides',
-            onPressed: () => context.push('/sphere/$sphereId/guides'),
-          ),
-          if (iAmAdmin)
-            IconButton(
-              icon: const Icon(Icons.tune),
-              tooltip: 'Rules, questions, topics, automation',
-              onPressed: () => context.push('/sphere/$sphereId/settings'),
-            ),
         ],
       ),
       body: ListView(
@@ -165,11 +142,67 @@ class SphereDetailScreen extends StatelessWidget {
                 onVote: (inFavour) => _castVote(
                     context, proposal.id, inFavour: inFavour),
               )),
-          if (sphere.description.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Text(sphere.description, style: theme.textTheme.bodyMedium),
+          // Header: name, members at a glance, the main actions.
+          Container(
+            margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [cs.primary.withValues(alpha: 0.14), cs.secondary.withValues(alpha: 0.10)],
+              ),
+              borderRadius: BorderRadius.circular(20),
             ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(color: cs.primary, borderRadius: BorderRadius.circular(16)),
+                  child: const Icon(Icons.blur_on, color: Colors.white, size: 28),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(sphere.name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+                    Text('${sphere.members.length} member${sphere.members.length == 1 ? '' : 's'} · private',
+                        style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                  ]),
+                ),
+                SizedBox(
+                  width: 24.0 + 18.0 * (sphere.members.length.clamp(1, 4) - 1),
+                  height: 28,
+                  child: Stack(children: [
+                    for (final (i, m) in sphere.members.take(4).toList().indexed)
+                      Positioned(
+                        left: i * 18.0,
+                        child: Container(
+                          padding: const EdgeInsets.all(1.5),
+                          decoration: BoxDecoration(color: cs.surface, shape: BoxShape.circle),
+                          child: UserAvatar(displayName: nameFor(m.identityKey), identityKey: m.identityKey, size: AvatarSize.small),
+                        ),
+                      ),
+                  ]),
+                ),
+              ]),
+              if (sphere.description.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(sphere.description, style: theme.textTheme.bodyMedium),
+              ],
+              const SizedBox(height: 12),
+              Row(children: [
+                _HeaderAction(icon: Icons.forum_outlined, tooltip: 'Sphere chat', onTap: () => context.push('/sphere/$sphereId/chat')),
+                _HeaderAction(icon: Icons.photo_library_outlined, tooltip: 'Media and files', onTap: () => context.push('/sphere/$sphereId/media')),
+                if (sphere.members.length > 1)
+                  _HeaderAction(icon: Icons.videocam_outlined, tooltip: 'Start a group call', onTap: () => startGroupCallFlow(context, sphere)),
+                _HeaderAction(icon: Icons.menu_book_outlined, tooltip: 'Guides', onTap: () => context.push('/sphere/$sphereId/guides')),
+                _HeaderAction(icon: Icons.history, tooltip: 'Activity', onTap: () => context.push('/sphere/$sphereId/log')),
+                if (iAmAdmin)
+                  _HeaderAction(icon: Icons.tune, tooltip: 'Rules, topics, automation', onTap: () => context.push('/sphere/$sphereId/settings')),
+              ]),
+            ]),
+          ),
           if (iAmAdmin) ...[
             ...sphereService.joinRequestsFor(sphereId).map((r) => ListTile(
                   leading: Icon(Icons.person_add_alt_1, color: cs.primary),
@@ -248,7 +281,7 @@ class SphereDetailScreen extends StatelessWidget {
           ...sphere.members.map((member) {
             final isMe = member.identityKey == me;
             return ListTile(
-              leading: UserAvatar(displayName: nameFor(member.identityKey)),
+              leading: UserAvatar(displayName: nameFor(member.identityKey), identityKey: member.identityKey),
               title: Text(nameFor(member.identityKey)),
               subtitle: Builder(builder: (context) {
                 final note = context.watch<LibraryService>().memberNote(sphereId, member.identityKey);
@@ -272,24 +305,26 @@ class SphereDetailScreen extends StatelessWidget {
             );
           }),
           const Divider(),
-          if (iAmOwner && sphere.members.length == 1)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Text(
-                'You are the only member. Nobody else can re-key this sphere, '
-                'so add someone and make them an admin before you rely on it.',
-                style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
+          if (iAmOwner && (sphere.members.length == 1 || sphere.admins.length == 1))
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.errorContainer.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(14),
               ),
-            )
-          else if (iAmOwner && sphere.admins.length == 1)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Text(
-                'You are the only admin. If you lose this device nobody can '
-                'invite or remove anyone here again. Making a second admin '
-                'costs nothing.',
-                style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
-              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(Icons.shield_outlined, size: 18, color: cs.onErrorContainer),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    sphere.members.length == 1
+                        ? 'You are the only member. Nobody else can re-key this sphere, so add someone and make them an admin before you rely on it.'
+                        : 'You are the only admin. If you lose this device nobody can invite or remove anyone here again. Making a second admin costs nothing.',
+                    style: theme.textTheme.bodySmall?.copyWith(color: cs.onErrorContainer),
+                  ),
+                ),
+              ]),
             ),
           ListTile(
             leading: Icon(Icons.logout, color: cs.error),
@@ -309,47 +344,6 @@ class SphereDetailScreen extends StatelessWidget {
   ///
   /// Group calls had no entry point after the old group screens were retired,
   /// so the mesh code was unreachable.
-  Future<void> _startGroupCall(BuildContext context, Sphere sphere) async {
-    final calls = context.read<CallService>();
-    final router = GoRouter.of(context);
-    final messenger = ScaffoldMessenger.of(context);
-
-    final type = await showDialog<CallType>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Call ${sphere.name}?'),
-        content: Text(
-          'Everyone in this sphere (${sphere.members.length - 1} other '
-          '${sphere.members.length == 2 ? 'person' : 'people'}) will be rung.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, CallType.audio),
-            child: const Text('Audio'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, CallType.video),
-            child: const Text('Video'),
-          ),
-        ],
-      ),
-    );
-    if (type == null) return;
-
-    try {
-      await calls.startGroupCall(
-        sphere.id,
-        sphere.members.map((m) => m.identityKey).toList(),
-        type,
-      );
-      router.push('/call');
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Could not start call: $e')));
-    }
-  }
-
   static String _roleLabel(SphereRole role) {
     switch (role) {
       case SphereRole.owner:
@@ -460,11 +454,7 @@ class SphereDetailScreen extends StatelessWidget {
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(8),
-              color: Colors.white,
-              child: QrImageView(data: link, size: 180, backgroundColor: Colors.white),
-            ),
+            QrBox(data: link),
             const SizedBox(height: 8),
             SelectableText(link, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
           ],
@@ -989,6 +979,39 @@ class _RemovalVoteCard extends StatelessWidget {
               style: TextStyle(color: cs.onErrorContainer, fontSize: 12),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// One round tonal icon button in a sphere's header. The label is the
+/// tooltip, read aloud by a screen reader and shown on a long press.
+class _HeaderAction extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _HeaderAction({required this.icon, required this.tooltip, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: cs.surface.withValues(alpha: 0.7),
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              width: 46,
+              height: 46,
+              child: Icon(icon, color: cs.primary, size: 22),
+            ),
+          ),
+        ),
       ),
     );
   }

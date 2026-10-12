@@ -14,6 +14,10 @@ import '../../services/sphere_chat_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/file_bridge.dart';
 import '../../services/library_service.dart';
+import '../../services/media_service.dart';
+import '../../services/video_transcoder.dart';
+import 'group_call.dart';
+import '../../widgets/avatar.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_cards.dart';
 
@@ -110,6 +114,89 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
     super.dispose();
   }
 
+  /// Everything that is not words, in one place: pictures and video go the
+  /// same way a direct chat sends them (re-encoded, origin score attached).
+  Future<void> _attach() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Take a photo'),
+                subtitle: const Text('Carries the strongest origin score'),
+                onTap: () => Navigator.pop(ctx, 'camera'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Photo'),
+                onTap: () => Navigator.pop(ctx, 'photo'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam_outlined),
+                title: const Text('Video'),
+                subtitle: const Text('Up to 3 minutes'),
+                onTap: () => Navigator.pop(ctx, 'video'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.attach_file),
+                title: const Text('File'),
+                subtitle: const Text('Any type, sent as it is'),
+                onTap: () => Navigator.pop(ctx, 'file'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.poll_outlined),
+                title: const Text('Poll'),
+                onTap: () => Navigator.pop(ctx, 'poll'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'file') return _sendFile();
+    if (choice == 'poll') return _sendPoll();
+
+    final media = context.read<MediaService>();
+    final messenger = ScaffoldMessenger.of(context);
+    String? path;
+    String label;
+    try {
+      if (choice == 'video') {
+        path = await media.pickVideo(limit: MediaService.chatVideoLimit);
+        label = '[Video]';
+      } else if (choice == 'camera') {
+        path = await media.captureImage();
+        label = '[Image]';
+      } else {
+        path = await media.pickAndStoreImage();
+        label = '[Image]';
+      }
+    } on MediaRejectedException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    } on UnsupportedVideoException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+    if (path == null || !mounted) return;
+    final chosen = path;
+    setState(() => _sending = true);
+    try {
+      await context
+          .read<SphereChatService>()
+          .sendMessage(widget.sphereId, label, mediaRefs: [chosen]);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not send: $e')));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
   Future<void> _sendFile() async {
     final messenger = ScaffoldMessenger.of(context);
     final PickedFile? picked;
@@ -193,10 +280,14 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        titleSpacing: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(sphere.name),
+            Text(sphere.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(fontSize: 19, fontWeight: FontWeight.w700)),
             Text(
               '${sphere.members.length} members',
               style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
@@ -209,6 +300,12 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
               icon: const Icon(Icons.timer_outlined),
               tooltip: 'Disappearing messages',
               onPressed: _chooseDisappearing,
+            ),
+          if (sphere.members.length > 1)
+            IconButton(
+              icon: const Icon(Icons.videocam_outlined),
+              tooltip: 'Call the sphere',
+              onPressed: () => startGroupCallFlow(context, sphere),
             ),
           IconButton(
             icon: const Icon(Icons.info_outline),
@@ -276,17 +373,27 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
                     itemBuilder: (context, index) {
                       final message = messages[messages.length - 1 - index];
                       final isMe = message.senderId == me;
+                      final i = messages.length - 1 - index;
+                      final newDay = i == 0 || !DateChip.sameDay(messages[i - 1].timestamp, message.timestamp);
+                      final endOfRun = i == messages.length - 1 ||
+                          messages[i + 1].senderId != message.senderId ||
+                          messages[i + 1].isSystem;
+                      final startOfRun = i == 0 ||
+                          messages[i - 1].senderId != message.senderId ||
+                          messages[i - 1].isSystem;
                       return Column(
                         crossAxisAlignment: isMe
                             ? CrossAxisAlignment.end
                             : CrossAxisAlignment.start,
                         children: [
+                          if (newDay)
+                            SizedBox(width: double.infinity, child: DateChip(day: message.timestamp)),
                           // Who said it matters in a group in a way it never
                           // does in a one-to-one thread.
-                          if (!isMe)
+                          if (!isMe && !message.isSystem && startOfRun)
                             Padding(
                               padding:
-                                  const EdgeInsets.only(left: 12, bottom: 2),
+                                  const EdgeInsets.only(left: 50, bottom: 2),
                               child: Text(
                                 nameFor(message.senderId),
                                 style: theme.textTheme.bodySmall?.copyWith(
@@ -302,6 +409,14 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
                             isMine: isMe,
                             myKey: me,
                             nameFor: nameFor,
+                            avatarGutter: !isMe,
+                            avatar: !isMe && endOfRun
+                                ? UserAvatar(
+                                    displayName: nameFor(message.senderId),
+                                    identityKey: message.senderId,
+                                    size: AvatarSize.small,
+                                  )
+                                : null,
                             isStarred: context.watch<LibraryService>().isStarred(message.id),
                             blurMedia: !isMe &&
                                 context.watch<LibraryService>().isMediaBlurred(widget.sphereId),
@@ -408,18 +523,16 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
                       ),
                     ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    padding: const EdgeInsets.fromLTRB(4, 8, 8, 8),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         IconButton(
-                          tooltip: 'Poll',
-                          icon: Icon(Icons.poll_outlined, color: cs.primary),
-                          onPressed: _sending ? null : _sendPoll,
-                        ),
-                        IconButton(
-                          tooltip: 'File',
-                          icon: Icon(Icons.attach_file, color: cs.primary),
-                          onPressed: _sending ? null : _sendFile,
+                          tooltip: 'Attach',
+                          icon: Icon(Icons.add_circle, color: cs.primary, size: 28),
+                          onPressed: _sending ? null : _attach,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                         ),
                         Expanded(
                           child: TextField(
@@ -439,7 +552,7 @@ class _SphereChatScreenState extends State<SphereChatScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4),
                         IconButton.filled(
                           onPressed: _sending ? null : _send,
                           icon: _sending

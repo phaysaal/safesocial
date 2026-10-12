@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -122,6 +124,50 @@ void main() {
       await here.updateProfile(bio: 'new');
       await here.adoptFromOwnDevice(stale.profileForOwnDevices());
       expect(here.currentIdentity!.bio, 'new');
+    });
+
+    test('a sibling with the same words but no picture file takes the picture', () async {
+      // Found on hardware: a tablet linked from the phone's backup held the
+      // profile with the phone's picture path, which is nothing on the
+      // tablet, and every resend from the phone was "not newer" and dropped.
+      final phone = IdentityService();
+      await phone.createIdentity('Fai');
+      await phone.updateAvatar('/phone/me.jpg');
+      final tablet = IdentityService();
+      await tablet.createIdentity('Fai');
+      await tablet.adoptFromOwnDevice(
+        {'own': phone.currentIdentity!.toJson()..remove('avatarRef')},
+      );
+      // The restore: same words, same time, a dead path.
+      await tablet.updateAvatar('/phone/me.jpg');
+      final sameWords = phone.currentIdentity!.copyWith(updatedAt: tablet.currentIdentity!.updatedAt);
+      IdentityService.fileExists = (path) => path.startsWith('/tablet/');
+
+      try {
+        final fetched = <String>[];
+        await tablet.adoptFromOwnDevice(
+          {'own': sameWords.toJson()..remove('avatarRef'), 'avatar': 'blob:pic'},
+          materialise: (ref) async {
+            fetched.add(ref);
+            return '/tablet/me.jpg';
+          },
+        );
+        expect(fetched, ['blob:pic']);
+        expect(tablet.currentIdentity!.avatarRef, '/tablet/me.jpg');
+
+        // Held now, so the same message again fetches nothing.
+        await tablet.adoptFromOwnDevice(
+          {'own': sameWords.toJson()..remove('avatarRef'), 'avatar': 'blob:pic'},
+          materialise: (ref) async {
+            fetched.add(ref);
+            return '/tablet/again.jpg';
+          },
+        );
+        expect(fetched, ['blob:pic']);
+        expect(tablet.currentIdentity!.avatarRef, '/tablet/me.jpg');
+      } finally {
+        IdentityService.fileExists = (path) => File(path).existsSync();
+      }
     });
 
     test('garbage from a device is ignored', () async {

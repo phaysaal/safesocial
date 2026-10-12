@@ -568,6 +568,10 @@ class IdentityService extends ChangeNotifier {
   /// Our profile as another of our devices has it. Taken when it is newer
   /// than ours; nothing is broadcast back, or the two devices would trade
   /// the same profile forever.
+  /// Whether a local media path still points at a file. Swapped in tests.
+  @visibleForTesting
+  static bool Function(String path) fileExists = (path) => File(path).existsSync();
+
   Future<void> adoptFromOwnDevice(
     Map<String, dynamic> json, {
     Future<String?> Function(String reference)? materialise,
@@ -585,11 +589,27 @@ class IdentityService extends ChangeNotifier {
     } catch (_) {
       return;
     }
-    if (!incoming.updatedAt.isAfter(current.updatedAt)) return;
+    if (incoming.updatedAt.isBefore(current.updatedAt)) return;
 
     Future<String?> fetch(Object? ref) async {
       if (ref is! String || ref.isEmpty || materialise == null) return null;
       return materialise(ref);
+    }
+
+    if (!incoming.updatedAt.isAfter(current.updatedAt)) {
+      // The same words we already hold. A device linked from a backup has
+      // exactly that, with a picture path that was true on the other phone
+      // and is nothing here; so a picture we lack is still taken.
+      final have = current.avatarRef;
+      final lacking = have == null || have.isEmpty || !fileExists(have);
+      if (!lacking) return;
+      final avatar = await fetch(json['avatar']);
+      if (avatar == null) return;
+      _currentIdentity = current.copyWith(avatarRef: avatar, clearTemporaryAvatar: true);
+      await _persistIdentity();
+      notifyListeners();
+      DebugLogService().info('Identity', 'Profile picture fetched from another of our devices');
+      return;
     }
 
     final avatar = await fetch(json['avatar']);

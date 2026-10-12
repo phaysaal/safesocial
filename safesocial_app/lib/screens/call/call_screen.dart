@@ -187,10 +187,13 @@ class _CallScreenState extends State<CallScreen> {
         alignment: WrapAlignment.center,
         children: [
           if (callService.remoteStreams.length <= 1)
-            UserAvatar(displayName: callService.remoteContactName ?? '?', size: AvatarSize.large)
+            UserAvatar(
+                displayName: callService.remoteContactName ?? '?',
+                identityKey: callService.remoteContactKey,
+                size: AvatarSize.large)
           else
             ...callService.remoteStreams.keys.map((k) => UserAvatar(
-                displayName: callService.nameFor(k), size: AvatarSize.large)),
+                displayName: callService.nameFor(k), identityKey: k, size: AvatarSize.large)),
         ],
       ),
     );

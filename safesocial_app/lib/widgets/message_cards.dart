@@ -482,3 +482,35 @@ Future<void> openFileMessage(BuildContext context, Message m) async {
     messenger.showSnackBar(SnackBar(content: Text('Could not open the file: $e')));
   }
 }
+
+/// "Today", "Yesterday" or a date, between messages from different days.
+class DateChip extends StatelessWidget {
+  final DateTime day;
+  const DateChip({super.key, required this.day});
+
+  static bool sameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+
+  static String label(DateTime d) {
+    final now = DateTime.now();
+    if (sameDay(d, now)) return 'Today';
+    if (sameDay(d, now.subtract(const Duration(days: 1)))) return 'Yesterday';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${d.day} ${months[d.month - 1]}${d.year == now.year ? '' : ' ${d.year}'}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(label(day), style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+}

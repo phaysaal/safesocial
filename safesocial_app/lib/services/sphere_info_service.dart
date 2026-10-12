@@ -62,6 +62,23 @@ class SphereInfoService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Send the current info again, unchanged, under the sphere's current key.
+  /// For a newcomer: the item that carried the rules was sealed under an
+  /// epoch from before they joined, and sync never offers content from before
+  /// a member's time, so they would hold no rules, topics or welcome line
+  /// until the next edit (found with three phones, 12 October 2026). Members
+  /// who already hold this version keep it. Admins only; nothing to send is
+  /// not an error.
+  Future<void> republish(String sphereId) async {
+    final sphere = _spheres.sphere(sphereId);
+    final me = _spheres.myIdentityKey;
+    final info = _infos[sphereId];
+    final send = publish;
+    if (sphere == null || me == null || info == null || send == null) return;
+    if (!sphere.isAdmin(me)) return;
+    await send(sphereId: sphereId, type: 'sphere_info', payloadJson: jsonEncode({'type': 'sphere_info', 'info': info.toJson()}));
+  }
+
   /// Change a sphere's info and tell every member. Admins only.
   Future<SphereInfo> update(String sphereId, SphereInfo Function(SphereInfo current) change) async {
     final sphere = _spheres.sphere(sphereId);

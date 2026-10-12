@@ -85,6 +85,9 @@ class CallService extends ChangeNotifier {
   CallType get callType => _callType;
   String? get remoteContactName => _remoteContactName;
 
+  /// The other party's identity key in a one-to-one call.
+  String? get remoteContactKey => _remoteContactKey;
+
   /// Looks a contact's name up locally. A caller's own claim about its name
   /// is never shown; the contact list is the only source.
   String? Function(String identityKey)? resolveName;

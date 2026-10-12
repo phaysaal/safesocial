@@ -69,6 +69,12 @@ class MessageBubble extends StatelessWidget {
   /// Opens a received file with whatever handles its type.
   final void Function(Message)? onOpenFile;
 
+  /// The sender's face beside a received bubble, drawn at the bottom of the
+  /// last bubble in a run. [avatarGutter] keeps the same space empty on the
+  /// others so a run lines up. Ignored for our own messages.
+  final Widget? avatar;
+  final bool avatarGutter;
+
   static const List<String> quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
   const MessageBubble({
@@ -100,13 +106,39 @@ class MessageBubble extends StatelessWidget {
     this.theirsColor,
     this.favouriteEmoji,
     this.onOpenFile,
+    this.avatar,
+    this.avatarGutter = false,
   });
 
-  static const _teal = Color(0xFF009688);
-  static const _tealDark = Color(0xFF00796B);
+  static const double _avatarWidth = 32;
+  static const double _avatarGap = 6;
+
+  // Their side: a slate that keeps white text readable without borrowing a
+  // colour the brand does not have.
+  static const _teal = Color(0xFF5B6B78);
+  static const _tealDark = Color(0xFF3B4752);
 
   @override
   Widget build(BuildContext context) {
+    final bubble = _build(context);
+    if (isMine || message.isSystem || (avatar == null && !avatarGutter)) return bubble;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        SizedBox(
+          width: _avatarWidth,
+          height: _avatarWidth,
+          child: avatar == null
+              ? null
+              : Padding(padding: const EdgeInsets.only(bottom: 2), child: avatar),
+        ),
+        const SizedBox(width: _avatarGap),
+        Flexible(child: bubble),
+      ],
+    );
+  }
+
+  Widget _build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
@@ -164,9 +196,11 @@ class MessageBubble extends StatelessWidget {
           GestureDetector(
             onLongPress: () => _showMessageOptions(context),
             child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+              constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.78 -
+                      (isMine || (avatar == null && !avatarGutter) ? 0 : _avatarWidth + _avatarGap)),
               margin: const EdgeInsets.symmetric(vertical: 2),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
               decoration: BoxDecoration(
                 color: bgColor,
                 borderRadius: BorderRadius.only(
@@ -200,7 +234,7 @@ class MessageBubble extends StatelessWidget {
                     const SizedBox(height: 6),
                   ],
                   ..._body(context, theme, textColor),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -365,11 +399,13 @@ class MessageBubble extends StatelessWidget {
       widgets.add(const SizedBox(height: 6));
     }
     if (message.content.isNotEmpty && !(message.viewOnce && message.content == '[Image]')) {
+      // widthFactor keeps the bubble as wide as its words, not the screen.
       widgets.add(Align(
         alignment: Alignment.centerLeft,
+        widthFactor: 1,
         child: message.mentions.isEmpty
             ? buildEmoticonText(
-                message.content, theme.textTheme.bodyMedium?.copyWith(color: textColor, fontSize: 15))
+                message.content, theme.textTheme.bodyMedium?.copyWith(color: textColor, fontSize: 15, height: 1.3))
             : _mentionText(message.content, textColor),
       ));
       widgets.add(TranslationLine(id: 'msg:${message.id}', onDark: true));

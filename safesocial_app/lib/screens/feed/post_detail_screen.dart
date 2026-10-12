@@ -127,7 +127,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 // ── Author header ────────────────────────────
                 Row(
                   children: [
-                    UserAvatar(displayName: authorName, size: AvatarSize.medium),
+                    UserAvatar(displayName: authorName, identityKey: post.authorId, size: AvatarSize.medium),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -463,7 +463,7 @@ class _CommentTile extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          UserAvatar(displayName: name, size: AvatarSize.small),
+          UserAvatar(displayName: name, identityKey: comment.authorId, size: AvatarSize.small),
           const SizedBox(width: 8),
           Expanded(
             child: Column(

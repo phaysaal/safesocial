@@ -60,7 +60,11 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   they fall back to public STUN and say so. The operator's coturn runs on the Scaleway
   instance beside ntfy (`turn.spheres.dev`, UDP/TCP 3478 and TLS 5349 with a Let's
   Encrypt certificate Caddy renews; secrets `TURN_SECRET`/`TURN_URLS` on the Worker). A "relay every call through TURN" switch under Call Servers sets the ICE
-  policy to relay only; that is how the TURN path was proven on 11 October 2026.
+  policy to relay only; that is how the TURN path was proven on 11 October 2026. A
+  sphere call (mesh, everyone rung) starts from the sphere header or the sphere chat bar
+  (`screens/spheres/group_call.dart`); a voice note is a direct-chat thing (hold the
+  microphone), not yet a sphere-chat one. A sphere chat's attach button offers a photo,
+  the camera, a video, a file and a poll.
 - **Hub identity.** The hub id in the socket URL is minted once per install and kept in
   plain `SharedPreferences`, because a mailbox holds one subscriber slot per hub and a
   fresh id per process filled the slots with dead hubs within a day. The relay evicts
@@ -108,10 +112,21 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   `profile` envelope is built per contact by `ProfileSharing.payloadFor`, which cuts the
   profile to what that contact's shared spheres allow; the receiver treats the message
   as the sender's whole view and drops any field it no longer carries, while a malformed
-  field is ignored. Only the legacy contact is told they are one. "View as" on the
+  field is ignored. `ProfileSync` (`services/profile_sync.dart`) decides who is sent it:
+  every contact on an edit, a contact when they are added, and at every start anyone
+  whose last copy (remembered as a digest of their cut, sealed key
+  `spheres_profile_sent_v1`) differs from what they would get now, which is how someone
+  who starts sharing a sphere with us gets the wider cut. A send the relay did not take
+  is owed, and goes the moment that contact's channel comes up (a start without network,
+  a reconnect) rather than at the next start only; restricting or releasing a contact
+  resends their cut at once; a removed contact is forgotten. Only the legacy contact is told they are one. "View as" on the
   profile screen renders exactly that cut. Photos travel as encrypted blobs. A *note* is
   a line of up to 80 characters with a 24-hour `noteUntil`; it travels only while it
-  lasts and the receiver drops it when a profile arrives without one.
+  lasts and the receiver drops it when a profile arrives without one. Pictures are
+  resolved by the reader from the identity key (`avatarRefFor` in `widgets/avatar.dart`:
+  our own profile for our key, the contact's fetched picture for theirs), so a post,
+  comment, member row or chat bubble shows the picture the person has now, never one
+  that travelled with the content.
 - **Messaging comforts.** Scheduled messages wait in `ChatService` (sealed key
   `spheres_scheduled_messages_v1`) and go on the 30-second sweep while this device runs.
   Vanish mode is `setVanish`: a five-minute disappearing preset that remembers and
@@ -153,7 +168,15 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   member's post, comment or chat message is dropped on receipt and their own device
   refuses to send; `reportsReached` mutes on the admin's device; `inviteLink(maxAge:)`
   retires an old token. Keyword alerts (`LibraryService.adminKeywords`) never leave the
-  device. Rules are shown until acknowledged (`spheres_rules_seen_v1`).
+  device. Rules are shown until acknowledged (`spheres_rules_seen_v1`). The item is sealed
+  under the epoch of its edit, and sync never offers content from before a member's time,
+  so the admin who approves a join republishes it unchanged for the newcomer
+  (`republish`), and a device that just accepted an invitation syncs that sphere at once
+  (`SphereService.onJoined`) to pick up the welcome post made at approval. The feed opens
+  a channel to every member of every sphere we are in, not only to contacts
+  (`FeedService.connectSphereMembers`, keyed by the exchange key the membership list
+  records); without it a member nobody here had added could not be sent anything. A
+  member who is not a contact is named by what they sign their posts with.
 - **Avatars and translation.** `AvatarSpec` + `AvatarPainter` draw a cartoon avatar on the
   device (`/profile/avatar`); the PNG becomes the profile picture through the usual
   `updateAvatar` path with provenance "edited with Spheres", and six expression variants
@@ -181,7 +204,7 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   classifier (nudity or AI-image detection; the origin score reads metadata only),
   communities as spheres of spheres, pending-post approval queues, story drawing. Every
   milestone of `docs/facebook_feature_list.md` (P1 to P10) has landed as of 12 October
-  2026; P5 to P10 have not yet run on hardware.
+  2026, and P5 to P10 had their first hardware pass that evening (see the second rule).
 - **Still open:** APNs, reproducible-build proof, external audit. See the plan's §13.
   The project's coturn and ntfy both run on the Scaleway instance under their own names
   with TLS; a phone whose ntfy app points at `https://ntfy.spheres.dev` is woken through
@@ -221,8 +244,21 @@ content arrives for an epoch it lacks, and an admin answers that member with a s
 from before we joined is never asked for, and a sync digest says the oldest epoch we can
 read so peers do not keep offering what was sealed before. The same pass found that a
 story hidden from a member reached them through sphere sync anyway; an archived envelope
-now remembers who it is not for (`SphereSyncService.remember(notFor:)`). When a change touches the message path, say so in the commit and prefer changes
-that a test can cover. Emulator pairs cannot
+now remembers who it is not for (`SphereSyncService.remember(notFor:)`). The P5 to P10
+pass of 12 October 2026 ran the three devices as three people (the Motorola reset to a
+fresh identity, approved into the sphere through an invite link with two questions) and
+found that a sphere member nobody had added as a contact was unreachable, because the
+feed opened channels to contacts only (fixed: channels to every member); that the rules
+and the welcome post never reached a newcomer, sealed before their epoch and dropped
+before they had accepted (fixed: republish at approval, sync at join); that the invite
+dialog drew nothing at all, a QR widget inside a dialog failing layout (fixed: `QrBox`);
+that an owed profile send waited for the next start and a restricted contact kept the
+fuller copy (fixed: resend on reconnect and on the change); and that a stale "waiting
+for them to approve" label outlived the fact (fixed: a sealed message clears it). Rules,
+topics, badges, suspension, keyword alerts through a ntfy wake, events with a co-host
+and an RSVP back, vanish mode, pokes, notes, tag review and a drawn avatar all crossed
+between the three. When a change touches the message path, say so in the commit and
+prefer changes that a test can cover. Emulator pairs cannot
 scan QR codes; debug builds print the invite link instead (see `identity_service.dart`).
 
 ## Build & run
@@ -231,7 +267,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 764 tests in 67 files under test/{crypto,models,screens,services}
+flutter test                       # 779 tests in 70 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

@@ -215,6 +215,24 @@ void main() {
       expect(service.contacts.single.isPending, isFalse);
     });
 
+    test('stops waiting when they simply message us, acceptance lost or not', () async {
+      // Seen on hardware: the tablet held the Samsung as a full contact and
+      // chatted both ways for a day, while the Samsung still showed it as
+      // "waiting for them to approve". Whoever seals to our keys has
+      // accepted us; the label must not outlive the fact.
+      final service = serviceForMe();
+      await service.addContact(alice, 'Alice',
+          keyExchangePublicKey: aliceExchange);
+      expect(service.contacts.single.isPending, isTrue);
+
+      await service.heardFrom(alice);
+
+      expect(service.contacts.single.isPending, isFalse);
+      // And it is idempotent for someone never pending.
+      await service.heardFrom(alice);
+      expect(service.contacts.single.isPending, isFalse);
+    });
+
     test('a request from someone we already added needs no decision', () async {
       // Both sides adding each other at once should just connect, not ask.
       final service = serviceForMe();

@@ -1,6 +1,23 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../services/contact_service.dart';
+import '../services/identity_service.dart';
+
+/// The local path of the picture we hold for [identityKey]: our own profile
+/// picture for our key, the picture from a contact's signed profile for
+/// theirs, null for anyone else. Resolved by the reader, never from the wire,
+/// so an old post shows the picture the person has now.
+String? avatarRefFor(BuildContext context, String? identityKey) {
+  if (identityKey == null || identityKey.isEmpty) return null;
+  final identity = context.watch<IdentityService?>();
+  if (identity != null && identity.publicKey == identityKey) {
+    return identity.currentIdentity?.avatarRef;
+  }
+  return context.watch<ContactService?>()?.getContact(identityKey)?.avatarRef;
+}
 
 /// Avatar size presets.
 enum AvatarSize {
@@ -15,13 +32,21 @@ enum AvatarSize {
 /// Reusable avatar widget that displays an image or initials fallback.
 class UserAvatar extends StatelessWidget {
   final String displayName;
+
+  /// A picture to show, as a local path. When null, [identityKey] is looked
+  /// up through [avatarRefFor].
   final String? imageRef;
+
+  /// Whose face this is. Lets the widget find the picture itself wherever
+  /// the caller only knows the key.
+  final String? identityKey;
   final AvatarSize size;
 
   const UserAvatar({
     super.key,
     required this.displayName,
     this.imageRef,
+    this.identityKey,
     this.size = AvatarSize.medium,
   });
 
@@ -31,8 +56,9 @@ class UserAvatar extends StatelessWidget {
     final bgColor = _colorFromName(displayName);
 
     // Show image if we have a local file path
-    if (imageRef != null && imageRef!.isNotEmpty) {
-      final file = File(imageRef!);
+    final ref = imageRef ?? avatarRefFor(context, identityKey);
+    if (ref != null && ref.isNotEmpty) {
+      final file = File(ref);
       if (file.existsSync()) {
         return CircleAvatar(
           radius: size.radius,
@@ -41,15 +67,29 @@ class UserAvatar extends StatelessWidget {
       }
     }
 
-    return CircleAvatar(
-      radius: size.radius,
-      backgroundColor: bgColor,
+    // A tonal pair from the name's hue: a soft fill with a deep initial,
+    // rather than a saturated disc with white on it.
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: size.radius * 2,
+      height: size.radius * 2,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: dark
+              ? [bgColor.withValues(alpha: 0.55), bgColor.withValues(alpha: 0.35)]
+              : [bgColor.withValues(alpha: 0.28), bgColor.withValues(alpha: 0.16)],
+        ),
+      ),
+      alignment: Alignment.center,
       child: Text(
         initial,
         style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
-          fontSize: size.radius * 0.85,
+          color: dark ? Colors.white : HSLColor.fromColor(bgColor).withLightness(0.32).toColor(),
+          fontWeight: FontWeight.w700,
+          fontSize: size.radius * 0.9,
         ),
       ),
     );
@@ -57,18 +97,9 @@ class UserAvatar extends StatelessWidget {
 
   Color _colorFromName(String name) {
     if (name.isEmpty) return const Color(0xFF7B2FBE);
-
-    final hash = name.codeUnits.fold<int>(0, (prev, c) => prev + c);
-    final colors = [
-      const Color(0xFFC93D4E), // sunset rose
-      const Color(0xFF7B2FBE), // purple
-      const Color(0xFF2196F3), // blue
-      const Color(0xFFFF6B35), // orange
-      const Color(0xFFE91E63), // pink
-      const Color(0xFF4CAF50), // green
-      const Color(0xFFFF9800), // amber
-      const Color(0xFF9C27B0), // deep purple
-    ];
-    return colors[hash % colors.length];
+    // Eight hues around the wheel, keyed by the name so it stays the same.
+    final hash = name.codeUnits.fold<int>(0, (prev, c) => prev * 31 + c);
+    final hue = (hash % 8) * 45.0;
+    return HSLColor.fromAHSL(1, hue, 0.62, 0.52).toColor();
   }
 }

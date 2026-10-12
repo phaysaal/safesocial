@@ -201,7 +201,7 @@ class _RecommendCardState extends State<RecommendCard> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  UserAvatar(displayName: widget.nameFor(e.key), size: AvatarSize.small),
+                  UserAvatar(displayName: widget.nameFor(e.key), identityKey: e.key, size: AvatarSize.small),
                   const SizedBox(width: 8),
                   Expanded(
                     child: RichText(
@@ -294,7 +294,7 @@ class ReshareCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            UserAvatar(displayName: authorName, size: AvatarSize.small),
+            UserAvatar(displayName: authorName, identityKey: original.authorId, size: AvatarSize.small),
             const SizedBox(width: 8),
             Expanded(
               child: Text(authorName,
