@@ -256,6 +256,22 @@ class RelayHub {
   /// closes: Android cuts the process's network soon after, and a socket
   /// retrying from a frozen process is wasted battery and log noise. Pending
   /// publishes are reported as not sent, the same as any other closed socket.
+  bool _paused = false;
+
+  /// Paused: the socket rests and nothing reconnects until [resume]. The
+  /// subscriptions and keys stay; the user is simply away.
+  bool get paused => _paused;
+
+  void pause() {
+    _paused = true;
+    rest();
+  }
+
+  Future<void> resume() async {
+    _paused = false;
+    await verifyIdle();
+  }
+
   void rest() {
     _resting = true;
     _retryTimer?.cancel();
@@ -466,7 +482,7 @@ class RelayHub {
   }
 
   Future<void> _connect() async {
-    if (_connecting || _connected) return;
+    if (_connecting || _connected || _paused) return;
     _connecting = true;
     _resting = false;
 
@@ -537,7 +553,7 @@ class RelayHub {
   ///
   /// Jittered so a relay restart does not bring every client back at once.
   void _scheduleRetry() {
-    if (_subs.isEmpty || _resting) return;
+    if (_subs.isEmpty || _resting || _paused) return;
     _attempt++;
     final backoffMs = _baseRetryDelay.inMilliseconds * (1 << min(_attempt - 1, 10));
     final cappedMs = backoffMs.clamp(
@@ -810,6 +826,7 @@ class RelayHub {
   /// HTTP, which does not depend on the socket at all. If anything was waiting
   /// there, the socket demonstrably failed to deliver it, so it is replaced.
   Future<void> verifyIdle() async {
+    if (_paused) return;
     if (!_connected) {
       // Resumed with no socket and things to listen to: do not wait for the
       // backoff timer.

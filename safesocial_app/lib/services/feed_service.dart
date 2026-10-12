@@ -562,6 +562,34 @@ class FeedService extends ChangeNotifier {
   @visibleForTesting
   void Function(String member)? onMemberQueued;
 
+  /// Contacts whose comments on our posts are hidden for everyone but them,
+  /// the moment they arrive. Set by the app from `Contact.restricted`.
+  Set<String> Function()? restrictedKeys;
+
+  /// Posts that tag [who] (payload `tags`, identity keys), newest first.
+  List<Post> taggedPosts(String who) =>
+      _posts.where((p) => (p.payload?['tags'] as List?)?.contains(who) ?? false).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  // ── Unseen posts, for the dot on the Home tab ──────────────────────────────
+
+  DateTime? _feedSeenAt;
+  static const _feedSeenKey = 'spheres_feed_seen_at';
+
+  /// Posts by others newer than the last time the feed was looked at.
+  int get unseenCount {
+    final since = _feedSeenAt;
+    return _posts
+        .where((p) => p.authorId != _myPublicKey && !p.isStory && (since == null || p.createdAt.isAfter(since)))
+        .length;
+  }
+
+  Future<void> markFeedSeen() async {
+    _feedSeenAt = DateTime.now();
+    await SecureStore.instance.setString(_feedSeenKey, _feedSeenAt!.toIso8601String());
+    notifyListeners();
+  }
+
   /// Show only posts with this topic; local and transient.
   String? topicFilter;
   void setTopicFilter(String? topic) {
@@ -812,6 +840,7 @@ class FeedService extends ChangeNotifier {
     await _loadPostNotificationPrefs();
     await _loadTrashAndArchive();
     await _loadStoryArchive();
+    _feedSeenAt = DateTime.tryParse(await SecureStore.instance.getString(_feedSeenKey) ?? '');
     try {
       final draftsRaw = await SecureStore.instance.getString(_draftsKey);
       if (draftsRaw != null) {
@@ -1251,6 +1280,15 @@ class FeedService extends ChangeNotifier {
       // claimed by the comment itself.
       _applyComment(postId,
           comment.copyWith(hidden: false, pinned: false, reactions: const []));
+      // A restricted contact's comment on our post is hidden at once; they
+      // still see it themselves and are told nothing.
+      if (target != null &&
+          target.authorId == _myPublicKey &&
+          authorId != _myPublicKey &&
+          (restrictedKeys?.call().contains(authorId) ?? false)) {
+        await setCommentHidden(postId, comment.id, true);
+        DebugLogService().info('Feed', 'Hid a restricted contact\'s comment on our post');
+      }
     } else if (json['type'] == 'reaction') {
       final postId = json['post_id'] as String;
       final emoji = json['emoji'] as String;

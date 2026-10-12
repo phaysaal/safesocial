@@ -966,10 +966,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 _guard(() => chat.setVanish(widget.conversationId, !chat.isVanish(widget.conversationId)));
               } else if (value == 'ignore') {
                 context.read<LibraryService>().toggleIgnoreChat(widget.conversationId);
+              } else if (value == 'poke') {
+                _send(() => context.read<ChatService>().poke(widget.conversationId));
               }
             },
             itemBuilder: (ctx) => [
               const PopupMenuItem(value: 'look', child: Text('Chat look: theme, nickname, emoji')),
+              const PopupMenuItem(value: 'poke', child: Text('Poke 👉')),
               PopupMenuItem(
                 value: 'vanish',
                 child: Text(chatService.isVanish(widget.conversationId)

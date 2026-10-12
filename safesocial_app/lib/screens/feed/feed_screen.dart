@@ -103,6 +103,10 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
+    // Looking at the feed clears the dot on the Home tab.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<FeedService>().markFeedSeen();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FeedService>().refreshFeed();
     });

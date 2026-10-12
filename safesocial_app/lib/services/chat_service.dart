@@ -871,6 +871,17 @@ class ChatService extends ChangeNotifier {
     return message.copyWith(mediaRefs: saved, audioRef: audio);
   }
 
+  /// A nudge with no words. Once a minute per person at most, from this side.
+  final Map<String, DateTime> _lastPoke = {};
+  Future<Message> poke(String contactKey) async {
+    final last = _lastPoke[contactKey];
+    if (last != null && DateTime.now().difference(last) < const Duration(minutes: 1)) {
+      throw StateError('One poke a minute is plenty.');
+    }
+    _lastPoke[contactKey] = DateTime.now();
+    return sendMessage(contactKey, '👉', kind: 'poke');
+  }
+
   /// Whether pictures go at full size. Set by the app from the setting.
   bool Function()? wantsOriginalQuality;
 
@@ -1483,6 +1494,7 @@ class ChatService extends ChangeNotifier {
   static String describeMessage(Message msg) {
     if (msg.isDeleted) return 'Message deleted';
     if (msg.kind == 'file') return 'File: ${msg.payload?['name'] ?? msg.content}';
+    if (msg.kind == 'poke') return 'Poked you 👉';
     if (msg.isPoll) return 'Poll: ${msg.payload?['question'] ?? msg.content}';
     if (msg.isLocation) return 'Shared a location';
     if (msg.isContactCard) return 'Shared a contact';

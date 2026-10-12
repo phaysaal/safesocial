@@ -5,7 +5,9 @@ import 'package:provider/provider.dart';
 import '../../models/sphere.dart';
 import '../../models/profile_about.dart';
 import '../../services/contact_service.dart';
+import '../../models/post.dart';
 import '../../services/feed_service.dart';
+import '../../services/library_service.dart';
 import '../../services/profile_sharing.dart';
 import '../../services/identity_service.dart';
 import '../../services/sphere_service.dart';
@@ -61,6 +63,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final pinnedPosts = [
       for (final id in profile.pinnedPostIds) ...feed.posts.where((p) => p.id == id),
     ];
+    final library = context.watch<LibraryService>();
+    final tagged = feed.taggedPosts(profile.publicKey);
+    final pendingTags = library.tagReview
+        ? tagged.where((p) => !library.isTagApproved(p.id) && !library.isTagHidden(p.id)).toList()
+        : const <Post>[];
+    final shownTags = tagged.where((p) => library.showsTag(p.id)).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -105,6 +113,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onRemoveHighlight: viewAs != null
                   ? null
                   : (id) => context.read<IdentityService>().removeHighlight(id),
+              taggedPosts: shownTags,
               pinnedPosts: viewAs != null &&
                       !ProfileSharing.visibleFields(profile, viewAs).contains(ProfileField.pinned)
                   ? const []
@@ -173,6 +182,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ? 'Share a note for a day'
                               : 'Note: ${profile.activeNote}'),
                         ),
+                        if (pendingTags.isNotEmpty)
+                          Card(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              ListTile(
+                                leading: Icon(Icons.local_offer_outlined, color: cs.primary),
+                                title: Text('${pendingTags.length} post${pendingTags.length == 1 ? '' : 's'} tag you'),
+                                subtitle: const Text('Say yes before it shows on your profile.'),
+                              ),
+                              for (final p in pendingTags)
+                                ListTile(
+                                  dense: true,
+                                  title: Text(p.content.isEmpty ? '(media)' : p.content, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  subtitle: Text(p.authorName),
+                                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                    IconButton(icon: const Icon(Icons.close), tooltip: 'Keep off my profile', onPressed: () => library.reviewTag(p.id, approve: false)),
+                                    IconButton(icon: Icon(Icons.check, color: cs.primary), tooltip: 'Show on my profile', onPressed: () => library.reviewTag(p.id, approve: true)),
+                                  ]),
+                                ),
+                            ]),
+                          ),
                         TextButton.icon(
                           onPressed: () => context.push('/stories/archive'),
                           icon: const Icon(Icons.history_outlined, size: 18),

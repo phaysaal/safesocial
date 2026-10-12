@@ -106,6 +106,11 @@ class _PostCardState extends State<PostCard> {
                                 decoration: BoxDecoration(color: cs.secondaryContainer, borderRadius: BorderRadius.circular(8)),
                                 child: Text('#$topic', style: TextStyle(fontSize: 10, color: cs.onSecondaryContainer)),
                               ),
+                            if (post.payload?['tags'] is List && (post.payload!['tags'] as List).isNotEmpty)
+                              Text(
+                                'with ${(post.payload!['tags'] as List).whereType<String>().map((k) => authorNameFor(context, authorId: k, carried: '')).join(', ')}',
+                                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                              ),
                           ]);
                         }
                         return RichText(

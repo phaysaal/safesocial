@@ -105,6 +105,9 @@ class ProfileView extends StatelessWidget {
   /// On our own profile: a long press on a highlight removes it.
   final Future<void> Function(String highlightId)? onRemoveHighlight;
 
+  /// Posts by others that tag this person and may be shown.
+  final List<Post> taggedPosts;
+
   const ProfileView({
     super.key,
     required this.data,
@@ -113,6 +116,7 @@ class ProfileView extends StatelessWidget {
     this.note,
     this.pinnedPosts = const [],
     this.onRemoveHighlight,
+    this.taggedPosts = const [],
   });
 
   @override
@@ -380,6 +384,11 @@ class ProfileView extends StatelessWidget {
               ],
             ),
           ),
+          if (taggedPosts.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: _SectionLabel('Tagged in')),
+            for (final p in taggedPosts) PostCard(post: p),
+          ],
           if (pinnedPosts.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/feed_service.dart';
+import '../../services/library_service.dart';
 import '../../services/identity_service.dart';
 import '../../services/search_service.dart';
 import '../../services/sphere_service.dart';
@@ -58,6 +59,7 @@ class _SearchScreenState extends State<SearchScreen> {
             child: TextField(
               controller: _searchController,
               onChanged: (v) => setState(() => _query = v),
+              onSubmitted: (v) => context.read<LibraryService>().addSearch(v),
               autofocus: true,
               decoration: InputDecoration(
                 hintText: 'Search messages, posts, spheres, people',
@@ -88,6 +90,28 @@ class _SearchScreenState extends State<SearchScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
                 children: [
+                  Builder(builder: (context) {
+                    final library = context.watch<LibraryService>();
+                    if (library.searchHistory.isEmpty) return const SizedBox.shrink();
+                    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Text('Recent', style: theme.textTheme.labelLarge),
+                        const Spacer(),
+                        TextButton(onPressed: library.clearSearchHistory, child: const Text('Clear')),
+                      ]),
+                      Wrap(spacing: 6, children: [
+                        for (final q in library.searchHistory)
+                          ActionChip(
+                            label: Text(q),
+                            onPressed: () {
+                              _searchController.text = q;
+                              setState(() => _query = q);
+                            },
+                          ),
+                      ]),
+                      const SizedBox(height: 8),
+                    ]);
+                  }),
                   _QuickAction(
                     icon: Icons.person_add_outlined,
                     label: 'Add a new contact',

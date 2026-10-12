@@ -276,6 +276,15 @@ class MessageBubble extends StatelessWidget {
         ),
       ];
     }
+    if (message.kind == 'poke') {
+      return [
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          const Text('👉', style: TextStyle(fontSize: 22)),
+          const SizedBox(width: 8),
+          Text(isMine ? 'You poked them' : 'Poked you', style: const TextStyle(color: Colors.white)),
+        ]),
+      ];
+    }
     if (message.kind == 'call') {
       final p = message.payload ?? const {};
       return [

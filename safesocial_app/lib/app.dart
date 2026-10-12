@@ -35,7 +35,16 @@ import 'screens/feed/manage_posts_screen.dart';
 import 'screens/feed/story_archive_screen.dart';
 import 'screens/spheres/sphere_guides_screen.dart';
 import 'screens/spheres/sphere_settings_screen.dart';
+import 'screens/wellbeing/crisis_screen.dart';
+import 'screens/wellbeing/privacy_checkup_screen.dart';
+import 'screens/wellbeing/wellbeing_screen.dart';
+import 'screens/wellbeing/year_review_screen.dart';
 import 'services/bubble_bridge.dart';
+import 'services/wellbeing_service.dart';
+import 'services/feed_service.dart';
+import 'services/chat_service.dart';
+import 'services/sphere_chat_service.dart';
+import 'services/sphere_service.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
 import 'screens/spheres/sphere_list_screen.dart';
@@ -73,6 +82,7 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     _initDeepLinking();
     _initRouter();
     AppLifecycle.foreground = true;
+    context.read<WellbeingService>().onForeground();
     // A tapped notification opens the thing it was about.
     context.read<NotificationService>().onOpen = (route) {
       if (mounted) _router.push(route);
@@ -99,6 +109,11 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     // Notifications are suppressed while the UI is on screen; a wake with no
     // UI never gets here and stays "background".
     AppLifecycle.foreground = state == AppLifecycleState.resumed;
+    if (state == AppLifecycleState.resumed) {
+      context.read<WellbeingService>().onForeground();
+    } else {
+      context.read<WellbeingService>().onBackground();
+    }
     // Leaving the screen with the app lock on means unlocking on return.
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       if (context.read<LibraryService>().appLock) context.read<AppLockService>().lock();
@@ -331,6 +346,22 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           ),
         ),
         GoRoute(
+          path: '/wellbeing',
+          builder: (context, state) => const WellbeingScreen(),
+        ),
+        GoRoute(
+          path: '/help/crisis',
+          builder: (context, state) => const CrisisScreen(),
+        ),
+        GoRoute(
+          path: '/year',
+          builder: (context, state) => const YearReviewScreen(),
+        ),
+        GoRoute(
+          path: '/privacy-checkup',
+          builder: (context, state) => const PrivacyCheckupScreen(),
+        ),
+        GoRoute(
           path: '/sphere/:id/settings',
           builder: (context, state) => SphereSettingsScreen(sphereId: state.pathParameters['id']!),
         ),
@@ -378,14 +409,50 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final themeService = context.watch<ThemeService>();
 
+    final motion = themeService.reducedMotion
+        ? const PageTransitionsTheme(builders: {
+            TargetPlatform.android: _NoTransition(),
+            TargetPlatform.iOS: _NoTransition(),
+            TargetPlatform.linux: _NoTransition(),
+            TargetPlatform.macOS: _NoTransition(),
+            TargetPlatform.windows: _NoTransition(),
+          })
+        : null;
+    ThemeData adjust(ThemeData base, Brightness b) {
+      var t = base;
+      if (themeService.highContrast) {
+        final scheme = b == Brightness.dark ? const ColorScheme.highContrastDark() : const ColorScheme.highContrastLight();
+        t = ThemeData(colorScheme: scheme, brightness: b, useMaterial3: true).copyWith(
+          textTheme: base.textTheme.apply(bodyColor: scheme.onSurface, displayColor: scheme.onSurface),
+        );
+      }
+      if (motion != null) t = t.copyWith(pageTransitionsTheme: motion);
+      return t;
+    }
+
     return MaterialApp.router(
       title: 'Spheres',
       debugShowCheckedModeBanner: false,
-      theme: lightTheme,
-      darkTheme: darkTheme,
+      theme: adjust(lightTheme, Brightness.light),
+      darkTheme: adjust(darkTheme, Brightness.dark),
       themeMode: themeService.themeMode,
       routerConfig: _router,
-      builder: (context, child) => _LockGate(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: mq.textScaler.scale(1) == 1
+                ? TextScaler.linear(themeService.textScale)
+                : TextScaler.linear(mq.textScaler.scale(1) * themeService.textScale),
+            disableAnimations: themeService.reducedMotion || mq.disableAnimations,
+          ),
+          child: PauseGate(
+            child: BreakOverlay(
+              child: _LockGate(child: child ?? const SizedBox.shrink()),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -456,28 +523,49 @@ class _HomeScreenState extends State<HomeScreen> {
     final cs = Theme.of(context).colorScheme;
     final tablet = isTablet(context);
 
-    final destinations = const [
+    // Dots: new posts since the feed was last looked at, unread chats, and
+    // contact requests waiting. Counted here, shown nowhere else.
+    final feed = context.watch<FeedService>();
+    final chat = context.watch<ChatService>();
+    final sphereChat = context.watch<SphereChatService>();
+    final contacts = context.watch<ContactService>();
+    final unseenPosts = feed.unseenCount;
+    var unreadChats = 0;
+    for (final k in chat.conversations.keys) {
+      if (chat.unreadCount(k) > 0) unreadChats++;
+    }
+    for (final s in context.watch<SphereService>().spheres) {
+      if (sphereChat.unreadIn(s.id) > 0) unreadChats++;
+    }
+    final requests = contacts.requests.length;
+    Widget dotted(Widget icon, int n) => Badge(
+          isLabelVisible: n > 0,
+          label: Text('$n'),
+          child: icon,
+        );
+
+    final destinations = [
       NavigationDestination(
-        icon: Icon(Icons.home_outlined),
-        selectedIcon: Icon(Icons.home),
+        icon: dotted(const Icon(Icons.home_outlined), unseenPosts),
+        selectedIcon: const Icon(Icons.home),
         label: 'Home',
       ),
       NavigationDestination(
-        icon: Icon(Icons.chat_bubble_outline),
-        selectedIcon: Icon(Icons.chat_bubble),
+        icon: dotted(const Icon(Icons.chat_bubble_outline), unreadChats),
+        selectedIcon: const Icon(Icons.chat_bubble),
         label: 'Chat',
       ),
       NavigationDestination(
-        icon: Icon(Icons.people_outline),
-        selectedIcon: Icon(Icons.people),
+        icon: dotted(const Icon(Icons.people_outline), requests),
+        selectedIcon: const Icon(Icons.people),
         label: 'Contacts',
       ),
-      NavigationDestination(
+      const NavigationDestination(
         icon: Icon(Icons.person_outline),
         selectedIcon: Icon(Icons.person),
         label: 'Profile',
       ),
-      NavigationDestination(
+      const NavigationDestination(
         icon: Icon(Icons.terminal_outlined),
         selectedIcon: Icon(Icons.terminal),
         label: 'Console',
@@ -559,4 +647,13 @@ class _LockGate extends StatelessWidget {
 String? _bubbleRoute() {
   final name = WidgetsBinding.instance.platformDispatcher.defaultRouteName;
   return name.startsWith('/chat/') ? name : null;
+}
+
+/// No page animation at all, for people who asked for less motion.
+class _NoTransition extends PageTransitionsBuilder {
+  const _NoTransition();
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
+          Animation<double> secondaryAnimation, Widget child) =>
+      child;
 }

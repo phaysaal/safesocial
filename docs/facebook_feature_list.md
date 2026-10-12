@@ -170,25 +170,27 @@ not applicable.
 Push ✓ (content-free wake, built on device) · in-app tab ✓ · per-kind settings ✓ · email
 and SMS ✗ · birthday reminders ✓ · tagged in a post ✓ · comment on your post ✓ · reply to
 your comment ✓ · reactions ○ · turn on for a post ○ · mark all read ✓ · badge counts ✓ ·
-quiet mode and scheduled quiet hours ○ · notification dots ○.
+quiet mode and scheduled quiet hours ✓ (calls still ring) · notification dots ✓ (Home, Chat, Contacts).
 
 ## 11. Search
 
 Global search of people, posts, photos, videos, marketplace, groups, pages, events,
 places ✗ · search your own messages, posts, spheres and contacts ✓ (local) · filters ~ ·
-search history ○ · hashtags ✗ · recent searches ○.
+search history ✓ (ten, local) · hashtags ✗ · recent searches ✓.
 
 ## 12. Privacy, security and settings
 
-Privacy checkup ○ · default audience ✓ · who can see your friend list ✓ (nobody) · who
+Privacy checkup ✓ (every choice in one place, with its value) · default audience ✓ · who can see your friend list ✓ (nobody) · who
 can look you up by email or phone ✗ (nobody can; there is no directory) · search engine
-indexing ✗ (nothing is public) · timeline and tag review ○ · off-Facebook activity ✗ · ad
-preferences ✗ · download your information ✓ · access your information ~ · deactivate ○ ·
+indexing ✗ (nothing is public) · timeline and tag review ✓ (a post that tags you waits for your yes) · off-Facebook activity ✗ · ad
+preferences ✗ · download your information ✓ · access your information ~ · deactivate ✓ (pause: the relay rests, every key and store stays) ·
 delete with grace period ~ (wipe is immediate) · two-factor ✗ (no account; the key is the
 account) · login alerts ~ (security notices on key changes and new devices ✓) · recognised
 devices ✓ (your devices) · app passwords ✗ · apps and websites ✗ · Accounts Center ✗ ·
-language ○ · dark mode ✓ · data saver ○ · video autoplay ○ · location history ✗ · manage
-activity ~ · take a break ○ · quiet mode ○ · time-on-app dashboard ○ · daily reminder ○ ·
+language ~ (English only so far; said plainly in Settings) · dark mode ✓ · data saver ✓ ·
+video autoplay, not needed · location history ✗ · manage activity ~ · take a break ✓ (every
+twenty minutes the screen dims for twenty seconds) · quiet mode ✓ (quiet hours) ·
+time-on-app dashboard ✓ (seven days, local) · daily reminder ✓ ·
 parental supervision ✗ · face recognition, removed by Facebook · key verification ✓
 (safety numbers; Facebook has it only in Messenger) · backup with passphrase ✓ · social
 recovery ✓ · device linking ✓.
@@ -196,16 +198,17 @@ recovery ✓ · device linking ✓.
 ## 13. Safety and reporting
 
 Report a post, comment, profile or message ~ (to the sphere's admins ✓; to a platform ✗)
-· support inbox ✗ · block ✓ · restrict ○ · hide ✓ · mute ✓ · hidden words ✓ · fact-check
+· support inbox ✗ · block ✓ · restrict ✓ (their comments on your posts are hidden on arrival; they still see them) · hide ✓ · mute ✓ · hidden words ✓ · fact-check
 labels ✗ · sensitive-content warnings ~ (blur-until-tapped ✓, classifiers ✗ by decision)
 · "AI info" labels ~ (media origin score ✓, reads metadata only) · community standards
-and account strikes ✗ · suicide and crisis resources ○ · account status ✗.
+and account strikes ✗ · suicide and crisis resources ✓ (helplines kept in the app) · account status ✗.
 
 ## 14. Accessibility and small comforts
 
-Automatic alt text ✗ · custom alt text ✓ · captions ✗ · screen reader support ~ · text
-size ○ · reduced motion ○ · high contrast ○ · keyboard shortcuts, web only · poke ○ ·
-year in review ○ · your topics ✗ · QR codes ✓ · chat heads ○.
+Automatic alt text ✗ · custom alt text ✓ · captions ✗ · screen reader support ~ (icon
+buttons carry labels; no full pass yet) · text size ✓ · reduced motion ✓ (and the device
+setting) · high contrast ✓ · keyboard shortcuts, web only · poke ✓ · year in review ✓
+(counted on the device) · your topics ✗ · QR codes ✓ · chat heads ✓ (Android bubbles).
 
 ## Reading the marks
 
@@ -246,7 +249,7 @@ same commit.
 | P6 ✓ 12 Oct 2026 | **Sphere governance** | Membership questions answered in the join request, rules shown on join, units and guides, files, badges and expert marks, keyword alerts for admins (local), suspend for a period, welcome posts, post topics, admin automation for the rules already built (auto-mute on N reports, auto-expire invites) | `sphere_join` carries answers; rules, units and topics are signed sphere items | 6 |
 | P7 ✓ 11 Oct 2026 | **Events** | Co-hosts, recurring events, ticket links, "interested" alongside going, event photos, reminders, ICS export, a map link that opens the user's own map app | `event_rsvp` gains a state; the rest rides existing post kinds | 3 |
 | P8 ✓ 11 Oct 2026 | **Friends and feed** | Restricted contacts (see only named spheres), snooze for 30 days, take a break, friendversary from local history, favourites feed, hide a post, birthday cards, autoplay and data-saver settings | Local, except restricted contacts, which is an audience list on the sender | 3 |
-| P9 | **Settings, safety, accessibility** | Privacy checkup walkthrough, tag review before a mention shows on your profile, pause (deactivate) that keeps keys, language, quiet hours, time dashboard, daily reminder, restrict a contact (their comments visible only to them), crisis resources, text size, reduced motion, high contrast, a screen-reader pass over every screen, search history, notification dots, year in review, poke | Restrict is `comment_hide` applied automatically; the rest is local | 5 |
+| P9 ✓ 12 Oct 2026 | **Settings, safety, accessibility** | Privacy checkup walkthrough, tag review before a mention shows on your profile, pause (deactivate) that keeps keys, language, quiet hours, time dashboard, daily reminder, restrict a contact (their comments visible only to them), crisis resources, text size, reduced motion, high contrast, a screen-reader pass over every screen, search history, notification dots, year in review, poke | Restrict is `comment_hide` applied automatically; the rest is local | 5 |
 | P10 | **Avatars and on-device extras** | A cartoon avatar editor with stickers; on-device translation of posts and comments with a downloadable model (opt-in, never bundled, following the nudity-model decision) | Avatar is a blob in `profile`; translation stays on the device | 6 |
 
 About 50 days in all. P1, P8 and P7 are the cheap, visible wins and go first; P2 and

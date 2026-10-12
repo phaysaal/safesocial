@@ -154,6 +154,17 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   refuses to send; `reportsReached` mutes on the admin's device; `inviteLink(maxAge:)`
   retires an old token. Keyword alerts (`LibraryService.adminKeywords`) never leave the
   device. Rules are shown until acknowledged (`spheres_rules_seen_v1`).
+- **Wellbeing** (`services/wellbeing_service.dart`, local, sealed key `spheres_wellbeing_v1`):
+  seconds on screen per day; after twenty minutes in a row `breakActive` dims the whole app
+  (`BreakOverlay` in `app.dart`) for twenty seconds with a countdown, and five minutes away
+  counts as a break; a daily limit raises one reminder; quiet hours silence everything but
+  calls (`NotificationService.inQuietHours`); pause rests the relay (`RelayHub.pause` /
+  `resume`, nothing reconnects meanwhile) and `PauseGate` covers the app, with every key and
+  store untouched. Tag review (`LibraryService.tagReview`) holds a post that tags us
+  (`payload['tags']`) off our profile until approved; a restricted contact's comment on our
+  post is hidden on arrival (`FeedService.restrictedKeys`); `unseenCount` feeds the Home
+  dot; text scale, high contrast and reduced motion live in `ThemeService` and are applied
+  in the `MaterialApp` builder. Language: English only, and Settings says so.
 - **Invite links** are `spheres://join?s=&t=&via=&n=&q=`; `q` carries the sphere's join
   questions, the request carries the answers, and approval makes the requester a contact
   and a member in one step, then posts the welcome line if the sphere has one.
@@ -209,7 +220,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 749 tests in 65 files under test/{crypto,models,screens,services}
+flutter test                       # 761 tests in 66 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

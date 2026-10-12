@@ -7,6 +7,7 @@ import 'crypto/session_manager.dart';
 import 'services/album_service.dart';
 import 'services/bubble_bridge.dart';
 import 'services/sphere_info_service.dart';
+import 'services/wellbeing_service.dart';
 import 'services/app_lock_service.dart';
 import 'services/call_config.dart';
 import 'services/call_service.dart';
@@ -58,6 +59,7 @@ class AppServices {
   late final sphereChatService = SphereChatService(sphereService);
   late final sphereSyncService = SphereSyncService(sphereService);
   late final sphereInfoService = SphereInfoService(sphereService);
+  final wellbeingService = WellbeingService();
   final callConfig = CallConfig();
   final notificationService = NotificationService();
   final appLockService = AppLockService();
@@ -102,6 +104,15 @@ class AppServices {
     await callConfig.load();
     await libraryService.load();
     await notificationService.load();
+    await wellbeingService.load();
+    notificationService.inQuietHours = wellbeingService.inQuietHours;
+    wellbeingService.onPauseChanged = (paused) async {
+      if (paused) {
+        RelayHub.instance.pause();
+      } else {
+        await RelayHub.instance.resume();
+      }
+    };
     // Quiet: muted, snoozed, on a break, or a chat we chose to ignore.
     notificationService.isQuiet =
         (k) => contactService.isQuiet(k) || libraryService.isChatIgnored(k);
@@ -131,6 +142,9 @@ class AppServices {
     // the same function, so a freshly created identity works without a
     // restart.
     await wire();
+    feedService.restrictedKeys = () => contactService.contacts.where((c) => c.restricted).map((c) => c.publicKey).toSet();
+    // A pause chosen earlier holds across restarts: rest the relay now.
+    if (wellbeingService.paused) RelayHub.instance.pause();
   }
 
   /// Re-read local state and re-wire after the identity on disk changed
@@ -199,6 +213,7 @@ class AppServices {
         ChangeNotifierProvider.value(value: sphereChatService),
         ChangeNotifierProvider.value(value: sphereSyncService),
         ChangeNotifierProvider.value(value: sphereInfoService),
+        ChangeNotifierProvider.value(value: wellbeingService),
         ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),
         ChangeNotifierProvider.value(value: callConfig),

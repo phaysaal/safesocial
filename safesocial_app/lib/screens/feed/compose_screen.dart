@@ -60,6 +60,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   /// A topic of the one sphere this goes to, when it has topics.
   String? _topic;
+
+  /// Members tagged in this post, by identity key.
+  final Set<String> _tags = {};
   String? _activity;
   bool _allowReshare = true;
   String? _draftId;
@@ -327,6 +330,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
       if (_feeling != null) 'feeling': _feeling,
       if (_activity != null) 'activity': _activity,
       if (_topic != null) 'topic': _topic,
+      if (_tags.isNotEmpty) 'tags': _tags.toList(),
     };
     if (_payload == null && extras.isEmpty) return null;
     return {...?_payload, ...extras};
@@ -778,6 +782,38 @@ class _ComposeScreenState extends State<ComposeScreen> {
                                   );
                                   if (chosen == null) return;
                                   setState(() => _topic = chosen.isEmpty ? null : chosen);
+                                },
+                        );
+                      }),
+                      Builder(builder: (context) {
+                        final members = <String>{
+                          for (final id in _targets) ...?context.read<SphereService>().sphere(id)?.members.map((m) => m.identityKey),
+                        }..remove(context.read<IdentityService>().publicKey);
+                        if (members.isEmpty) return const SizedBox.shrink();
+                        return IconButton(
+                          tooltip: _tags.isEmpty ? 'Tag people' : 'Tagged ${_tags.length}',
+                          icon: Icon(Icons.local_offer_outlined, color: _tags.isEmpty ? cs.onSurfaceVariant : cs.primary),
+                          onPressed: _posting
+                              ? null
+                              : () async {
+                                  final contacts = context.read<ContactService>();
+                                  await showModalBottomSheet<void>(
+                                    context: context,
+                                    builder: (ctx) => StatefulBuilder(
+                                      builder: (ctx, setSheet) => SafeArea(
+                                        child: ListView(shrinkWrap: true, children: [
+                                          const ListTile(title: Text('Tag people'), subtitle: Text('They see it; with tag review on, they decide whether it shows on their profile.')),
+                                          for (final m in members)
+                                            CheckboxListTile(
+                                              value: _tags.contains(m),
+                                              title: Text(contacts.getContact(m)?.displayName ?? 'Member ${m.substring(0, 6)}'),
+                                              onChanged: (on) => setSheet(() => on == true ? _tags.add(m) : _tags.remove(m)),
+                                            ),
+                                        ]),
+                                      ),
+                                    ),
+                                  );
+                                  if (mounted) setState(() {});
                                 },
                         );
                       }),

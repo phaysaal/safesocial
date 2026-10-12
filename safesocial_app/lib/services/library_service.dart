@@ -159,6 +159,7 @@ class LibraryService extends ChangeNotifier {
   }
 
   bool isChatLocked(String chatKey) => _lockedChats.contains(chatKey);
+  int get lockedChatCount => _lockedChats.length;
   bool get appLock => _appLock;
 
   Future<void> toggleChatLock(String chatKey) async {
@@ -436,6 +437,63 @@ class LibraryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Search history, tag review ─────────────────────────────────────────────
+
+  static const _searchHistoryKey = 'spheres_search_history_v1';
+  static const _tagReviewKey = 'spheres_tag_review_v1';
+  final List<String> _searchHistory = [];
+  bool _tagReview = true;
+  final Set<String> _approvedTags = {};
+  final Set<String> _hiddenTags = {};
+
+  List<String> get searchHistory => List.unmodifiable(_searchHistory);
+
+  Future<void> addSearch(String query) async {
+    final q = query.trim();
+    if (q.length < 2) return;
+    _searchHistory.remove(q);
+    _searchHistory.insert(0, q);
+    if (_searchHistory.length > 10) _searchHistory.removeRange(10, _searchHistory.length);
+    await SecureStore.instance.setStringList(_searchHistoryKey, _searchHistory);
+    notifyListeners();
+  }
+
+  Future<void> clearSearchHistory() async {
+    _searchHistory.clear();
+    await SecureStore.instance.setStringList(_searchHistoryKey, const []);
+    notifyListeners();
+  }
+
+  /// Tag review: a post that tags us waits for a yes before it shows on our
+  /// profile. Off means every tag shows.
+  bool get tagReview => _tagReview;
+  bool isTagApproved(String postId) => _approvedTags.contains(postId);
+  bool isTagHidden(String postId) => _hiddenTags.contains(postId);
+
+  /// Whether a post tagging us belongs on our profile right now.
+  bool showsTag(String postId) => _hiddenTags.contains(postId) ? false : (!_tagReview || _approvedTags.contains(postId));
+
+  Future<void> setTagReview(bool on) async {
+    _tagReview = on;
+    await _persistTags();
+    notifyListeners();
+  }
+
+  Future<void> reviewTag(String postId, {required bool approve}) async {
+    if (approve) {
+      _hiddenTags.remove(postId);
+      _approvedTags.add(postId);
+    } else {
+      _approvedTags.remove(postId);
+      _hiddenTags.add(postId);
+    }
+    await _persistTags();
+    notifyListeners();
+  }
+
+  Future<void> _persistTags() => SecureStore.instance.setString(
+      _tagReviewKey, jsonEncode({'review': _tagReview, 'approved': _approvedTags.toList(), 'hidden': _hiddenTags.toList()}));
+
   // ── Admin keyword alerts, local ────────────────────────────────────────────
 
   static const _adminKeywordsKey = 'spheres_admin_keywords_v1';
@@ -469,6 +527,22 @@ class LibraryService extends ChangeNotifier {
     _ignoredChats
       ..clear()
       ..addAll(await store.getStringList(_ignoredChatsKey) ?? const []);
+    _searchHistory
+      ..clear()
+      ..addAll(await store.getStringList(_searchHistoryKey) ?? const []);
+    final tagRaw = await store.getString(_tagReviewKey);
+    if (tagRaw != null) {
+      try {
+        final j = jsonDecode(tagRaw) as Map;
+        _tagReview = j['review'] != false;
+        _approvedTags
+          ..clear()
+          ..addAll((j['approved'] as List? ?? const []).whereType<String>());
+        _hiddenTags
+          ..clear()
+          ..addAll((j['hidden'] as List? ?? const []).whereType<String>());
+      } catch (_) {}
+    }
     _adminKeywords.clear();
     final kwRaw = await store.getString(_adminKeywordsKey);
     if (kwRaw != null) {

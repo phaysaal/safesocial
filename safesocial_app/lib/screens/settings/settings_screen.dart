@@ -377,6 +377,92 @@ class SettingsScreen extends StatelessWidget {
             );
           }),
           const Divider(indent: 56),
+          Builder(builder: (context) {
+            final library = context.watch<LibraryService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.local_offer_outlined, color: cs.primary),
+              title: const Text('Tag review'),
+              subtitle: const Text('A post that tags you waits for your yes before it shows on your profile.'),
+              value: library.tagReview,
+              onChanged: library.setTagReview,
+            );
+          }),
+          ListTile(
+            leading: Icon(Icons.checklist_outlined, color: cs.primary),
+            title: const Text('Privacy checkup'),
+            subtitle: const Text('Every choice about who sees what, in one place'),
+            onTap: () => context.push('/privacy-checkup'),
+          ),
+
+          // ── Wellbeing ────────────────────────────────────
+          _SectionHeader(title: 'Wellbeing & Safety'),
+          ListTile(
+            leading: Icon(Icons.self_improvement, color: cs.primary),
+            title: const Text('Your time here'),
+            subtitle: const Text('Breaks every 20 minutes, a daily reminder, quiet hours, pause'),
+            onTap: () => context.push('/wellbeing'),
+          ),
+          ListTile(
+            leading: Icon(Icons.favorite_outline, color: cs.primary),
+            title: const Text('If you need someone now'),
+            subtitle: const Text('Helplines, kept in the app'),
+            onTap: () => context.push('/help/crisis'),
+          ),
+          ListTile(
+            leading: Icon(Icons.auto_awesome_outlined, color: cs.primary),
+            title: const Text('Your year so far'),
+            subtitle: const Text('Counted on this device'),
+            onTap: () => context.push('/year'),
+          ),
+
+          // ── Accessibility ────────────────────────────────
+          _SectionHeader(title: 'Accessibility'),
+          Builder(builder: (context) {
+            final t = context.watch<ThemeService>();
+            return ListTile(
+              leading: Icon(Icons.format_size, color: cs.primary),
+              title: const Text('Text size'),
+              subtitle: Slider(
+                value: t.textScale,
+                min: 0.85,
+                max: 1.6,
+                divisions: 5,
+                label: '${(t.textScale * 100).round()}%',
+                onChanged: t.setTextScale,
+              ),
+            );
+          }),
+          Builder(builder: (context) {
+            final t = context.watch<ThemeService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.contrast, color: cs.primary),
+              title: const Text('High contrast'),
+              subtitle: const Text('Stronger colours and borders'),
+              value: t.highContrast,
+              onChanged: t.setHighContrast,
+            );
+          }),
+          Builder(builder: (context) {
+            final t = context.watch<ThemeService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.animation, color: cs.primary),
+              title: const Text('Reduce motion'),
+              subtitle: const Text('No page animations; the device setting is honoured too'),
+              value: t.reducedMotion,
+              onChanged: t.setReducedMotion,
+            );
+          }),
+          ListTile(
+            leading: Icon(Icons.record_voice_over_outlined, color: cs.primary),
+            title: const Text('Screen reader'),
+            subtitle: const Text('Every icon button carries a label; the device\'s own reader is used. Tell us where one is missing.'),
+          ),
+          ListTile(
+            leading: Icon(Icons.language, color: cs.primary),
+            title: const Text('Language'),
+            subtitle: const Text('English is the only language built so far; dates and numbers follow the device.'),
+          ),
+          const Divider(indent: 56),
           ListTile(
             leading: Icon(Icons.storage_outlined, color: cs.primary),
             title: const Text('Cached Media'),

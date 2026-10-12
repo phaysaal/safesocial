@@ -155,6 +155,9 @@ class NotificationService extends ChangeNotifier {
   /// notification; returns false when it cannot, and the plain one is used.
   Future<bool> Function(InboundEvent event, String body)? bubble;
 
+  /// Quiet hours: nothing but a call is shown while they last. Set by the app.
+  bool Function()? inQuietHours;
+
   /// A reminder the device shows by itself at [at], e.g. before an event.
   Future<void> scheduleReminder({
     required int id,
@@ -186,6 +189,7 @@ class NotificationService extends ChangeNotifier {
     if (from != null && event.kind != InboundKind.call && (isQuiet?.call(from) ?? false)) {
       return false;
     }
+    if (event.kind != InboundKind.call && (inQuietHours?.call() ?? false)) return false;
     // Calls ring regardless of whether the app is on screen; everything else
     // is already visible when it is.
     if (AppLifecycle.foreground && event.kind != InboundKind.call) return false;

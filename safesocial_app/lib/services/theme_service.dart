@@ -17,6 +17,9 @@ class ThemeService extends ChangeNotifier {
     } else {
       _themeMode = ThemeMode.light;
     }
+    _textScale = (prefs.getDouble(_scaleKey) ?? 1.0).clamp(0.85, 1.6);
+    _highContrast = prefs.getBool(_contrastKey) ?? false;
+    _reducedMotion = prefs.getBool(_motionKey) ?? false;
     notifyListeners();
   }
 
@@ -25,6 +28,36 @@ class ThemeService extends ChangeNotifier {
         _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, _themeMode == ThemeMode.dark ? 'dark' : 'light');
+    notifyListeners();
+  }
+
+  static const _scaleKey = 'text_scale';
+  static const _contrastKey = 'high_contrast';
+  static const _motionKey = 'reduced_motion';
+  double _textScale = 1.0;
+  bool _highContrast = false;
+  bool _reducedMotion = false;
+
+  /// 0.85 to 1.6; the device's own setting multiplies on top.
+  double get textScale => _textScale;
+  bool get highContrast => _highContrast;
+  bool get reducedMotion => _reducedMotion;
+
+  Future<void> setTextScale(double scale) async {
+    _textScale = scale.clamp(0.85, 1.6);
+    (await SharedPreferences.getInstance()).setDouble(_scaleKey, _textScale);
+    notifyListeners();
+  }
+
+  Future<void> setHighContrast(bool on) async {
+    _highContrast = on;
+    (await SharedPreferences.getInstance()).setBool(_contrastKey, on);
+    notifyListeners();
+  }
+
+  Future<void> setReducedMotion(bool on) async {
+    _reducedMotion = on;
+    (await SharedPreferences.getInstance()).setBool(_motionKey, on);
     notifyListeners();
   }
 
