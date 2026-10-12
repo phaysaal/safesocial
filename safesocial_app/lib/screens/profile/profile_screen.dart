@@ -144,6 +144,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           label: const Text('Manage posts: archive, trash, delete in bulk'),
                         ),
                         TextButton.icon(
+                          onPressed: () async {
+                            final identity = context.read<IdentityService>();
+                            final c = TextEditingController(text: identity.currentIdentity?.activeNote ?? '');
+                            final text = await showDialog<String>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Note for a day'),
+                                content: TextField(
+                                  controller: c,
+                                  maxLength: 80,
+                                  autofocus: true,
+                                  decoration: const InputDecoration(hintText: 'What are you up to?'),
+                                  textCapitalization: TextCapitalization.sentences,
+                                ),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                                  TextButton(onPressed: () => Navigator.pop(ctx, ''), child: const Text('Clear')),
+                                  FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Share')),
+                                ],
+                              ),
+                            );
+                            if (text == null) return;
+                            await identity.setNote(text);
+                          },
+                          icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                          label: Text((profile.activeNote).isEmpty
+                              ? 'Share a note for a day'
+                              : 'Note: ${profile.activeNote}'),
+                        ),
+                        TextButton.icon(
                           onPressed: () => context.push('/stories/archive'),
                           icon: const Icon(Icons.history_outlined, size: 18),
                           label: const Text('Story archive and highlights'),

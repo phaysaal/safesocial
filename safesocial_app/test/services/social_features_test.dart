@@ -51,7 +51,7 @@ void main() {
         timestamp: DateTime(2026, 10, 11),
         kind: 'poll',
         payload: {'question': 'q', 'options': ['a', 'b'], 'votes': {}},
-        expiresAt: DateTime(2026, 10, 12),
+        expiresAt: DateTime.now().add(const Duration(days: 1)),
         viewOnce: true,
         forwarded: true,
         mentions: [bob],

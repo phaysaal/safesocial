@@ -76,7 +76,8 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   name and picture only (`ProfileSharing.payloadFor(restricted:)`). A quiet contact's
   call still rings. Nothing of this is told to the other person.
 - **Message kinds.** `Message.kind` is text, poll, location, contact, video_note, sticker,
-  call or system, with structured content in `payload`; `Post.kind` is post, event, poll,
+  file (any type, uploaded as it is with `name`, `mime` and `size` in the payload, opened
+  through the `spheres/files` channel), call or system, with structured content in `payload`; `Post.kind` is post, event, poll,
   life_event, recommend (one suggestion per member, via `post_suggest`) or reshare. Any
   post's payload may carry `bg` (a named background for short text), `feeling` or
   `activity`. Every post carries `authorSig`, the author's Ed25519 signature over
@@ -108,7 +109,21 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   profile to what that contact's shared spheres allow; the receiver treats the message
   as the sender's whole view and drops any field it no longer carries, while a malformed
   field is ignored. Only the legacy contact is told they are one. "View as" on the
-  profile screen renders exactly that cut. Photos travel as encrypted blobs.
+  profile screen renders exactly that cut. Photos travel as encrypted blobs. A *note* is
+  a line of up to 80 characters with a 24-hour `noteUntil`; it travels only while it
+  lasts and the receiver drops it when a profile arrives without one.
+- **Messaging comforts.** Scheduled messages wait in `ChatService` (sealed key
+  `spheres_scheduled_messages_v1`) and go on the 30-second sweep while this device runs.
+  Vanish mode is `setVanish`: a five-minute disappearing preset that remembers and
+  restores the previous setting. An ignored chat (`LibraryService.isChatIgnored`) raises
+  no notification and sends no typing signal or read receipt; chat theme, nickname and
+  chat emoji are local (`spheres_chat_looks_v1`). "Send pictures at full size" skips the
+  1600 px downscale but still re-encodes. Chat bubbles: `NotificationService.bubble` tries
+  `BubbleBridge.show` for a direct message and falls back to the plain notification;
+  `MainActivity.kt` posts a MessagingStyle notification with bubble metadata and
+  `BubbleActivity` attaches to the cached engine (`FlutterEngineCache`, id `main`) so no
+  second copy of the services starts, then asks the app to show the chat over the
+  `spheres/bubbles` channel.
 - **Stories** are posts with `isStory` and a day's expiry. A story may carry a sticker
   (`poll`, `question`, `countdown`, `quiz`, `slider`, `feeling`, `link`) in its payload;
   answers to the first four travel as private replies to the author, a link opens only
@@ -183,7 +198,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 734 tests in 63 files under test/{crypto,models,screens,services}
+flutter test                       # 742 tests in 64 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run
 flutter build apk --debug

@@ -48,6 +48,14 @@ class UserProfile with EquatableMixin {
   /// Named sets of pictures kept from stories, shown on the profile.
   final List<StoryHighlight> highlights;
 
+  /// A short line for contacts, gone after a day. Empty when there is none.
+  final String note;
+  final DateTime? noteUntil;
+
+  /// The note while it lasts, or empty.
+  String get activeNote =>
+      note.isNotEmpty && noteUntil != null && DateTime.now().isBefore(noteUntil!) ? note : '';
+
   UserProfile({
     required this.publicKey,
     this.keyExchangePublicKey,
@@ -65,6 +73,8 @@ class UserProfile with EquatableMixin {
     this.legacyContact,
     this.pinnedPostIds = const [],
     this.highlights = const [],
+    this.note = '',
+    this.noteUntil,
   });
 
   bool get avatarIsTemporary => avatarUntil != null;
@@ -98,6 +108,8 @@ class UserProfile with EquatableMixin {
           (json['pinnedPostIds'] as List<dynamic>?)?.whereType<String>().toList() ??
               const [],
       highlights: StoryHighlight.listFromJson(json['highlights']),
+      note: json['note'] is String ? ProfileAbout.text(json['note'], 80) : '',
+      noteUntil: json['noteUntil'] is String ? DateTime.tryParse(json['noteUntil'] as String) : null,
     );
   }
 
@@ -120,6 +132,8 @@ class UserProfile with EquatableMixin {
       if (legacyContact != null) 'legacyContact': legacyContact,
       if (pinnedPostIds.isNotEmpty) 'pinnedPostIds': pinnedPostIds,
       if (highlights.isNotEmpty) 'highlights': [for (final h in highlights) h.toJson()],
+      if (note.isNotEmpty) 'note': note,
+      if (noteUntil != null) 'noteUntil': noteUntil!.toIso8601String(),
     };
   }
 
@@ -145,6 +159,9 @@ class UserProfile with EquatableMixin {
     bool clearLegacyContact = false,
     List<String>? pinnedPostIds,
     List<StoryHighlight>? highlights,
+    String? note,
+    DateTime? noteUntil,
+    bool clearNote = false,
   }) {
     return UserProfile(
       publicKey: publicKey ?? this.publicKey,
@@ -166,6 +183,8 @@ class UserProfile with EquatableMixin {
           clearLegacyContact ? null : (legacyContact ?? this.legacyContact),
       pinnedPostIds: pinnedPostIds ?? this.pinnedPostIds,
       highlights: highlights ?? this.highlights,
+      note: clearNote ? '' : (note ?? this.note),
+      noteUntil: clearNote ? null : (noteUntil ?? this.noteUntil),
     );
   }
 
@@ -187,6 +206,8 @@ class UserProfile with EquatableMixin {
         legacyContact,
         pinnedPostIds,
         highlights,
+        note,
+        noteUntil,
       ];
 }
 

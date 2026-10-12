@@ -424,6 +424,34 @@ class IdentityService extends ChangeNotifier {
     return true;
   }
 
+  /// A short line for contacts, shown for a day. Empty clears it now.
+  Future<void> setNote(String text) async {
+    final current = _currentIdentity;
+    if (current == null) return;
+    final trimmed = ProfileAbout.text(text, 80);
+    _currentIdentity = trimmed.isEmpty
+        ? current.copyWith(clearNote: true, updatedAt: DateTime.now())
+        : current.copyWith(
+            note: trimmed,
+            noteUntil: DateTime.now().add(const Duration(hours: 24)),
+            updatedAt: DateTime.now());
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+  }
+
+  /// Clear a note whose day is over, and tell contacts so theirs clears too.
+  Future<bool> expireNote() async {
+    final current = _currentIdentity;
+    final until = current?.noteUntil;
+    if (current == null || until == null || DateTime.now().isBefore(until)) return false;
+    _currentIdentity = current.copyWith(clearNote: true, updatedAt: DateTime.now());
+    await _persistIdentity();
+    notifyListeners();
+    await onProfileChanged?.call(_currentIdentity!);
+    return true;
+  }
+
   /// Everything beyond name, bio, picture and birthday, in one go.
   Future<void> updateAbout(ProfileAbout about) async {
     if (_currentIdentity == null) return;

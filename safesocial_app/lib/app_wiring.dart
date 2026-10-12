@@ -180,8 +180,10 @@ Future<void> wireIdentity({
   };
   chatService.onOwnProfile = (json) =>
       identityService.adoptFromOwnDevice(json, materialise: MediaService.decodeAndSaveImage);
-  // A temporary picture whose time ran out while the app was closed.
+  // A temporary picture whose time ran out while the app was closed, and a
+  // note whose day is over.
   unawaited(identityService.expireTemporaryAvatar());
+  unawaited(identityService.expireNote());
   // Invite links: a request lands in our inbox; approving makes them a
   // contact and a member in one step.
   contactService.onJoinRequest = ({required sphereId, required token, required requester}) =>
@@ -243,6 +245,9 @@ Future<void> wireIdentity({
   // Membership changes and sphere keys travel over the pairwise chat channels
   // that already exist, so there is no separate transport to keep alive.
   sphereService.sendToPeer = chatService.sendRawToPeer;
+  chatService.wantsOriginalQuality = () => libraryService.originalQualityMedia;
+  chatService.isIgnored = libraryService.isChatIgnored;
+  unawaited(chatService.sendDueScheduled());
   feedService.onMissingKey = (sphereId, epoch) => sphereService.requestKey(sphereId, epoch: epoch);
 
   // Group chat is addressed to the sphere, so it travels the same per-member

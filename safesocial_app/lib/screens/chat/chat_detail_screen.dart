@@ -24,7 +24,9 @@ import '../../services/media_service.dart';
 import '../../services/sphere_chat_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/video_transcoder.dart';
+import '../../services/file_bridge.dart';
 import '../../widgets/avatar.dart';
+import '../../widgets/chat_themes.dart';
 import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_cards.dart';
@@ -366,6 +368,117 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
   }
 
+  Future<void> _sendFile() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final PickedFile? picked;
+    try {
+      picked = await FileBridge.pick();
+    } on UnsupportedError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not available here')));
+      return;
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not pick a file: $e')));
+      return;
+    }
+    if (picked == null || !mounted) return;
+    final file = picked;
+    await _send(() => context.read<ChatService>().sendFile(widget.conversationId,
+        path: file.path, name: file.name, mime: file.mime, size: file.size));
+  }
+
+  Future<void> _openFile(Message m) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final p = m.payload ?? const {};
+    try {
+      await FileBridge.open(m.mediaRefs.first,
+          name: p['name'] as String? ?? 'file', mime: p['mime'] as String? ?? 'application/octet-stream');
+    } on UnsupportedError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not available here')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Nothing on this device opens that: $e')));
+    }
+  }
+
+  Future<void> _chatLook() async {
+    final library = context.read<LibraryService>();
+    final id = widget.conversationId;
+    final nickname = TextEditingController(text: library.chatNickname(id) ?? '');
+    var theme = library.chatTheme(id);
+    var emoji = library.chatEmoji(id);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Chat look', style: Theme.of(ctx).textTheme.titleMedium),
+            Text('Only on this device. The other side sees nothing of it.',
+                style: Theme.of(ctx).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, children: [
+              for (final (tid, label) in ChatThemes.all)
+                ChoiceChip(
+                  label: Text(label),
+                  avatar: CircleAvatar(backgroundColor: ChatThemes.mine(tid) ?? Theme.of(ctx).colorScheme.primary, radius: 8),
+                  selected: theme == tid,
+                  onSelected: (_) {
+                    setSheet(() => theme = tid);
+                    library.setChatLook(id, theme: tid);
+                  },
+                ),
+            ]),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nickname,
+              decoration: const InputDecoration(labelText: 'Nickname for them here', hintText: 'Leave empty for their name'),
+              onChanged: (v) => library.setChatLook(id, nickname: v),
+            ),
+            const SizedBox(height: 12),
+            Text('Chat emoji', style: Theme.of(ctx).textTheme.labelLarge),
+            Wrap(spacing: 6, children: [
+              for (final e in const ['👍', '❤️', '🔥', '😂', '🎉', '🙏', '👀', '💯'])
+                ChoiceChip(
+                  label: Text(e),
+                  selected: emoji == e,
+                  onSelected: (_) {
+                    setSheet(() => emoji = e);
+                    library.setChatLook(id, emoji: e);
+                  },
+                ),
+            ]),
+            const SizedBox(height: 8),
+            Text('One tap on it sends it; it leads the reactions.', style: Theme.of(ctx).textTheme.bodySmall),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendLater() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+    final now = DateTime.now();
+    final date = await showDatePicker(
+        context: context, initialDate: now, firstDate: now, lastDate: now.add(const Duration(days: 365)));
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+        context: context, initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))));
+    if (time == null || !mounted) return;
+    final at = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<ChatService>().scheduleMessage(widget.conversationId, text, at);
+      _messageController.clear();
+      messenger.showSnackBar(SnackBar(content: Text('Will be sent ${_fmtWhen(at)}, if this device is running then')));
+    } on ArgumentError catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('${e.message}')));
+    }
+  }
+
+  static String _fmtWhen(DateTime at) =>
+      '${at.day}/${at.month} at ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+
   Future<void> _sendViewOnce() async {
     final path = await context.read<MediaService>().pickAndStoreImage();
     if (path == null || !mounted) return;
@@ -630,12 +743,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               title: const Text('Contact card'),
               onTap: () => Navigator.pop(ctx, 'contact'),
             ),
+            ListTile(
+              leading: const Icon(Icons.attach_file),
+              title: const Text('File'),
+              subtitle: const Text('Any type, sent as it is, encrypted'),
+              onTap: () => Navigator.pop(ctx, 'file'),
+            ),
           ],
           ),
         ),
       ),
     );
     if (choice == null || !mounted) return;
+    if (choice == 'file') return _sendFile();
     if (choice == 'poll') return _sendPoll();
     if (choice == 'sticker') return _sendSticker();
     if (choice == 'location') return _shareLocation();
@@ -700,8 +820,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final messages =
         chatService.conversations[widget.conversationId] ?? <Message>[];
     final contact = contactService.getContact(widget.conversationId);
-    final displayName = contact?.displayName ?? widget.conversationId;
+    final library = context.watch<LibraryService>();
+    final displayName = library.chatNickname(widget.conversationId) ??
+        contact?.displayName ??
+        widget.conversationId;
     final myPublicKey = identityService.publicKey ?? 'self';
+    final look = library.chatTheme(widget.conversationId);
+    final isDark = theme.brightness == Brightness.dark;
+    final wash = ChatThemes.wash(look, dark: isDark);
 
     return Scaffold(
       appBar: AppBar(
@@ -746,6 +872,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if ((contact?.activeNote ?? '').isNotEmpty)
+                    Text('💬 ${contact!.activeNote}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
                   Builder(builder: (ctx) {
                     final typing =
                         chatService.isTyping(widget.conversationId);
@@ -839,9 +970,29 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 _toggleLock(context);
               } else if (value == 'blur') {
                 context.read<LibraryService>().toggleBlurMedia(widget.conversationId);
+              } else if (value == 'look') {
+                _chatLook();
+              } else if (value == 'vanish') {
+                final chat = context.read<ChatService>();
+                _guard(() => chat.setVanish(widget.conversationId, !chat.isVanish(widget.conversationId)));
+              } else if (value == 'ignore') {
+                context.read<LibraryService>().toggleIgnoreChat(widget.conversationId);
               }
             },
             itemBuilder: (ctx) => [
+              const PopupMenuItem(value: 'look', child: Text('Chat look: theme, nickname, emoji')),
+              PopupMenuItem(
+                value: 'vanish',
+                child: Text(chatService.isVanish(widget.conversationId)
+                    ? 'Vanish mode: on (5 minutes)'
+                    : 'Vanish mode: off'),
+              ),
+              PopupMenuItem(
+                value: 'ignore',
+                child: Text(library.isChatIgnored(widget.conversationId)
+                    ? 'Stop ignoring this chat'
+                    : 'Ignore this chat'),
+              ),
               PopupMenuItem(
                 value: 'disappear',
                 child: Text(chatService.disappearAfter(widget.conversationId) == null
@@ -870,6 +1021,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
         ],
       ),
+      backgroundColor: wash == null ? null : Color.alphaBlend(wash, cs.surface),
       body: !_unlocked
           ? Center(
               child: Column(
@@ -939,6 +1091,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 widget.conversationId, msg.id, emoji),
                         message: message,
                         isMine: isMine,
+                        mineColor: ChatThemes.mine(look),
+                        theirsColor: ChatThemes.theirs(look, dark: isDark),
+                        favouriteEmoji: library.chatEmoji(widget.conversationId),
+                        onOpenFile: _openFile,
                         isStarred: library.isStarred(message.id),
                         blurMedia: !isMine && library.isMediaBlurred(widget.conversationId),
                         isPinned: chatService.pinnedMessageId(widget.conversationId) == message.id,
@@ -1035,6 +1191,34 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         ],
                       ),
                     ),
+                  if (chatService.isVanish(widget.conversationId))
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      color: cs.tertiaryContainer,
+                      child: Text('Vanish mode: every message here disappears 5 minutes after it is sent, for both of you.',
+                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onTertiaryContainer)),
+                    ),
+                  if (library.isChatIgnored(widget.conversationId))
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      color: cs.surfaceContainerHighest,
+                      child: Text('Ignored: no notifications, and they are not told when you read or type.',
+                          style: theme.textTheme.bodySmall),
+                    ),
+                  for (final s in chatService.scheduledFor(widget.conversationId))
+                    ListTile(
+                      dense: true,
+                      leading: Icon(Icons.schedule_send_outlined, color: cs.primary),
+                      title: Text(s.content, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text('Sends ${_fmtWhen(s.at)} from this device'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        tooltip: 'Cancel',
+                        onPressed: () => context.read<ChatService>().cancelScheduled(s.id),
+                      ),
+                    ),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -1099,8 +1283,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   // press that started a recording still gets its release:
                   // swapping the button out mid-gesture meant letting go did
                   // nothing and the recording ran until "send" was tapped.
+                  if (!_hasText && !_isRecording)
+                    IconButton(
+                      tooltip: 'Send the chat emoji',
+                      icon: Text(library.chatEmoji(widget.conversationId), style: const TextStyle(fontSize: 22)),
+                      onPressed: () => _send(() => context
+                          .read<ChatService>()
+                          .sendMessage(widget.conversationId, library.chatEmoji(widget.conversationId))),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    ),
                   GestureDetector(
-                    onLongPressStart: _hasText ? null : (_) => _startRecording(),
+                    onLongPressStart: _hasText ? (_) => _sendLater() : (_) => _startRecording(),
                     onLongPressEnd: _hasText ? null : (_) => _stopRecording(),
                     child: IconButton(
                       icon: _isRecording

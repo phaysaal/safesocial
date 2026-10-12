@@ -478,6 +478,7 @@ class MediaService extends ChangeNotifier {
   static Future<String?> prepareForRelay(
     String filePath, {
     Duration? videoLimit,
+    bool originalQuality = false,
   }) async {
     final file = File(filePath);
     if (!file.existsSync()) {
@@ -509,9 +510,11 @@ class MediaService extends ChangeNotifier {
         throw const MediaRejectedException('That file is not an image.');
       }
 
-      // Resize to max 1600px on the longest side.
-      final resized = _fit(image, 1600);
-      payload = Uint8List.fromList(img.encodeJpg(resized, quality: 80));
+      // Resize to max 1600px on the longest side, unless the sender asked
+      // for the picture as it is. Either way it is re-encoded, so nothing
+      // the file said about itself travels.
+      final resized = originalQuality ? image : _fit(image, 1600);
+      payload = Uint8List.fromList(img.encodeJpg(resized, quality: originalQuality ? 92 : 80));
       mimeType = 'image/jpeg';
       thumbnail = _thumbnailFor(image);
     }
@@ -533,6 +536,46 @@ class MediaService extends ChangeNotifier {
     DebugLogService().info('Media',
         'Prepared ${payload.length ~/ 1024}KB $mimeType blob');
     return ref.encode();
+  }
+
+  /// Upload any file as an encrypted blob, as it is, and return its
+  /// reference. Nothing is re-encoded: a document is not a picture, and
+  /// what it says about itself is the recipient's business.
+  static Future<String?> prepareFileForRelay(String filePath,
+      {required String mimeType}) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw const MediaRejectedException('That file is no longer available.');
+    }
+    final bytes = await file.readAsBytes();
+    if (bytes.length > maxMediaBytes) {
+      throw MediaRejectedException(
+        'That file is ${bytes.length ~/ (1024 * 1024)} MB; the limit is '
+        '${maxMediaBytes ~/ (1024 * 1024)} MB.',
+      );
+    }
+    final ref = await BlobService().upload(bytes: bytes, mimeType: mimeType);
+    if (ref == null) return null;
+    DebugLogService().info('Media', 'Prepared ${bytes.length ~/ 1024}KB $mimeType file blob');
+    return ref.encode();
+  }
+
+  /// Fetch a received file and keep it under its own name. A local path is
+  /// returned as it is; a failed fetch returns null so the card can retry.
+  static Future<String?> decodeAndSaveFile(String ref, {required String name, Directory? into}) async {
+    final blob = BlobRef.tryDecode(ref);
+    if (blob == null) return ref;
+    final dir = into ?? await getApplicationDocumentsDirectory();
+    final folder = Directory('${dir.path}/files');
+    if (!folder.existsSync()) await folder.create(recursive: true);
+    final safeAddr = blob.address.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').substring(0, 12);
+    final safeName = name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final file = File('${folder.path}/${safeAddr}_$safeName');
+    if (file.existsSync()) return file.path;
+    final bytes = await BlobService().download(blob);
+    if (bytes == null) return null;
+    await file.writeAsBytes(bytes);
+    return file.path;
   }
 
   /// Upload a recorded voice note as an encrypted blob and return its

@@ -151,6 +151,10 @@ class NotificationService extends ChangeNotifier {
   /// Whether a contact is muted, snoozed or on a break. Set by the app.
   bool Function(String identityKey)? isQuiet;
 
+  /// Shows a direct message as an Android chat bubble instead of a plain
+  /// notification; returns false when it cannot, and the plain one is used.
+  Future<bool> Function(InboundEvent event, String body)? bubble;
+
   /// A reminder the device shows by itself at [at], e.g. before an event.
   Future<void> scheduleReminder({
     required int id,
@@ -188,11 +192,19 @@ class NotificationService extends ChangeNotifier {
     if (!_seen.add(event.id)) return false;
     if (_seen.length > 2000) _seen.remove(_seen.first);
 
+    final body = _preview ? event.body : _generic(event.kind);
+    if (event.kind == InboundKind.chat && bubble != null) {
+      try {
+        if (await bubble!(event, body)) return true;
+      } catch (e) {
+        DebugLogService().warn('Notify', 'No bubble; showing a notification instead: $e');
+      }
+    }
     try {
       await _sink.show(
         id: event.id.hashCode,
         title: event.title,
-        body: _preview ? event.body : _generic(event.kind),
+        body: body,
         thread: event.thread,
         route: event.route,
         highPriority: event.kind == InboundKind.call,

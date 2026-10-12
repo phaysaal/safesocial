@@ -839,6 +839,11 @@ class ContactService extends ChangeNotifier {
       featuredRefs: featured,
       namedMeLegacy: profile['legacy'] == true,
       highlights: highlights,
+      note: profile['note'] is Map ? ProfileAbout.text((profile['note'] as Map)['text'], 80) : '',
+      noteUntil: profile['note'] is Map
+          ? DateTime.tryParse('${(profile['note'] as Map)['until']}')
+          : null,
+      clearNote: profile['note'] is! Map,
       pinnedPostIds: (profile['pinned'] as List?)?.whereType<String>().take(10).toList() ?? const [],
     );
     await _persistContacts();

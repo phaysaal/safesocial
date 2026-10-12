@@ -2,4 +2,5 @@
 <paths>
     <!-- Calendar files handed to the share sheet; nothing else is exposed. -->
     <cache-path name="ics" path="ics/" />
+    <cache-path name="open" path="open/" />
 </paths>

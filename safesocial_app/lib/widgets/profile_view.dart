@@ -24,6 +24,9 @@ class ProfileData {
   final ProfileAbout about;
   final bool avatarIsTemporary;
 
+  /// A short line for the day, or empty.
+  final String statusNote;
+
   const ProfileData({
     required this.name,
     this.bio = '',
@@ -34,6 +37,7 @@ class ProfileData {
     this.highlights = const [],
     this.about = ProfileAbout.empty,
     this.avatarIsTemporary = false,
+    this.statusNote = '',
   });
 
   /// Our own profile, whole.
@@ -47,6 +51,7 @@ class ProfileData {
         highlights: p.highlights,
         about: p.about,
         avatarIsTemporary: p.avatarIsTemporary,
+        statusNote: p.activeNote,
       );
 
   /// Our own profile as a contact sharing [sharedSpheres] with us sees it.
@@ -63,6 +68,7 @@ class ProfileData {
       highlights: fields.contains(ProfileField.highlights) ? p.highlights : const [],
       about: p.about.restrictedTo(fields),
       avatarIsTemporary: p.avatarIsTemporary,
+      statusNote: fields.contains(ProfileField.note) ? p.activeNote : '',
     );
   }
 
@@ -75,6 +81,7 @@ class ProfileData {
         featuredRefs: c.featuredRefs,
         highlights: c.highlights,
         about: c.about,
+        statusNote: c.activeNote,
       );
 }
 
@@ -220,6 +227,15 @@ class ProfileView extends StatelessWidget {
                       ].join(' · '),
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                  ),
+                if (data.statusNote.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Chip(
+                      avatar: const Text('💬'),
+                      label: Text(data.statusNote),
+                      visualDensity: VisualDensity.compact,
                     ),
                   ),
                 if (data.bio.isNotEmpty) ...[

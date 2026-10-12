@@ -380,8 +380,86 @@ class LibraryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Chat looks, ignored chats, media and bubble preferences ───────────────
+
+  static const _chatLooksKey = 'spheres_chat_looks_v1';
+  static const _ignoredChatsKey = 'spheres_ignored_chats_v1';
+  static const _originalQualityKey = 'spheres_original_quality_v1';
+  static const _bubblesKey = 'spheres_chat_bubbles_v1';
+  final Map<String, Map<String, String>> _chatLooks = {};
+  final Set<String> _ignoredChats = {};
+  bool _originalQuality = false;
+  bool _chatBubbles = false;
+
+  /// The named look of a chat; see `ChatThemes`.
+  String chatTheme(String chatKey) => _chatLooks[chatKey]?['theme'] ?? 'default';
+
+  /// What we call them in this chat, or null for their name. Local.
+  String? chatNickname(String chatKey) {
+    final n = _chatLooks[chatKey]?['nickname'];
+    return n == null || n.isEmpty ? null : n;
+  }
+
+  /// The chat's own emoji: one tap sends it, and it leads the reactions.
+  String chatEmoji(String chatKey) => _chatLooks[chatKey]?['emoji'] ?? '👍';
+
+  /// Change any of a chat's look; an empty string clears that part.
+  Future<void> setChatLook(String chatKey, {String? theme, String? nickname, String? emoji}) async {
+    final look = Map<String, String>.from(_chatLooks[chatKey] ?? const {});
+    if (theme != null) theme.isEmpty || theme == 'default' ? look.remove('theme') : look['theme'] = theme;
+    if (nickname != null) nickname.trim().isEmpty ? look.remove('nickname') : look['nickname'] = nickname.trim();
+    if (emoji != null) emoji.isEmpty || emoji == '👍' ? look.remove('emoji') : look['emoji'] = emoji;
+    if (look.isEmpty) {
+      _chatLooks.remove(chatKey);
+    } else {
+      _chatLooks[chatKey] = look;
+    }
+    await SecureStore.instance.setString(_chatLooksKey, jsonEncode(_chatLooks));
+    notifyListeners();
+  }
+
+  /// An ignored chat stays out of the list and tells its sender nothing.
+  bool isChatIgnored(String chatKey) => _ignoredChats.contains(chatKey);
+  int get ignoredChatCount => _ignoredChats.length;
+
+  Future<void> toggleIgnoreChat(String chatKey) async {
+    if (!_ignoredChats.remove(chatKey)) _ignoredChats.add(chatKey);
+    await SecureStore.instance.setStringList(_ignoredChatsKey, _ignoredChats.toList());
+    notifyListeners();
+  }
+
+  /// Pictures in chats go at full size instead of 1600 px.
+  bool get originalQualityMedia => _originalQuality;
+  Future<void> setOriginalQualityMedia(bool on) async {
+    _originalQuality = on;
+    await SecureStore.instance.setString(_originalQualityKey, on ? '1' : '0');
+    notifyListeners();
+  }
+
+  /// Android chat bubbles for direct messages.
+  bool get chatBubbles => _chatBubbles;
+  Future<void> setChatBubbles(bool on) async {
+    _chatBubbles = on;
+    await SecureStore.instance.setString(_bubblesKey, on ? '1' : '0');
+    notifyListeners();
+  }
+
   Future<void> load() async {
     final store = SecureStore.instance;
+    _originalQuality = (await store.getString(_originalQualityKey)) == '1';
+    _chatBubbles = (await store.getString(_bubblesKey)) == '1';
+    _ignoredChats
+      ..clear()
+      ..addAll(await store.getStringList(_ignoredChatsKey) ?? const []);
+    _chatLooks.clear();
+    final looksRaw = await store.getString(_chatLooksKey);
+    if (looksRaw != null) {
+      try {
+        (jsonDecode(looksRaw) as Map).forEach((k, v) {
+          if (v is Map) _chatLooks[k.toString()] = v.map((a, b) => MapEntry('$a', '$b'));
+        });
+      } catch (_) {}
+    }
     _commentsNewestFirst = (await store.getString(_commentOrderKey)) == '1';
     _dataSaver = (await store.getString(_dataSaverKey)) == '1';
     _favouritesFeed = (await store.getString(_favouritesFeedKey)) == '1';

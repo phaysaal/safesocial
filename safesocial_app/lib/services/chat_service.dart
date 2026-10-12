@@ -59,6 +59,7 @@ class ChatService extends ChangeNotifier {
   /// Tell a peer we are typing, at most once every few seconds.
   Future<void> notifyTyping(String peerKey, {bool stopped = false}) async {
     if (!_sendTypingSignals) return;
+    if (isIgnored?.call(peerKey) ?? false) return;
     final sessions = _sessions;
     if (sessions == null) return;
     if (!_typing.shouldSend(peerKey, stopped: stopped)) return;
@@ -495,7 +496,10 @@ class ChatService extends ChangeNotifier {
   Timer? _expirySweep;
   void _startExpirySweep() {
     _expirySweep?.cancel();
-    _expirySweep = Timer.periodic(const Duration(seconds: 30), (_) => sweepExpired());
+    _expirySweep = Timer.periodic(const Duration(seconds: 30), (_) {
+      sweepExpired();
+      sendDueScheduled();
+    });
   }
 
   /// Send a small control payload to every device of a peer and our own.
@@ -637,6 +641,7 @@ class ChatService extends ChangeNotifier {
   /// there. Called when a chat opens and when a message arrives while open.
   Future<void> markRead(String contactKey) async {
     if (!_sendReadReceipts) return;
+    if (isIgnored?.call(contactKey) ?? false) return;
     final unread = (_conversations[contactKey] ?? const <Message>[])
         .where((m) => m.senderId != _myPublicKey && !m.isSystem && !_readSent.contains(m.id))
         .map((m) => m.id)
@@ -824,8 +829,17 @@ class ChatService extends ChangeNotifier {
     final encoded = <String>[];
     final provenance = <MediaProvenance?>[];
     for (var i = 0; i < message.mediaRefs.length; i++) {
-      final data = await MediaService.prepareForRelay(message.mediaRefs[i],
-          videoLimit: MediaService.chatVideoLimit);
+      final ref = message.mediaRefs[i];
+      // A file goes as it is; a picture is re-encoded, at full size only
+      // when the sender asked for it.
+      final data = message.kind == 'file'
+          ? (BlobRef.tryDecode(ref) != null
+              ? ref
+              : await MediaService.prepareFileForRelay(ref,
+                  mimeType: message.payload?['mime'] as String? ?? 'application/octet-stream'))
+          : await MediaService.prepareForRelay(ref,
+              videoLimit: MediaService.chatVideoLimit,
+              originalQuality: wantsOriginalQuality?.call() ?? false);
       if (data != null) {
         encoded.add(data);
         // Kept aligned with the refs: a dropped item takes its claim with it.
@@ -848,10 +862,123 @@ class ChatService extends ChangeNotifier {
 
     final saved = <String>[];
     for (final ref in message.mediaRefs) {
-      final path = await MediaService.decodeAndSaveImage(ref);
+      final path = message.kind == 'file'
+          ? await MediaService.decodeAndSaveFile(ref,
+              name: message.payload?['name'] as String? ?? 'file')
+          : await MediaService.decodeAndSaveImage(ref);
       saved.add(path ?? ref);
     }
     return message.copyWith(mediaRefs: saved, audioRef: audio);
+  }
+
+  /// Whether pictures go at full size. Set by the app from the setting.
+  bool Function()? wantsOriginalQuality;
+
+  /// Send any file. It travels as an encrypted blob under its own name and
+  /// type; the card on the other side opens it with whatever handles the type.
+  Future<Message> sendFile(String contactKey,
+          {required String path, required String name, required String mime, required int size}) =>
+      sendMessage(contactKey, name,
+          mediaRefs: [path], kind: 'file', payload: {'name': name, 'mime': mime, 'size': size});
+
+  // ── Ignored chats ─────────────────────────────────────────────────────────
+
+  /// An ignored chat's messages still arrive, but we tell its sender nothing:
+  /// no typing, no read receipts, and no notification. Set by the app.
+  bool Function(String peerKey)? isIgnored;
+
+  // ── Scheduled messages ────────────────────────────────────────────────────
+
+  static const _scheduledKey = 'spheres_scheduled_messages_v1';
+  final List<ScheduledMessage> _scheduled = [];
+
+  /// Messages waiting for their time, for one chat, soonest first.
+  List<ScheduledMessage> scheduledFor(String peerKey) =>
+      _scheduled.where((s) => s.peer == peerKey).toList()..sort((a, b) => a.at.compareTo(b.at));
+
+  List<ScheduledMessage> get allScheduled => List.unmodifiable(_scheduled);
+
+  /// Keep [content] to be sent to [peerKey] at [at]. Sent by this device,
+  /// when it is running; the other side is told nothing until then.
+  Future<ScheduledMessage> scheduleMessage(String peerKey, String content, DateTime at) async {
+    if (content.trim().isEmpty) throw ArgumentError('Nothing to send');
+    if (!at.isAfter(DateTime.now())) throw ArgumentError('That time has passed');
+    final s = ScheduledMessage(
+        id: const Uuid().v4(), peer: peerKey, content: content.trim(), at: at);
+    _scheduled.add(s);
+    await _persistScheduled();
+    notifyListeners();
+    return s;
+  }
+
+  Future<void> cancelScheduled(String id) async {
+    _scheduled.removeWhere((s) => s.id == id);
+    await _persistScheduled();
+    notifyListeners();
+  }
+
+  /// Send everything whose time has come. Runs on the sweep timer and at
+  /// start; returns how many went.
+  Future<int> sendDueScheduled({DateTime? now}) async {
+    final at = now ?? DateTime.now();
+    final due = _scheduled.where((s) => !s.at.isAfter(at)).toList();
+    var sent = 0;
+    for (final s in due) {
+      try {
+        await sendMessage(s.peer, s.content);
+        _scheduled.remove(s);
+        sent++;
+      } catch (e) {
+        DebugLogService().warn('Chat', 'A scheduled message could not go yet: $e');
+      }
+    }
+    if (sent > 0) {
+      await _persistScheduled();
+      notifyListeners();
+    }
+    return sent;
+  }
+
+  Future<void> _persistScheduled() => SecureStore.instance
+      .setString(_scheduledKey, jsonEncode([for (final s in _scheduled) s.toJson()]));
+
+  Future<void> _loadScheduled() async {
+    _scheduled.clear();
+    final raw = await SecureStore.instance.getString(_scheduledKey);
+    if (raw == null) return;
+    try {
+      for (final e in (jsonDecode(raw) as List).whereType<Map>()) {
+        _scheduled.add(ScheduledMessage.fromJson(e.cast<String, dynamic>()));
+      }
+    } catch (_) {}
+  }
+
+  // ── Vanish mode ───────────────────────────────────────────────────────────
+  //
+  // A preset over disappearing messages: on means every message in the chat
+  // disappears five minutes after it is sent, for both sides, and off puts
+  // back whatever the chat had before. The other side sees it as the usual
+  // "set messages to disappear" line; nothing here is hidden from them.
+
+  static const vanishAfter = Duration(minutes: 5);
+  static const _vanishKey = 'spheres_vanish_v1';
+  final Map<String, int> _vanishBefore = {};
+
+  bool isVanish(String peerKey) =>
+      _vanishBefore.containsKey(peerKey) && disappearAfter(peerKey) == vanishAfter;
+
+  Future<void> setVanish(String peerKey, bool on) async {
+    if (on) {
+      if (!_vanishBefore.containsKey(peerKey)) {
+        _vanishBefore[peerKey] = disappearAfter(peerKey)?.inSeconds ?? 0;
+      }
+      await setDisappearing(peerKey, vanishAfter);
+    } else {
+      final before = _vanishBefore.remove(peerKey) ?? 0;
+      await setDisappearing(peerKey, before == 0 ? null : Duration(seconds: before));
+    }
+    await SecureStore.instance.setString(_vanishKey, jsonEncode(_vanishBefore));
+    notifyListeners();
   }
 
   /// React to a message, or remove an existing reaction by sending the same
@@ -1355,6 +1482,7 @@ class ChatService extends ChangeNotifier {
   /// One line for a notification or a list row.
   static String describeMessage(Message msg) {
     if (msg.isDeleted) return 'Message deleted';
+    if (msg.kind == 'file') return 'File: ${msg.payload?['name'] ?? msg.content}';
     if (msg.isPoll) return 'Poll: ${msg.payload?['question'] ?? msg.content}';
     if (msg.isLocation) return 'Shared a location';
     if (msg.isContactCard) return 'Shared a contact';
@@ -1384,6 +1512,15 @@ class ChatService extends ChangeNotifier {
   Future<void> loadConversations() async {
     final store = SecureStore.instance;
     _sendReadReceipts = await store.getBool(_readReceiptsKey) ?? true;
+    await _loadScheduled();
+    try {
+      final vanish = await store.getString(_vanishKey);
+      if (vanish != null) {
+        (jsonDecode(vanish) as Map).forEach((k, v) {
+          if (v is int) _vanishBefore[k.toString()] = v;
+        });
+      }
+    } catch (_) {}
     try {
       final raw = await store.getString(_settingsKey);
       if (raw != null) {
@@ -1474,4 +1611,22 @@ class ChatService extends ChangeNotifier {
     _conversations.putIfAbsent(contactPublicKey, () => []);
     notifyListeners();
   }
+}
+
+/// A message kept on this device until its time, then sent as any other.
+class ScheduledMessage {
+  final String id;
+  final String peer;
+  final String content;
+  final DateTime at;
+  const ScheduledMessage({required this.id, required this.peer, required this.content, required this.at});
+
+  Map<String, dynamic> toJson() => {'id': id, 'peer': peer, 'content': content, 'at': at.toIso8601String()};
+
+  factory ScheduledMessage.fromJson(Map<String, dynamic> j) => ScheduledMessage(
+        id: j['id'] as String,
+        peer: j['peer'] as String,
+        content: j['content'] as String,
+        at: DateTime.parse(j['at'] as String),
+      );
 }

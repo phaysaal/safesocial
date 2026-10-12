@@ -76,6 +76,13 @@ class Contact with EquatableMixin {
   /// Their story highlights, pictures as local paths once fetched.
   final List<StoryHighlight> highlights;
 
+  /// Their short note, and when it stops showing.
+  final String note;
+  final DateTime? noteUntil;
+
+  String get activeNote =>
+      note.isNotEmpty && noteUntil != null && DateTime.now().isBefore(noteUntil!) ? note : '';
+
   const Contact({
     required this.publicKey,
     this.keyExchangePublicKey,
@@ -100,6 +107,8 @@ class Contact with EquatableMixin {
     this.namedMeLegacy = false,
     this.pinnedPostIds = const [],
     this.highlights = const [],
+    this.note = '',
+    this.noteUntil,
     this.restricted = false,
     this.favourite = false,
     this.onBreak = false,
@@ -154,6 +163,8 @@ class Contact with EquatableMixin {
           (json['pinnedPostIds'] as List<dynamic>?)?.whereType<String>().toList() ??
               const [],
       highlights: StoryHighlight.listFromJson(json['highlights']),
+      note: json['note'] is String ? json['note'] as String : '',
+      noteUntil: json['noteUntil'] is String ? DateTime.tryParse(json['noteUntil'] as String) : null,
     );
   }
 
@@ -186,6 +197,8 @@ class Contact with EquatableMixin {
       if (snoozedUntil != null) 'snoozedUntil': snoozedUntil!.toIso8601String(),
       if (pinnedPostIds.isNotEmpty) 'pinnedPostIds': pinnedPostIds,
       if (highlights.isNotEmpty) 'highlights': [for (final h in highlights) h.toJson()],
+      if (note.isNotEmpty) 'note': note,
+      if (noteUntil != null) 'noteUntil': noteUntil!.toIso8601String(),
     };
   }
 
@@ -216,6 +229,9 @@ class Contact with EquatableMixin {
     bool? namedMeLegacy,
     List<String>? pinnedPostIds,
     List<StoryHighlight>? highlights,
+    String? note,
+    DateTime? noteUntil,
+    bool clearNote = false,
     bool? restricted,
     bool? favourite,
     bool? onBreak,
@@ -247,6 +263,8 @@ class Contact with EquatableMixin {
       namedMeLegacy: namedMeLegacy ?? this.namedMeLegacy,
       pinnedPostIds: pinnedPostIds ?? this.pinnedPostIds,
       highlights: highlights ?? this.highlights,
+      note: clearNote ? '' : (note ?? this.note),
+      noteUntil: clearNote ? null : (noteUntil ?? this.noteUntil),
       restricted: restricted ?? this.restricted,
       favourite: favourite ?? this.favourite,
       onBreak: onBreak ?? this.onBreak,
@@ -279,6 +297,8 @@ class Contact with EquatableMixin {
         namedMeLegacy,
         pinnedPostIds,
         highlights,
+        note,
+        noteUntil,
         restricted,
         favourite,
         onBreak,

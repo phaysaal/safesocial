@@ -298,6 +298,34 @@ class SettingsScreen extends StatelessWidget {
           }),
           Builder(builder: (context) {
             final library = context.watch<LibraryService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.high_quality_outlined, color: cs.primary),
+              title: const Text('Send pictures at full size'),
+              subtitle: const Text(
+                  'Photos in chats keep their full resolution instead of 1600 px. Still '
+                  're-encoded, so nothing the file says about itself travels. Videos are '
+                  'always compressed.'),
+              isThreeLine: true,
+              value: library.originalQualityMedia,
+              onChanged: library.setOriginalQualityMedia,
+            );
+          }),
+          Builder(builder: (context) {
+            final library = context.watch<LibraryService>();
+            return SwitchListTile(
+              secondary: Icon(Icons.bubble_chart_outlined, color: cs.primary),
+              title: const Text('Chat bubbles'),
+              subtitle: const Text(
+                  'Android 11 and later. A new direct message floats as a bubble that opens '
+                  'the chat in a small window. Android also has to allow bubbles for Spheres '
+                  'in its notification settings; otherwise you get the usual notification.'),
+              isThreeLine: true,
+              value: library.chatBubbles,
+              onChanged: library.setChatBubbles,
+            );
+          }),
+          Builder(builder: (context) {
+            final library = context.watch<LibraryService>();
             return ListTile(
               leading: Icon(Icons.visibility_off_outlined, color: cs.primary),
               title: const Text('Hidden words'),

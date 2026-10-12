@@ -5,6 +5,7 @@ import 'package:provider/single_child_widget.dart';
 import 'app_wiring.dart';
 import 'crypto/session_manager.dart';
 import 'services/album_service.dart';
+import 'services/bubble_bridge.dart';
 import 'services/app_lock_service.dart';
 import 'services/call_config.dart';
 import 'services/call_service.dart';
@@ -99,7 +100,18 @@ class AppServices {
     await callConfig.load();
     await libraryService.load();
     await notificationService.load();
-    notificationService.isQuiet = contactService.isQuiet;
+    // Quiet: muted, snoozed, on a break, or a chat we chose to ignore.
+    notificationService.isQuiet =
+        (k) => contactService.isQuiet(k) || libraryService.isChatIgnored(k);
+    notificationService.bubble = (event, body) async {
+      if (!libraryService.chatBubbles || !event.route.startsWith('/chat/')) return false;
+      return BubbleBridge.show(
+        chatKey: event.route.substring('/chat/'.length),
+        name: event.title,
+        text: body,
+        id: event.id.hashCode,
+      );
+    };
     await wakeService.load();
 
     syncService.attachServices(identityService);

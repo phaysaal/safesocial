@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../crypto/blob.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -392,4 +394,65 @@ Future<Duration?> showDisappearingDialog(BuildContext context, Duration? current
       ],
     ),
   );
+}
+
+/// A file of any type: name, size and an Open button. The bytes are fetched
+/// like any media; until they are, the card says so.
+class FileCard extends StatelessWidget {
+  final Message message;
+  final VoidCallback? onOpen;
+  const FileCard({super.key, required this.message, this.onOpen});
+
+  static String describeSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  static IconData iconFor(String mime) {
+    if (mime.startsWith('image/')) return Icons.image_outlined;
+    if (mime.startsWith('video/')) return Icons.movie_outlined;
+    if (mime.startsWith('audio/')) return Icons.audiotrack_outlined;
+    if (mime == 'application/pdf') return Icons.picture_as_pdf_outlined;
+    if (mime.contains('zip') || mime.contains('compressed')) return Icons.folder_zip_outlined;
+    if (mime.startsWith('text/')) return Icons.description_outlined;
+    return Icons.insert_drive_file_outlined;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = message.payload ?? const {};
+    final name = p['name'] as String? ?? message.content;
+    final mime = p['mime'] as String? ?? 'application/octet-stream';
+    final size = p['size'] is int ? p['size'] as int : 0;
+    final ref = message.mediaRefs.isEmpty ? '' : message.mediaRefs.first;
+    final fetched = ref.isNotEmpty && BlobRef.tryDecode(ref) == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(iconFor(mime), size: 22, color: Colors.white70),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                    maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text(size > 0 ? '${describeSize(size)} · $mime' : mime,
+                    style: const TextStyle(color: Colors.white60, fontSize: 11)),
+              ]),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ActionChip(
+          avatar: Icon(fetched ? Icons.open_in_new : Icons.downloading, size: 16),
+          label: Text(fetched ? 'Open' : 'Not fetched yet', style: const TextStyle(fontSize: 12)),
+          onPressed: fetched ? onOpen : null,
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+  }
 }

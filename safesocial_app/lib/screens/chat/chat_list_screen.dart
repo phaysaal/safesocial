@@ -36,11 +36,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
     // Pinned conversations first; the service keeps the user's pin order.
     final conversationIds =
         library.sortChats(chatService.getConversationIds()
-            .where((k) => _showArchived || !library.isChatArchived(k))
+            .where((k) => _showArchived || (!library.isChatArchived(k) && !library.isChatIgnored(k)))
             .where((k) => _filter != 'spheres')
             .where((k) => _filter != 'unread' || chatService.unreadCount(k) > 0)
             .toList());
-    final archivedCount = library.archivedChatCount;
+    final archivedCount = library.archivedChatCount + library.ignoredChatCount;
 
     // Sphere threads sit alongside people. A group conversation is not a
     // separate place in this app — it is addressed to a sphere instead of a
@@ -151,7 +151,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 final messages = conversations[contactKey]!;
                 final contact = contactService.getContact(contactKey);
                 
-                final displayName = contact?.displayName ?? contactKey;
+                final displayName = library.chatNickname(contactKey) ?? contact?.displayName ?? contactKey;
                 final lastMessage = messages.isNotEmpty ? messages.last : null;
                 final pinned = library.isPinned(contactKey);
 
@@ -295,6 +295,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
               onTap: () {
                 Navigator.pop(sheetContext);
                 library.togglePin(contactKey);
+              },
+            ),
+            ListTile(
+              leading: Icon(library.isChatIgnored(contactKey)
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined),
+              title: Text(library.isChatIgnored(contactKey) ? 'Stop ignoring' : 'Ignore'),
+              subtitle: const Text('No notifications; they are not told you read or type'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                library.toggleIgnoreChat(contactKey);
               },
             ),
             ListTile(

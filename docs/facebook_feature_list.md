@@ -115,16 +115,19 @@ data saver ✓.
 ## 7. Messaging (Messenger inside the app)
 
 One-to-one ✓ · groups ✓ (sphere chats) · end-to-end encryption ✓ (always, no opt-in) ·
-disappearing messages ✓ · vanish mode ○ · reactions ✓ · reply quoting ✓ · forward ✓ ·
+disappearing messages ✓ · vanish mode ✓ (a preset: five minutes, and off puts back what was there) · reactions ✓ · reply quoting ✓ · forward ✓ ·
 unsend ✓ · edit within a window ✓ · voice messages ✓ · video messages ✓ · photos and
-video, HD toggle ~ (always re-encoded; original quality ○) · files ○ · GIFs ✗ · stickers
-✓ (local packs) · avatar stickers ○ · emoji ✓ · chat themes ○ · nicknames ○ · chat emoji
-○ · polls in groups ✓ · mentions ✓ · pinned messages ✓ · message requests ✓ · archive ✓ ·
-mute ✓ · ignore ○ · block ✓ · read receipts and read-by ✓ · typing ✓ · active status ✗
+video, HD toggle ✓ (photos at full size, still re-encoded; videos always compressed) ·
+files ✓ (any type, as it is, under its name) · GIFs ✗ · stickers
+✓ (local packs) · avatar stickers ○ (P10) · emoji ✓ · chat themes ✓ (local) · nicknames ✓
+(local) · chat emoji ✓ · polls in groups ✓ · mentions ✓ · pinned messages ✓ · message
+requests ✓ · archive ✓ · mute ✓ · ignore ✓ (no notification, no typing, no receipts) ·
+block ✓ · read receipts and read-by ✓ · typing ✓ · active status ✗
 (presence is metadata; by decision) · stories inside messaging ~ · voice and video
 calls ✓ · group calls ✓ (mesh, small) · screen sharing ✓ · call links ✓ (in sphere chat) ·
-effects and filters ○ · live location ✓ · payments ✗ · games ✗ · chat bubbles ○ ·
-scheduled messages ○ · app lock ✓ · chat lock ✓ · secret conversations, superseded ·
+effects and filters ○ · live location ✓ · payments ✗ · games ✗ · chat bubbles ✓ (Android
+11+, when Android allows them for the app; not yet seen on hardware) · scheduled messages
+✓ (kept on this device, sent while it runs) · profile notes ✓ (a line for a day) · app lock ✓ · chat lock ✓ · secret conversations, superseded ·
 search in chats ✓ · media gallery per chat ✓ · Notes on profile ○ · broadcast channels ✗
 · Meta AI in chat ✗ · communities ○ (by decision) · export a chat ✓ · contact cards ✓ ·
 video notes ✓ · call history and missed calls ✓.
@@ -235,7 +238,7 @@ same commit.
 | P2 ✓ 11 Oct 2026 | **Profile** | Bio, pronouns, nickname, name pronunciation, cover photo, featured photos, the about fields (work, education, city, hometown, relationship with partner mention, family, languages, websites, hobbies, quotes, life events), temporary profile picture, "updated their picture" post into chosen spheres, per-field audience (all contacts or named spheres), view-as, legacy contact tied to social recovery | `profile` envelope grows typed fields and per-field audience; cover and featured photos ride as blobs | 6 |
 | P3 ✓ 11 Oct 2026 | **Composer and media** | Coloured text backgrounds, feeling and activity, crop, rotate, filters, text and stickers on photos, video trim and thumbnail choice, life events, "ask for recommendations" as a poll variant, reshare a post into another sphere with attribution (author's signature travels; the author can forbid resharing), pin to profile, trash with 30-day restore, bulk archive and trash | `post_reshare` with the original envelope embedded; `post.allowReshare` | 7 |
 | P4 ✓ 11 Oct 2026 | **Stories** | Loop clip (forward only, called a loop and not a boomerang), collage layouts, selfie mode, quiz and slider stickers, feeling sticker, link sticker (no preview), hide from named contacts, archive, highlights on the profile | Story payload gains sticker kinds and `loop`; hiding is an exclusion at send time; highlights are a `profile` field under their own audience | 4 |
-| P5 | **Messaging comforts** | Files of any type, chat themes and nicknames (local), chat emoji, ignore, scheduled messages, original-quality media toggle, chat bubbles on Android, profile notes, a vanish-mode preset over disappearing messages, avatar stickers once avatars exist | Files are blobs with a name and type; the rest is local or reuses existing kinds | 5 |
+| P5 ✓ 12 Oct 2026 | **Messaging comforts** | Files of any type, chat themes and nicknames (local), chat emoji, ignore, scheduled messages, original-quality media toggle, chat bubbles on Android, profile notes, a vanish-mode preset over disappearing messages, avatar stickers once avatars exist | Files are blobs with a name and type; the rest is local or reuses existing kinds | 5 |
 | P6 | **Sphere governance** | Membership questions answered in the join request, rules shown on join, units and guides, files, badges and expert marks, keyword alerts for admins (local), suspend for a period, welcome posts, post topics, admin automation for the rules already built (auto-mute on N reports, auto-expire invites) | `sphere_join` carries answers; rules, units and topics are signed sphere items | 6 |
 | P7 ✓ 11 Oct 2026 | **Events** | Co-hosts, recurring events, ticket links, "interested" alongside going, event photos, reminders, ICS export, a map link that opens the user's own map app | `event_rsvp` gains a state; the rest rides existing post kinds | 3 |
 | P8 ✓ 11 Oct 2026 | **Friends and feed** | Restricted contacts (see only named spheres), snooze for 30 days, take a break, friendversary from local history, favourites feed, hide a post, birthday cards, autoplay and data-saver settings | Local, except restricted contacts, which is an audience list on the sender | 3 |

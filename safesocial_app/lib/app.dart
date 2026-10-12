@@ -32,6 +32,7 @@ import 'screens/profile/profile_screen.dart';
 import 'screens/contacts/contact_profile_screen.dart';
 import 'screens/feed/manage_posts_screen.dart';
 import 'screens/feed/story_archive_screen.dart';
+import 'services/bubble_bridge.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/media/media_viewer_screen.dart';
 import 'screens/spheres/sphere_list_screen.dart';
@@ -157,8 +158,13 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
 
   void _initRouter() {
     // Fix Issue #8: Create router once
+    BubbleBridge.onOpenRoute = (route) => _router.go(route);
+    BubbleBridge.listen();
     _router = GoRouter(
-      initialLocation: '/',
+      // A chat bubble opens the app in its own small window on the chat it
+      // belongs to; after a cold start the platform passes the route in, and
+      // when the app is already running the bubble asks for it (below).
+      initialLocation: _bubbleRoute() ?? '/',
       redirect: (context, state) {
         final identity = context.read<IdentityService>();
         final onboarded = identity.isOnboarded;
@@ -519,4 +525,10 @@ class _LockGate extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The route an Android chat bubble asked for, or null for a normal start.
+String? _bubbleRoute() {
+  final name = WidgetsBinding.instance.platformDispatcher.defaultRouteName;
+  return name.startsWith('/chat/') ? name : null;
 }

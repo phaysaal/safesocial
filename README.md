@@ -70,7 +70,7 @@ platform-side data mining.
 | Local search over messages, posts, comments, spheres, contacts | Working |
 | Edit own posts, pin posts in a sphere (admins), archive chats and spheres, mute a member within a sphere, per-sphere media gallery | Working |
 | Key verification: safety number and QR comparison per contact, with a banner when keys change | Working |
-| Messaging extras: disappearing messages, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, chat lock, export, filters | Working; untested on hardware |
+| Messaging extras: disappearing messages and a vanish-mode preset, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, files of any type, scheduled messages, chat themes, nicknames and a chat emoji, ignore, full-size photos, chat bubbles on Android, a profile note for a day, chat lock, export, filters | Working; untested on hardware |
 | Feed extras: events with RSVP, poll posts, co-authored posts, alt text, drafts and scheduled posts, story captions and stickers, hidden-words filter, report to the sphere | Working; untested on hardware |
 | Comments: reply threads, seven reactions on posts and comments, edit with history, delete, hide and pin by the post's author or an admin, comments off per post, follow or mute a post, newest-first | Working; comment, reaction, reply, hide and edit checked between a phone and a tablet |
 | Spheres: invite links with admin approval, private member notes, birthdays and avatars shared with contacts | Working; untested on hardware |
@@ -134,7 +134,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 734 tests in 63 files
+flutter test                       # 742 tests in 64 files
 flutter run
 ```
 

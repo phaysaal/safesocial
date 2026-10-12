@@ -57,6 +57,8 @@ class ProfileSharing {
             if ((highlightRefs[h.id] ?? const []).isNotEmpty)
               {'id': h.id, 'title': h.title, 'refs': highlightRefs[h.id]},
         ],
+      if (profile.activeNote.isNotEmpty && may(ProfileField.note))
+        'note': {'text': profile.activeNote, 'until': profile.noteUntil!.toIso8601String()},
       // The legacy contact learns it from us, and only they do.
       if (profile.legacyContact == peer) 'legacy': true,
     };

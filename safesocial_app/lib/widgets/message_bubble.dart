@@ -57,6 +57,16 @@ class MessageBubble extends StatelessWidget {
   /// Blur pictures and videos until tapped (a per-chat or per-sphere choice).
   final bool blurMedia;
 
+  /// Chat look: our and their bubble colours, or null for the defaults.
+  final Color? mineColor;
+  final Color? theirsColor;
+
+  /// The chat's own emoji, first among the quick reactions.
+  final String? favouriteEmoji;
+
+  /// Opens a received file with whatever handles its type.
+  final void Function(Message)? onOpenFile;
+
   static const List<String> quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
   const MessageBubble({
@@ -84,6 +94,10 @@ class MessageBubble extends StatelessWidget {
     this.readByPeer = false,
     this.readByCount,
     this.blurMedia = false,
+    this.mineColor,
+    this.theirsColor,
+    this.favouriteEmoji,
+    this.onOpenFile,
   });
 
   static const _teal = Color(0xFF009688);
@@ -136,7 +150,7 @@ class MessageBubble extends StatelessWidget {
     final timeFormat = DateFormat.Hm();
     final isDark = theme.brightness == Brightness.dark;
 
-    final bgColor = isMine ? cs.primary : (isDark ? _tealDark : _teal);
+    final bgColor = isMine ? (mineColor ?? cs.primary) : (theirsColor ?? (isDark ? _tealDark : _teal));
     const textColor = Colors.white;
     final timeColor = Colors.white.withValues(alpha: 0.7);
 
@@ -282,6 +296,14 @@ class MessageBubble extends StatelessWidget {
         ],
       ];
     }
+    if (message.kind == 'file') {
+      return [
+        FileCard(
+          message: message,
+          onOpen: onOpenFile == null ? null : () => onOpenFile!(message),
+        ),
+      ];
+    }
     if (message.isContactCard) {
       return [
         ContactCard(
@@ -419,7 +441,10 @@ class MessageBubble extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: quickReactions
+                    children: [
+                      if (favouriteEmoji != null) favouriteEmoji!,
+                      ...quickReactions.where((e) => e != favouriteEmoji).take(favouriteEmoji == null ? 6 : 5),
+                    ]
                         .map((emoji) => InkWell(
                               borderRadius: BorderRadius.circular(24),
                               onTap: () {
