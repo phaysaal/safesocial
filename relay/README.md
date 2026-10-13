@@ -95,12 +95,18 @@ WebSocket API cannot set request headers portably.
 
 ### Wake (push)
 
-A mailbox can hold one wake target: a UnifiedPush endpoint URL, or `apns:<device token>`.
-When mail arrives and no socket or hub was listening, the relay knocks on it — an empty
-`POST` for UnifiedPush, a `content-available` background push for APNs — at most once per
-30 seconds. The knock carries nothing. Targets expire after seven days unless renewed,
-which the client does on every connect. APNs targets are refused with 501 unless the
-operator has configured the `APNS_*` secrets.
+A mailbox can hold one wake target: a UnifiedPush endpoint URL, optionally with the
+device's Web Push keys (`keys: {p256dh, auth}`), or `apns:<device token>`. When mail
+arrives and no socket or hub was listening, the relay knocks on it — a Web Push `POST`
+for UnifiedPush, a `content-available` background push for APNs — at most once per 30
+seconds. The knock carries nothing the device did not already know: it is empty, or, when
+the device sent keys, the fixed word "wake" encrypted to them (RFC 8291), because Google's
+push service drops a push with no bytes. With `VAPID_PRIVATE_KEY` and `VAPID_PUBLIC_KEY`
+set every knock is signed (RFC 8292) and `GET /` advertises the public key for clients to
+register with; without them a `fcm.googleapis.com` endpoint is refused with 501, since
+Google would refuse every knock. Targets expire after seven days unless renewed, which the
+client does on every connect. APNs targets are refused with 501 unless the operator has
+configured the `APNS_*` secrets.
 
 ### TURN
 
@@ -148,7 +154,8 @@ npx wrangler deploy
 
 `wrangler.toml` configures the `relay.spheres.dev` custom domain, the `RELAY_ROOM` Durable
 Object binding and `DO_JURISDICTION = "eu"`; you still need the DNS record in Cloudflare.
-Secrets (`TURN_*`, `APNS_*`) are set with `npx wrangler secret put` and are optional.
+Secrets (`TURN_*`, `APNS_*`, `VAPID_*`) are set with `npx wrangler secret put` and are optional;
+`node scripts/vapid_keygen.mjs` prints a VAPID pair.
 
 **`compatibility_date` matters.** Ed25519 verification is load-bearing here — if
 `crypto.subtle` cannot import an Ed25519 key, every authenticated request returns 401 and

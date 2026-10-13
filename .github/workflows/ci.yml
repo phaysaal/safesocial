@@ -45,11 +45,16 @@ jobs:
       - name: Test
         run: flutter test
 
-      # A debug build, deliberately. Release builds require the signing
+      # Debug builds, deliberately. Release builds require the signing
       # keystore (android/key.properties) and now fail without it rather than
-      # silently falling back to the public Android debug key.
-      - name: Build debug APK
-        run: flutter build apk --debug
+      # silently falling back to the public Android debug key. Both flavours:
+      # `foss` is what F-Droid and the GitHub release carry, `play` embeds the
+      # UnifiedPush FCM distributor for Google Play.
+      - name: Build debug APK (foss)
+        run: flutter build apk --debug --flavor foss
+
+      - name: Build debug APK (play)
+        run: flutter build apk --debug --flavor play
 
   reproducible:
     name: Reproducible build — same inputs, same bytes
@@ -86,16 +91,16 @@ jobs:
       # docs/reproducible_builds.md lists the usual culprits.
       - name: First build
         run: |
-          flutter build apk --debug
-          cp build/app/outputs/flutter-apk/app-debug.apk /tmp/first.apk
+          flutter build apk --debug --flavor foss
+          cp build/app/outputs/flutter-apk/app-foss-debug.apk /tmp/first.apk
 
       - name: Clean
         run: flutter clean && flutter pub get
 
       - name: Second build
         run: |
-          flutter build apk --debug
-          cp build/app/outputs/flutter-apk/app-debug.apk /tmp/second.apk
+          flutter build apk --debug --flavor foss
+          cp build/app/outputs/flutter-apk/app-foss-debug.apk /tmp/second.apk
 
       - name: Compare
         run: |

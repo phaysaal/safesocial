@@ -3,6 +3,7 @@ import 'dart:async';
 import 'app_services.dart';
 import 'services/debug_log_service.dart';
 import 'services/relay_service.dart';
+import 'services/send_alarms.dart';
 
 /// What happens when the device is woken for mail and there is no UI.
 ///
@@ -44,11 +45,36 @@ class BackgroundSync {
         log.info('Wake', 'Sync window closed; socket released until the next wake');
       } else {
         log.info('Wake', 'Sync window closed');
+        // A UI that is off screen is in the same position as the headless
+        // process once its window closes: let the socket go so the next
+        // message knocks rather than lands on a socket the phone cannot hear.
+        services.backgroundRest.onWindowClosed();
       }
     } catch (e) {
       log.error('Wake', 'Background sync failed: $e');
     } finally {
       _running = false;
+    }
+  }
+
+  /// An alarm fired for a scheduled send and there is no UI: bring the hub
+  /// up, send what is due, give the relay a moment to take it, re-set the
+  /// alarm for whatever still waits, and tell the platform we are done.
+  static Future<void> runScheduled(AppServices services) async {
+    final log = DebugLogService();
+    try {
+      log.info('Alarms', 'Woken for a scheduled send');
+      await RelayService.verifyAll();
+      final sent = await services.chatService.sendDueScheduled();
+      await services.feedService.publishDueDrafts();
+      log.info('Alarms', 'Sent $sent scheduled message(s) and any due posts');
+      await Future<void>.delayed(hold);
+      await SendAlarms.resync(services.chatService, services.feedService);
+      if (headless) RelayHub.instance.rest();
+    } catch (e) {
+      log.error('Alarms', 'Scheduled send failed: $e');
+    } finally {
+      await SendAlarms.done();
     }
   }
 }

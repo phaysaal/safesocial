@@ -915,7 +915,9 @@ class SettingsScreen extends StatelessWidget {
                     'that was decrypted here. To be woken while the app is '
                     'closed, the relay knocks on a push endpoint — the knock '
                     'carries nothing, and whoever runs that endpoint learns '
-                    'only that this phone was woken, and when.',
+                    'only that this phone was woken, and when. The Google Play '
+                    'build can use Google Play services for this; the other '
+                    'build never talks to Google.',
                     style: TextStyle(fontSize: 12),
                   ),
                   const SizedBox(height: 8),
@@ -984,11 +986,11 @@ class SettingsScreen extends StatelessWidget {
                         dense: true,
                         value: d,
                         groupValue: provider.distributor,
-                        title: Text(d, style: const TextStyle(fontSize: 12)),
+                        title: Text(UnifiedPushWakeProvider.describe(d),
+                            style: const TextStyle(fontSize: 12)),
                         onChanged: (v) async {
                           if (v == null) return;
-                          await provider.useDistributor(v);
-                          await w.start();
+                          await w.switchDistributor(v);
                           setDialogState(() {});
                         },
                       ),
@@ -996,7 +998,7 @@ class SettingsScreen extends StatelessWidget {
                   if (w.lastError != null) ...[
                     const SizedBox(height: 8),
                     Text(
-                      'The relay refused the wake endpoint: ${w.lastError}',
+                      'Background wake is not working: ${w.lastError}',
                       style: TextStyle(
                           fontSize: 11, color: Theme.of(ctx).colorScheme.error),
                     ),

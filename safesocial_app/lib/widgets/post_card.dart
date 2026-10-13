@@ -339,6 +339,23 @@ class _PostCardState extends State<PostCard> {
                 ]),
               );
             }),
+          if (context.watch<FeedService>().awaitsMyRelease(post))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(children: [
+                Icon(Icons.lock_open_outlined, size: 18, color: cs.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('${post.authorName} asked before showing this picture of you to the sphere.',
+                      style: theme.textTheme.bodySmall),
+                ),
+                FilledButton.tonal(
+                  key: const Key('release-media'),
+                  onPressed: () => context.read<FeedService>().releaseMedia(post.id),
+                  child: const Text('Show it'),
+                ),
+              ]),
+            ),
           if (post.isLifeEvent) LifeEventCard(post: post),
           if (post.isRecommend)
             RecommendCard(
@@ -598,6 +615,33 @@ class _PostCardState extends State<PostCard> {
     final blurred = context.watch<LibraryService>().blursAnyOf(post.sphereIds);
     final pano = (post.payload?['pano'] as List?)?.contains(index) ?? false;
     final protection = post.protection;
+    final myKey = context.read<IdentityService>().currentIdentity?.publicKey;
+    final locked = post.lock?[index];
+    // A picture waiting for the people in it: everyone but them and the
+    // author sees the frame and the names still to say yes. There is no key
+    // on this device to show anything else.
+    if (locked != null && !locked.complete && post.authorId != myKey &&
+        !(myKey != null && locked.keys.containsKey(myKey))) {
+      final names = locked.waiting.map((k) => authorNameFor(context, authorId: k, carried: '')).join(', ');
+      return Stack(fit: StackFit.passthrough, children: [
+        MediaThumb(ref: ref, width: width, height: height),
+        Positioned.fill(
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.35),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.all(12),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.hourglass_top, color: Colors.white, size: 26),
+              const SizedBox(height: 4),
+              Text('Waiting for $names',
+                  key: const Key('waiting-for'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ),
+      ]);
+    }
     final image = Semantics(
       label: alt.isEmpty ? null : alt,
       image: true,

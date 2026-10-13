@@ -53,22 +53,28 @@ echo "  pubspec.yaml  -> ${VERSION}+${NEXT_BUILD}"
 echo "  app_info.dart -> ${VERSION}"
 
 # ── 2. Build Flutter APKs ────────────────────────────────────────────────────
+# The GitHub release carries the `foss` flavour: no Google code, wakes through
+# a UnifiedPush distributor such as ntfy. The `play` flavour (built-in Google
+# Play services wake) is built as an app bundle for the Play Console and is
+# not attached here, because Play re-signs it and the bytes would never match.
 echo "Building Flutter APKs..."
 pushd safesocial_app >/dev/null
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
-flutter build apk --release --split-per-abi
+flutter build apk --release --split-per-abi --flavor foss
+flutter build appbundle --release --flavor play
 popd >/dev/null
 
 APK_DIR="safesocial_app/build/app/outputs/flutter-apk"
+AAB="safesocial_app/build/app/outputs/bundle/playRelease/app-play-release.aab"
 
 # ── Publish hashes ───────────────────────────────────────────────────────────
 # Without these a user cannot check that a download matches what was built, and
 # reproducing the build proves nothing because there is nothing to compare to.
 echo "Recording build hashes..."
 ( cd "$APK_DIR" && sha256sum \
-    app-arm64-v8a-release.apk \
-    app-armeabi-v7a-release.apk \
-    app-x86_64-release.apk ) > "$APK_DIR/SHA256SUMS.txt"
+    app-foss-arm64-v8a-release.apk \
+    app-foss-armeabi-v7a-release.apk \
+    app-foss-x86_64-release.apk ) > "$APK_DIR/SHA256SUMS.txt"
 cat "$APK_DIR/SHA256SUMS.txt"
 
 # ── 3. Update the landing page ───────────────────────────────────────────────
@@ -102,9 +108,9 @@ git commit -m "Release v$VERSION"
 # ── 5. Publish the GitHub release ────────────────────────────────────────────
 echo "Creating GitHub release v$VERSION..."
 gh release create "$VERSION" \
-  "$APK_DIR/app-arm64-v8a-release.apk" \
-  "$APK_DIR/app-armeabi-v7a-release.apk" \
-  "$APK_DIR/app-x86_64-release.apk" \
+  "$APK_DIR/app-foss-arm64-v8a-release.apk" \
+  "$APK_DIR/app-foss-armeabi-v7a-release.apk" \
+  "$APK_DIR/app-foss-x86_64-release.apk" \
   "$APK_DIR/SHA256SUMS.txt" \
   --repo phaysaal/safesocial \
   --title "v$VERSION" \
@@ -143,6 +149,7 @@ git push origin main
 
 echo ""
 echo "Release v$VERSION complete!"
+echo "Play bundle: $AAB (upload to the Play Console by hand)"
 echo "GitHub:     https://github.com/phaysaal/safesocial/releases/tag/$VERSION"
 echo "Cloudflare: https://spheres-landing.pages.dev"
 echo "Live site:  https://spheres.dev"

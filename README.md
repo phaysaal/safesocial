@@ -27,9 +27,16 @@ not an email address or phone number.
 >   only connects over a direct path, and Settings says which applies. The project's
 >   coturn runs on a Scaleway instance in Amsterdam and has carried one forced call
 >   between a phone and a tablet. The old public TURN default is gone.
-> - **Push is content-free and self-hosted.** Android wakes through UnifiedPush (bring a
->   distributor such as ntfy; no Google SDK in the build), iOS through APNs. Proven on a
->   phone with the app process gone: a knock through the project's own ntfy server in
+> - **Push is content-free, and Google is a choice, not a dependency.** Android wakes
+>   through UnifiedPush; iOS through APNs. The `foss` build carries no Google code and
+>   needs a distributor such as ntfy, whose open connection costs a persistent
+>   notification. The `play` build embeds the UnifiedPush FCM distributor, which
+>   registers with Google Play services the way a browser does (the relay's VAPID key as
+>   the sender; no Firebase project, no Google SDK), so it wakes with nothing else
+>   installed and Google learns only that this endpoint was poked, and when. The relay
+>   signs every knock (RFC 8292) and, where the device gave keys, sends the fixed word
+>   "wake" encrypted to them (RFC 8291), because Google drops a push with no bytes. Proven
+>   on a phone with the app process gone: a knock through the project's own ntfy server in
 >   Amsterdam brought it back and a message produced a notification within five seconds.
 >   The APNs key is still to come; without it the iOS app says so.
 > - **Multi-device has run on hardware once.** Each device has its own key, certified by
@@ -67,11 +74,12 @@ platform-side data mining.
 | Media: per-blob keys, 48 KB encrypted chunks, inline thumbnails, EXIF/GPS stripped | Working; video transcoded on-device to 720p (60 s feed, 3 min chat, 64 MB), poster frames, in-app playback, save to gallery |
 | Media origin score: a 0–10 trust badge on every picture, from the file's own data on the sender's device (camera EXIF, editing tags, Content Credentials and generator marks, name, size); in-app camera capture scores 10; blur-until-tapped per chat or sphere | Working; a reading of the file's claims with a disclaimer, not a detector; untested on hardware |
 | Protected photos and videos: shown only while held with two fingers, ten seconds at a time, blurred otherwise; decrypted in memory and never cached; screenshots blocked on Android; no save, share, forward or reshare; an optional watermark with the viewer's name; a CRT-style scan over the blurred picture against a second camera | Working on Android; iOS cannot block screenshots and the viewer says so; the sender is told the other phone enforces it |
+| Pictures that wait for the people in them: a tagged photo's key is sealed to the tagged people only, one share each; everyone else sees a blurred frame and "Waiting for Al" until each has said yes, and holds nothing that opens it before then | Working; ran between three phones on 12 October 2026 (the tablet waited for Moto, then opened the picture on Moto's yes) |
 | Voice/video calls over WebRTC, signalling encrypted | 1:1 working on hardware, direct and through the project's TURN; group (mesh) on emulators only |
 | Local search over messages, posts, comments, spheres, contacts | Working |
 | Edit own posts, pin posts in a sphere (admins), archive chats and spheres, mute a member within a sphere, per-sphere media gallery | Working |
 | Key verification: safety number and QR comparison per contact, with a banner when keys change | Working |
-| Messaging extras: disappearing messages and a vanish-mode preset, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, files of any type, scheduled messages, chat themes, nicknames and a chat emoji, ignore, full-size photos, chat bubbles on Android, a profile note for a day, chat lock, export, filters | Working; vanish mode, pokes and notes ran between phones on 12 October 2026; files and scheduling on tests only |
+| Messaging extras: disappearing messages and a vanish-mode preset, view-once media, edit and unsend, forward, star, pin, mentions, polls, read receipts, video notes, live location, contact cards, files of any type, scheduled messages that go at their minute with the app closed (an exact alarm wakes the phone), chat themes, nicknames and a chat emoji, ignore, full-size photos, chat bubbles on Android, a profile note for a day, chat lock, export, filters | Working; vanish mode, pokes and notes ran between phones on 12 October 2026; files and scheduling on tests only |
 | Feed extras: events with RSVP, poll posts, co-authored posts, alt text, drafts and scheduled posts, story captions and stickers, hidden-words filter, report to the sphere | Working; an event with a co-host and an RSVP ran between phones on 12 October 2026 |
 | Comments: reply threads, seven reactions on posts and comments, edit with history, delete, hide and pin by the post's author or an admin, comments off per post, follow or mute a post, newest-first | Working; comment, reaction, reply, hide and edit checked between a phone and a tablet |
 | Spheres: invite links with admin approval, private member notes, birthdays and avatars shared with contacts | Working; untested on hardware |
@@ -87,7 +95,7 @@ platform-side data mining.
 | Social recovery (Shamir, verified against the public key) | Working |
 | Multiple devices (per-device keys, signed device list, link/revoke) | Implemented, with tests; not yet exercised on hardware |
 | Local storage encrypted at rest (`SecureStore`) | Working; key names and entry counts remain visible |
-| Notifications and push wake (UnifiedPush / APNs, content-free) | Working on Android through the project's ntfy server (one phone, app process gone, woken and notified); the APNs key is still to come |
+| Notifications and push wake (UnifiedPush / APNs, content-free; `play` build wakes through Google Play services without a Google SDK) | Working on Android through the project's ntfy server and, in the `play` build, through Google Play services (three devices, app process gone, woken and notified seven seconds after the knock); an app off screen lets its socket go so the relay knocks rather than feeds a socket Android has cut; the APNs key is still to come |
 | Federation: each contact reached on the relay they chose | Implemented; relay host travels in the signed bundle |
 | Peer-to-peer / Veilid / DHT | Not implemented, not planned for now |
 
@@ -137,7 +145,7 @@ documents directory.
 cd safesocial_app
 flutter pub get
 flutter analyze --no-fatal-infos   # must be clean
-flutter test                       # 789 tests in 72 files
+flutter test                       # 798 tests in 75 files
 flutter run
 ```
 

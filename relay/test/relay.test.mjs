@@ -343,6 +343,162 @@ test("a wake is sent only when nobody was listening, and is coalesced", async ()
   }
 });
 
+// ── Web Push helpers for the tests ───────────────────────────────────────────
+
+/** A VAPID key pair as the operator would set it: PKCS#8 PEM and raw public. */
+async function vapidPair() {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+  const pem = `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`;
+  const pub = b64url(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)));
+  return { pem, pub, publicKey: pair.publicKey };
+}
+
+/** A device's Web Push subscription keys, as the UnifiedPush connector makes them. */
+async function deviceKeys() {
+  const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const p256dh = b64url(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)));
+  const auth = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  return { pair, p256dh, auth };
+}
+
+/** The receiving side of RFC 8291 / RFC 8188, as the connector does it. */
+async function decryptWebPush(body, device) {
+  const bytes = new Uint8Array(body);
+  const salt = bytes.slice(0, 16);
+  const rs = new DataView(bytes.buffer, bytes.byteOffset + 16, 4).getUint32(0);
+  const idlen = bytes[20];
+  const asPublic = bytes.slice(21, 21 + idlen);
+  const ciphertext = bytes.slice(21 + idlen);
+  assert.equal(rs, 4096);
+  assert.equal(idlen, 65);
+
+  const asKey = await crypto.subtle.importKey("raw", asPublic, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: asKey }, device.pair.privateKey, 256));
+  const uaPublic = new Uint8Array(await crypto.subtle.exportKey("raw", device.pair.publicKey));
+  const text = (s) => new TextEncoder().encode(s);
+  const cat = (...p) => Buffer.concat(p.map((x) => Buffer.from(x)));
+  const hkdf = async (ikm, s, info, len) => {
+    const k = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+    return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: s, info }, k, len * 8));
+  };
+  const ikm = await hkdf(shared, Buffer.from(device.auth.replace(/-/g, "+").replace(/_/g, "/"), "base64"), cat(text("WebPush: info\0"), uaPublic, asPublic), 32);
+  const cek = await hkdf(ikm, salt, text("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(ikm, salt, text("Content-Encoding: nonce\0"), 12);
+  const key = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["decrypt"]);
+  const record = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, key, ciphertext));
+  assert.equal(record[record.length - 1], 2, "last-record delimiter");
+  return new TextDecoder().decode(record.slice(0, -1));
+}
+
+test("a knock to a device that sent Web Push keys is signed and carries an encrypted word", async () => {
+  // The embedded Google distributor (the Play build) drops a push with no
+  // bytes and Google's service refuses one without VAPID, so the knock to
+  // such a device is a real Web Push message: a fixed word the device can
+  // decrypt, under a signature the push service can check. Both are proven
+  // here from the receiving side, not by inspecting our own encryption.
+  const vapid = await vapidPair();
+  const env = makeEnv({ VAPID_PRIVATE_KEY: vapid.pem, VAPID_PUBLIC_KEY: vapid.pub });
+  const mb = await mailbox();
+  const device = await deviceKeys();
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response("", { status: 201 });
+  };
+  try {
+    const box = mailboxFor(env, mb.address);
+    const reg = await box.fetch(
+      await mb.signedRequest(
+        "POST",
+        `/mbx/${mb.address}/wake`,
+        JSON.stringify({
+          url: "https://fcm.googleapis.com/fcm/send/token-1",
+          keys: { p256dh: device.p256dh, auth: device.auth },
+        }),
+      ),
+    );
+    assert.equal(reg.status, 200);
+
+    await box.deliver("m1");
+    await Promise.all(box.state.waited);
+    assert.equal(calls.length, 1);
+    const { init } = calls[0];
+    assert.equal(init.headers["Content-Encoding"], "aes128gcm");
+    assert.equal(init.headers["TTL"], "86400");
+    assert.equal(await decryptWebPush(init.body, device), "wake");
+
+    // The VAPID header: `vapid t=<jwt>, k=<our public key>`, the JWT signed by
+    // our private key over the push service's origin.
+    const auth = init.headers["Authorization"];
+    const m = /^vapid t=([^,]+), k=(.+)$/.exec(auth);
+    assert.ok(m, `authorization header: ${auth}`);
+    assert.equal(m[2], vapid.pub);
+    const [h, c, sig] = m[1].split(".");
+    const decode = (part) => JSON.parse(Buffer.from(part.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString());
+    assert.deepEqual(decode(h), { typ: "JWT", alg: "ES256" });
+    const claims = decode(c);
+    assert.equal(claims.aud, "https://fcm.googleapis.com");
+    assert.ok(claims.exp > Date.now() / 1000 && claims.exp <= Date.now() / 1000 + 24 * 3600);
+    assert.ok(typeof claims.sub === "string" && claims.sub.length > 0);
+    const verified = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      vapid.publicKey,
+      Buffer.from(sig.replace(/-/g, "+").replace(/_/g, "/"), "base64"),
+      new TextEncoder().encode(`${h}.${c}`),
+    );
+    assert.equal(verified, true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a Google endpoint is refused while the relay has no VAPID key, and the info says so", async () => {
+  // Accepting it would mean every knock is refused by Google with nothing the
+  // phone could ever see. Refusing at registration puts the reason in
+  // Settings instead.
+  const env = makeEnv();
+  const mb = await mailbox();
+  const box = mailboxFor(env, mb.address);
+  const res = await box.fetch(
+    await mb.signedRequest(
+      "POST",
+      `/mbx/${mb.address}/wake`,
+      JSON.stringify({ url: "https://fcm.googleapis.com/fcm/send/token-1" }),
+    ),
+  );
+  assert.equal(res.status, 501);
+  assert.match((await res.json()).error, /VAPID/);
+
+  const info = await (await worker.fetch(new Request("https://relay/"), env)).json();
+  assert.equal(info.vapid, null);
+
+  const vapid = await vapidPair();
+  const configured = makeEnv({ VAPID_PRIVATE_KEY: vapid.pem, VAPID_PUBLIC_KEY: vapid.pub });
+  const infoWithKey = await (await worker.fetch(new Request("https://relay/"), configured)).json();
+  assert.equal(infoWithKey.vapid, vapid.pub);
+});
+
+test("malformed Web Push keys are refused, and an ntfy endpoint never needed any", async () => {
+  const env = makeEnv();
+  const mb = await mailbox();
+  const box = mailboxFor(env, mb.address);
+  const bad = await box.fetch(
+    await mb.signedRequest(
+      "POST",
+      `/mbx/${mb.address}/wake`,
+      JSON.stringify({ url: "https://ntfy.example/abc", keys: { p256dh: "AAAA", auth: "BBBB" } }),
+    ),
+  );
+  assert.equal(bad.status, 400);
+
+  const plain = await box.fetch(
+    await mb.signedRequest("POST", `/mbx/${mb.address}/wake`, JSON.stringify({ url: "https://ntfy.example/abc" })),
+  );
+  assert.equal(plain.status, 200);
+});
+
 test("wake targets must be https, and APNs needs configuration", async () => {
   const env = makeEnv();
   const mb = await mailbox();

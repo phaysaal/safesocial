@@ -9,6 +9,7 @@ import 'services/identity_service.dart';
 import 'services/notification_service.dart';
 import 'services/app_lock_service.dart';
 import 'services/library_service.dart';
+import 'app_services.dart';
 import 'services/relay_service.dart';
 import 'services/theme_service.dart';
 import 'services/call_service.dart';
@@ -87,6 +88,11 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     _initRouter();
     AppLifecycle.foreground = true;
     context.read<WellbeingService>().onForeground();
+    // Started behind the lock screen (a knock, a notification tap on a locked
+    // phone): there is no change event to say so, only the state as it is.
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      AppServices.current?.backgroundRest.onBackground();
+    }
     // A tapped notification opens the thing it was about.
     context.read<NotificationService>().onOpen = (route) {
       if (mounted) _router.push(route);
@@ -117,6 +123,17 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
       context.read<WellbeingService>().onForeground();
     } else {
       context.read<WellbeingService>().onBackground();
+    }
+    // Off screen, the hub lets its socket go after a grace so the relay knocks
+    // (Android cuts a background app's network while its socket still looks
+    // alive from the relay's side). Inactive is a dialog or the shade, not
+    // leaving.
+    final rest = AppServices.current?.backgroundRest;
+    if (state == AppLifecycleState.resumed) {
+      rest?.onForeground();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      rest?.onBackground();
     }
     // Leaving the screen with the app lock on means unlocking on return.
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {

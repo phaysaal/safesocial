@@ -1,5 +1,6 @@
 package com.spheres.spheres_app
 
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -10,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.CalendarContract
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -48,6 +50,18 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+        // The one wake for scheduled sends; see AlarmReceiver and Alarms.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AlarmReceiver.CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "exact" -> result.success(Alarms.exactAllowed(this))
+                    "set" -> result.success(Alarms.set(this, call.argument<Long>("at") ?: 0L))
+                    "cancel" -> { Alarms.cancel(this); result.success(null) }
+                    "settings" -> { Alarms.openSettings(this); result.success(null) }
+                    "done" -> result.success(null)
+                    else -> result.notImplemented()
+                }
+            }
         // Protected media: the window refuses screenshots, screen recording
         // and the recents thumbnail while a protected viewer is open. The
         // answer says whether the flag took, so Dart never claims a
@@ -257,5 +271,54 @@ object Bubbles {
             return false
         }
         return true
+    }
+}
+
+/// One exact alarm for the earliest scheduled send. Exact alarms need the
+/// person's say-so on Android 12+; when refused, an inexact alarm is set
+/// instead and the answer says so, so the UI never promises the minute.
+object Alarms {
+    private const val REQUEST = 7301
+
+    private fun pending(context: Context): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            REQUEST,
+            Intent(context, AlarmReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    private fun manager(context: Context) =
+        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    fun exactAllowed(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || manager(context).canScheduleExactAlarms()
+
+    /** Returns true when the alarm set is exact. */
+    fun set(context: Context, atMillis: Long): Boolean {
+        val m = manager(context)
+        val at = maxOf(atMillis, System.currentTimeMillis() + 1000)
+        return if (exactAllowed(context)) {
+            m.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending(context))
+            true
+        } else {
+            m.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending(context))
+            false
+        }
+    }
+
+    fun cancel(context: Context) = manager(context).cancel(pending(context))
+
+    fun openSettings(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                    .setData(Uri.parse("package:" + context.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: ActivityNotFoundException) {
+            // Nothing to open on this build; the inexact alarm still stands.
+        }
     }
 }

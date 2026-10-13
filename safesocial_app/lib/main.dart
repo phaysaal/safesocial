@@ -5,7 +5,7 @@ import 'app.dart';
 import 'app_services.dart';
 import 'background_sync.dart';
 
-/// Two ways in.
+/// Three ways in.
 ///
 /// The user opening the app: load everything, show the UI. A push wake on
 /// Android: the UnifiedPush plugin starts this entry point with
@@ -21,6 +21,14 @@ void main(List<String> args) async {
     BackgroundSync.headless = true;
     await services.startNotifications(onWake: BackgroundSync.run);
     await BackgroundSync.run();
+    return;
+  }
+  // An alarm for a scheduled message or post, with the app closed: the same
+  // headless path, plus the sweeps that send what is due.
+  if (args.contains('--scheduled-bg')) {
+    BackgroundSync.headless = true;
+    await services.startNotifications(onWake: BackgroundSync.run);
+    await BackgroundSync.runScheduled(services);
     return;
   }
 

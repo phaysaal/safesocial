@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:equatable/equatable.dart';
+import 'media_lock.dart';
 import 'media_protection.dart';
 import 'media_provenance.dart';
 
@@ -83,6 +84,12 @@ class Post with EquatableMixin {
   /// Media shown only while held, never kept; see [MediaProtection].
   MediaProtection? get protection => MediaProtection.fromPayload(payload);
   bool get isProtected => protection != null;
+
+  /// Pictures waiting for the people tagged in them; see [MediaLock].
+  MediaLock? get lock => MediaLock.fromPayload(payload);
+
+  /// Identity keys tagged in this post (`payload['tags']`).
+  List<String> get tags => (payload?['tags'] as List?)?.whereType<String>().toList() ?? const [];
 
   /// What the author signs: the identity of the post and its words. Media and
   /// the audience are not in it; media is re-uploaded by a resharer and the

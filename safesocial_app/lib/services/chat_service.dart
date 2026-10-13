@@ -943,8 +943,13 @@ class ChatService extends ChangeNotifier {
 
   List<ScheduledMessage> get allScheduled => List.unmodifiable(_scheduled);
 
-  /// Keep [content] to be sent to [peerKey] at [at]. Sent by this device,
-  /// when it is running; the other side is told nothing until then.
+  /// The schedule changed: something was added, cancelled or sent. The
+  /// wiring re-sets the wake alarm from it.
+  void Function()? onScheduleChanged;
+
+  /// Keep [content] to be sent to [peerKey] at [at]. Sent by this device:
+  /// by the sweep while it runs, by an alarm wake when it does not. The
+  /// other side is told nothing until then.
   Future<ScheduledMessage> scheduleMessage(String peerKey, String content, DateTime at) async {
     if (content.trim().isEmpty) throw ArgumentError('Nothing to send');
     if (!at.isAfter(DateTime.now())) throw ArgumentError('That time has passed');
@@ -953,6 +958,7 @@ class ChatService extends ChangeNotifier {
     _scheduled.add(s);
     await _persistScheduled();
     notifyListeners();
+    onScheduleChanged?.call();
     return s;
   }
 
@@ -960,6 +966,7 @@ class ChatService extends ChangeNotifier {
     _scheduled.removeWhere((s) => s.id == id);
     await _persistScheduled();
     notifyListeners();
+    onScheduleChanged?.call();
   }
 
   /// Send everything whose time has come. Runs on the sweep timer and at
@@ -980,6 +987,7 @@ class ChatService extends ChangeNotifier {
     if (sent > 0) {
       await _persistScheduled();
       notifyListeners();
+      onScheduleChanged?.call();
     }
     return sent;
   }

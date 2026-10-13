@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
 import '../services/contact_service.dart';
+import '../services/feed_service.dart';
 import '../services/identity_service.dart';
 
 /// What to call whoever wrote something.
@@ -29,5 +30,10 @@ String authorNameFor(
   }
 
   if (carried.trim().isNotEmpty) return carried;
+  // A sphere member who is not a contact: the name they sign their own
+  // posts with, before a bare key (seen on the tablet as "Waiting for
+  // b5419e40…" over a tagged picture).
+  final signedWith = context.watch<FeedService>().authorNameFor(authorId);
+  if (signedWith != null && signedWith.trim().isNotEmpty) return signedWith;
   return authorId.length > 8 ? '${authorId.substring(0, 8)}…' : authorId;
 }

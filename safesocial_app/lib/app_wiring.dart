@@ -20,6 +20,7 @@ import 'services/sphere_sync_service.dart';
 import 'services/sphere_service.dart';
 import 'services/outbox_service.dart';
 import 'services/relay_service.dart';
+import 'services/send_alarms.dart';
 
 /// Connect an identity to every service that needs it.
 ///
@@ -250,6 +251,16 @@ Future<void> wireIdentity({
   chatService.wantsOriginalQuality = () => libraryService.originalQualityMedia;
   chatService.isIgnored = libraryService.isChatIgnored;
   unawaited(chatService.sendDueScheduled());
+  // The wake alarm for scheduled sends follows the schedule, and is re-set
+  // at every start because alarms do not survive a reboot.
+  Future<void> resyncAlarm() => SendAlarms.resync(chatService, feedService);
+  chatService.onScheduleChanged = () => unawaited(resyncAlarm());
+  feedService.onScheduleChanged = () => unawaited(resyncAlarm());
+  SendAlarms.onDue = () async {
+    await chatService.sendDueScheduled();
+    await feedService.publishDueDrafts();
+  };
+  unawaited(resyncAlarm());
   feedService.onMissingKey = (sphereId, epoch) => sphereService.requestKey(sphereId, epoch: epoch);
 
   // Group chat is addressed to the sphere, so it travels the same per-member

@@ -27,8 +27,31 @@ class BlobRef {
   final String address;
 
   /// Secret the address and content key are derived from. Possession of this
-  /// is what authorises reading; it never leaves a sealed envelope.
+  /// is what authorises reading; it never leaves a sealed envelope. Empty for
+  /// a *locked* reference: a picture waiting for the people in it, whose key
+  /// travels sealed to them alone (see `MediaLock`) and is filled in with
+  /// [withSeed] once it is known.
   final Uint8List seed;
+
+  bool get isLocked => seed.isEmpty;
+
+  BlobRef withSeed(Uint8List seed) => BlobRef(
+      address: address,
+      seed: seed,
+      chunkCount: chunkCount,
+      length: length,
+      mimeType: mimeType,
+      thumbnail: thumbnail);
+
+  BlobRef get locked => withSeed(Uint8List(0));
+
+  BlobRef withThumbnail(String? thumbnail) => BlobRef(
+      address: address,
+      seed: seed,
+      chunkCount: chunkCount,
+      length: length,
+      mimeType: mimeType,
+      thumbnail: thumbnail);
 
   final int chunkCount;
 
@@ -57,7 +80,7 @@ class BlobRef {
   String encode() => '$scheme${base64Url.encode(utf8.encode(jsonEncode({
         'v': version,
         'a': address,
-        's': base64Url.encode(seed),
+        if (seed.isNotEmpty) 's': base64Url.encode(seed),
         'c': chunkCount,
         'l': length,
         'm': mimeType,
@@ -79,7 +102,9 @@ class BlobRef {
 
       return BlobRef(
         address: json['a'] as String,
-        seed: Uint8List.fromList(base64Url.decode(json['s'] as String)),
+        seed: json['s'] is String
+            ? Uint8List.fromList(base64Url.decode(json['s'] as String))
+            : Uint8List(0),
         chunkCount: json['c'] as int,
         length: json['l'] as int,
         mimeType: json['m'] as String,

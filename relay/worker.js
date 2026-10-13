@@ -32,7 +32,7 @@
  * traffic, which are not implemented.
  */
 
-const VERSION = "6.0";
+const VERSION = "6.1";
 
 // ── Limits ───────────────────────────────────────────────────────────────────
 // v1 had none of these: unlimited body size, unlimited keys per identity, and
@@ -113,6 +113,11 @@ export default {
         jurisdiction: env.DO_JURISDICTION || null,
         turn: Boolean(env.TURN_SECRET && env.TURN_URLS),
         apns: Boolean(env.APNS_PRIVATE_KEY),
+        // The key a client hands its push distributor so that the push
+        // service (Google's, for the embedded distributor) accepts knocks
+        // signed by this relay and nobody else. Null when the operator has
+        // not set one; then a distributor that insists on VAPID refuses.
+        vapid: vapidConfigured(env) ? env.VAPID_PUBLIC_KEY : null,
       });
     }
 
@@ -393,9 +398,11 @@ export class RelayRoom {
         return new Response("OK");
       }
       const check = validateWakeTarget(wake.url, this.env);
-      if (check) return json({ error: check }, check.includes("configured") ? 501 : 400);
+      if (check) return json({ error: check }, check.includes("configured") || check.includes("VAPID") ? 501 : 400);
+      const keys = validateWakeKeys(wake.keys);
+      if (typeof keys === "string") return json({ error: keys }, 400);
 
-      await this.state.storage.put("wake", { url: wake.url, at: Date.now() });
+      await this.state.storage.put("wake", { url: wake.url, keys, at: Date.now() });
       return new Response("OK");
     }
 
@@ -835,7 +842,7 @@ export class RelayRoom {
     if (Date.now() - last < WAKE_COALESCE_MS) return;
     await this.state.storage.put("lastWake", Date.now());
 
-    const task = sendWake(wake.url, this.env).catch((e) =>
+    const task = sendWake(wake, this.env).catch((e) =>
       console.error("Wake failed:", e && e.message),
     );
     if (this.state.waitUntil) this.state.waitUntil(task);
@@ -989,16 +996,165 @@ function validateWakeTarget(url, env) {
     return "Malformed wake target";
   }
   if (parsed.protocol !== "https:") return "Wake target must be https";
+  // Google's push service takes a knock only when it is signed by the key
+  // the device registered with. Without one here the registration would be
+  // accepted and every knock refused, which the client could never see.
+  if (requiresVapid(parsed) && !vapidConfigured(env)) {
+    return "This relay has no VAPID key, so it cannot wake through Google Play services";
+  }
   return null;
 }
 
-async function sendWake(url, env) {
+/** Web Push key material from the device, so the knock can carry a body. */
+function validateWakeKeys(keys) {
+  if (keys === undefined || keys === null) return null;
+  if (typeof keys !== "object") return "Malformed wake keys";
+  const { p256dh, auth } = keys;
+  if (typeof p256dh !== "string" || typeof auth !== "string") return "Malformed wake keys";
+  let pub, secret;
+  try {
+    pub = base64UrlToBytes(p256dh);
+    secret = base64UrlToBytes(auth);
+  } catch (_) {
+    return "Malformed wake keys";
+  }
+  if (pub.length !== 65 || pub[0] !== 0x04) return "Wake key must be an uncompressed P-256 point";
+  if (secret.length !== 16) return "Wake auth secret must be 16 bytes";
+  return { p256dh, auth };
+}
+
+function requiresVapid(parsed) {
+  return parsed.hostname === "fcm.googleapis.com";
+}
+
+function vapidConfigured(env) {
+  return Boolean(env.VAPID_PRIVATE_KEY && env.VAPID_PUBLIC_KEY);
+}
+
+/**
+ * Knock on a wake registration. `wake` is what the device registered:
+ * `{ url, keys? }` for UnifiedPush, or an `apns:` url.
+ *
+ * UnifiedPush: the knock is a Web Push request (RFC 8030). With the relay's
+ * VAPID key configured it is signed (RFC 8292); Google's service refuses an
+ * unsigned one, ntfy ignores the header. When the device sent its Web Push
+ * keys the body is the word "wake", encrypted to them (RFC 8291), because
+ * Google's service drops a push with no bytes; otherwise the POST is empty.
+ * Either way whoever runs the endpoint learns that *this endpoint* was poked
+ * and when; nothing else, and the body says nothing a fixed word does not.
+ */
+async function sendWake(wake, env) {
+  const url = typeof wake === "string" ? wake : wake.url;
   if (url.startsWith("apns:")) {
     return sendApns(url.slice(5), env);
   }
-  // UnifiedPush: an empty POST is a valid, content-free wake. The distributor
-  // learns that *this endpoint* was poked and when; nothing else.
-  await fetch(url, { method: "POST", body: "", headers: { "TTL": "86400", "Urgency": "high" } });
+  const headers = { "TTL": "86400", "Urgency": "high" };
+  if (vapidConfigured(env)) {
+    headers["Authorization"] = `vapid t=${await vapidJwt(new URL(url).origin, env)}, k=${env.VAPID_PUBLIC_KEY}`;
+  }
+  let body = "";
+  const keys = typeof wake === "string" ? null : wake.keys;
+  if (keys) {
+    body = await encryptWebPush(new TextEncoder().encode("wake"), keys.p256dh, keys.auth);
+    headers["Content-Encoding"] = "aes128gcm";
+    headers["Content-Type"] = "application/octet-stream";
+  }
+  const res = await fetch(url, { method: "POST", body, headers });
+  if (res && res.status >= 400) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Push ${res.status} ${text.slice(0, 200)}`);
+  }
+}
+
+/**
+ * VAPID (RFC 8292): an ES256 JWT over the push service's origin, valid for
+ * twelve hours, with the relay's contact in `sub`. The private key is the
+ * secret `VAPID_PRIVATE_KEY` (PKCS#8 PEM); the public key `VAPID_PUBLIC_KEY`
+ * is the uncompressed point, base64url, the same string the device registers
+ * with. `relay/scripts/vapid_keygen.mjs` makes a pair.
+ */
+async function vapidJwt(audience, env) {
+  const header = { typ: "JWT", alg: "ES256" };
+  const now = Math.floor(Date.now() / 1000);
+  const claims = {
+    aud: audience,
+    exp: now + 12 * 60 * 60,
+    sub: env.VAPID_SUBJECT || "https://spheres.dev",
+  };
+  const enc = (obj) => bytesToBase64Url(new TextEncoder().encode(JSON.stringify(obj)));
+  const signingInput = `${enc(header)}.${enc(claims)}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToBytes(env.VAPID_PRIVATE_KEY),
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    new TextEncoder().encode(signingInput),
+  );
+  return `${signingInput}.${bytesToBase64Url(new Uint8Array(sig))}`;
+}
+
+/**
+ * Message encryption for Web Push (RFC 8291) with the aes128gcm content
+ * coding (RFC 8188): one record, the device's P-256 key and 16-byte auth
+ * secret, a fresh ephemeral key and salt per message. Returns the body
+ * bytes: salt | rs | idlen | ephemeral public key | ciphertext.
+ */
+async function encryptWebPush(plaintext, p256dhB64, authB64) {
+  const uaPublic = base64UrlToBytes(p256dhB64);
+  const authSecret = base64UrlToBytes(authB64);
+  const uaKey = await crypto.subtle.importKey(
+    "raw",
+    uaPublic,
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    [],
+  );
+  const asPair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+  const asPublic = new Uint8Array(await crypto.subtle.exportKey("raw", asPair.publicKey));
+  const ecdhSecret = new Uint8Array(
+    await crypto.subtle.deriveBits({ name: "ECDH", public: uaKey }, asPair.privateKey, 256),
+  );
+
+  const text = (s) => new TextEncoder().encode(s);
+  const keyInfo = concat(text("WebPush: info\0"), uaPublic, asPublic);
+  const ikm = await hkdf(ecdhSecret, authSecret, keyInfo, 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(ikm, salt, text("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(ikm, salt, text("Content-Encoding: nonce\0"), 12);
+
+  // One record: the plaintext, then the 0x02 delimiter that marks the last
+  // record (RFC 8188 §2). No padding is needed for a fixed word.
+  const record = concat(plaintext, new Uint8Array([2]));
+  const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, record),
+  );
+
+  const rs = new Uint8Array(4);
+  new DataView(rs.buffer).setUint32(0, 4096);
+  return concat(salt, rs, new Uint8Array([asPublic.length]), asPublic, ciphertext);
+}
+
+async function hkdf(ikm, salt, info, length) {
+  const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  return new Uint8Array(
+    await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, key, length * 8),
+  );
+}
+
+function concat(...parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
 }
 
 /**

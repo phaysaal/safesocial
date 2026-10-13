@@ -69,6 +69,11 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
     }
 
     String? path;
+    if (BlobRef.tryDecode(ref)?.isLocked ?? false) {
+      setState(() => _error = 'Waiting for the people in this picture to say yes. '
+          'Until then there is no key for it on this device.');
+      return;
+    }
     if (BlobRef.looksLikeRef(ref)) {
       setState(() {
         _resolving = true;

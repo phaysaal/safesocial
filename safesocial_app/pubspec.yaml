@@ -61,6 +61,8 @@ dev_dependencies:
   # Tests fake the documents directory to prove what is, and is not, written.
   path_provider_platform_interface: ^2.1.0
   plugin_platform_interface: ^2.1.0
+  # Timers under test, for the rule that lets the hub rest off screen.
+  fake_async: ^1.3.0
 
 flutter:
   uses-material-design: true

@@ -15,6 +15,7 @@ import '../../widgets/post_kinds.dart';
 import '../../widgets/trim_video_sheet.dart';
 import '../media/edit_image_screen.dart';
 import '../../models/media_protection.dart';
+import '../../services/send_alarms.dart';
 import '../../widgets/media_thumb.dart';
 import '../../widgets/protected_veil.dart';
 import '../../widgets/provenance_badge.dart';
@@ -70,6 +71,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   /// Photos and videos shown only while held; see [MediaProtection].
   MediaProtection? _protection;
+
+  /// Pictures wait for the people tagged in them; see [MediaLock].
+  bool _consent = false;
   String? _draftId;
 
   @override
@@ -110,11 +114,16 @@ class _ComposeScreenState extends State<ComposeScreen> {
       payload: _payload,
       altTexts: _altList,
     );
+    final exact = scheduledFor == null ? true : await SendAlarms.exactAllowed();
     messenger.showSnackBar(SnackBar(
         content: Text(scheduledFor == null
             ? 'Saved as a draft'
-            : 'Scheduled for ${scheduledFor.toLocal().toString().substring(0, 16)}. Keep the app '
-                'installed; it posts from this device.')));
+            : exact
+                ? 'Posts ${scheduledFor.toLocal().toString().substring(0, 16)} from this phone, '
+                    'even with the app closed'
+                : 'Posts ${scheduledFor.toLocal().toString().substring(0, 16)} from this phone; '
+                    'Android may delay it unless exact alarms are allowed for Spheres'),
+        action: exact ? null : const SnackBarAction(label: 'Allow', onPressed: SendAlarms.openSettings)));
     navigator.pop();
   }
 
@@ -337,6 +346,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
       if (_topic != null) 'topic': _topic,
       if (_tags.isNotEmpty) 'tags': _tags.toList(),
       if (_protection != null && _media.isNotEmpty) 'protected': _protection!.toJson(),
+      if (_consent && _media.isNotEmpty && _tags.isNotEmpty) 'consent': true,
     };
     if (_payload == null && extras.isEmpty) return null;
     return {...?_payload, ...extras};
@@ -578,6 +588,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                   if (_protection != null) _allowReshare = false;
                 });
               }
+              if (v == 'consent') setState(() => _consent = !_consent);
               if (v == 'watermark') {
                 setState(() => _protection =
                     MediaProtection(watermark: !(_protection?.watermark ?? false)));
@@ -599,6 +610,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 checked: _protection != null,
                 enabled: _media.isNotEmpty,
                 child: const Text('Protect photos and videos'),
+              ),
+              CheckedPopupMenuItem(
+                value: 'consent',
+                checked: _consent,
+                enabled: _media.isNotEmpty && _tags.isNotEmpty,
+                child: const Text('Ask the people tagged before the pictures show'),
               ),
               if (_protection != null)
                 CheckedPopupMenuItem(
@@ -741,6 +758,22 @@ class _ComposeScreenState extends State<ComposeScreen> {
                       if (_media.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         _attachments(cs),
+                        if (_consent && _tags.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Icon(Icons.hourglass_top, size: 16, color: cs.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'The pictures stay hidden from everyone else until each tagged '
+                                  'person says yes. They see the picture; nobody else holds its key.',
+                                  key: const Key('consent-note'),
+                                  style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                                ),
+                              ),
+                            ]),
+                          ),
                         if (_protection != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 8),

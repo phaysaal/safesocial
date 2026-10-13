@@ -37,6 +37,20 @@ android {
         versionName = flutter.versionName
     }
 
+    // Two builds of the same app. `foss` (F-Droid, sideload, CI) carries no
+    // Google code of any kind and wakes through a UnifiedPush distributor the
+    // person installs, such as ntfy. `play` (Google Play) also embeds the
+    // UnifiedPush FCM distributor, which registers with Google Play services
+    // the way a browser does (the relay's VAPID key as the sender; no Firebase
+    // project, no Google SDK, no proprietary code) so that phone wakes with
+    // nothing else installed and no persistent notification. The Dart code
+    // is identical; `appFlavor` tells it which build it is in.
+    flavorDimensions += "store"
+    productFlavors {
+        create("foss") { dimension = "store" }
+        create("play") { dimension = "store" }
+    }
+
     signingConfigs {
         create("release") {
             keyAlias = keystoreProperties["keyAlias"] as String?
@@ -93,6 +107,9 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // The Play build's built-in distributor; see productFlavors above. It
+    // declares its own receivers in its manifest, so nothing is added to ours.
+    "playImplementation"("org.unifiedpush.android:embedded-fcm-distributor:3.1.0")
 }
 
 // Two plugins pull in Google Tink under two artifact names — `tink` (via the

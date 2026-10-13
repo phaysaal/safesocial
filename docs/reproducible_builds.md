@@ -86,5 +86,9 @@ If a comparison fails, these are the usual reasons, roughly in order:
   compares whole APKs, so a signed release will always differ from a local
   rebuild. Comparing the unsigned artifact, or diffing zip entries excluding
   `META-INF/`, is the fix.
+- **Two flavours.** The release and `verify_build.sh` carry the `foss` flavour
+  (`app-foss-*-release.apk`). The `play` flavour is an app bundle that Google re-signs,
+  so its bytes can never be compared with a local rebuild; it differs from `foss` only
+  by the embedded UnifiedPush FCM distributor.
 - **No F-Droid metadata.** F-Droid builds from source and would give independent
   verification by a third party, which is worth more than self-attestation.

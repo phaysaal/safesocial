@@ -48,8 +48,9 @@ pushd safesocial_app >/dev/null
 flutter clean >/dev/null
 flutter pub get >/dev/null
 # Unsigned: signing needs a keystore only the maintainer has, and the signature
-# is not part of what is being verified here.
-flutter build apk --release --split-per-abi
+# is not part of what is being verified here. The release carries the `foss`
+# flavour (see build_release.sh).
+flutter build apk --release --split-per-abi --flavor foss
 popd >/dev/null
 
 APK_DIR="safesocial_app/build/app/outputs/flutter-apk"

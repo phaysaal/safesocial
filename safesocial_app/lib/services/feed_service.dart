@@ -8,10 +8,12 @@ import 'secure_store.dart';
 import 'package:uuid/uuid.dart';
 
 import '../crypto/blob.dart';
+import '../crypto/sealed_box.dart';
 import '../crypto/envelope.dart';
 import '../crypto/session_manager.dart';
 import '../models/contact.dart';
 import '../models/event_time.dart';
+import '../models/media_lock.dart';
 import '../models/media_provenance.dart';
 import '../models/post.dart';
 import '../models/sphere.dart';
@@ -304,6 +306,9 @@ class FeedService extends ChangeNotifier {
   /// Members of each sphere, for publishing a draft later. Set by the app.
   List<String> Function(String sphereId)? membersOf;
 
+  /// A draft was saved, deleted or posted; a scheduled one may have moved.
+  void Function()? onScheduleChanged;
+
   Future<String> saveDraft({
     String? id,
     required String content,
@@ -329,6 +334,7 @@ class FeedService extends ChangeNotifier {
     });
     await _persistDrafts();
     notifyListeners();
+    onScheduleChanged?.call();
     return draftId;
   }
 
@@ -336,6 +342,7 @@ class FeedService extends ChangeNotifier {
     _drafts.removeWhere((d) => d['id'] == id);
     await _persistDrafts();
     notifyListeners();
+    onScheduleChanged?.call();
   }
 
   /// Post a draft now, whatever its schedule.
@@ -994,6 +1001,21 @@ class FeedService extends ChangeNotifier {
     if (targets.isEmpty) {
       throw StateError('A post has to be addressed to at least one sphere');
     }
+    // "Ask the people in it first": checked before anything is stored, so a
+    // post that cannot be locked is never shown as sent.
+    final consent = payload?['consent'] == true;
+    final tagged = (payload?['tags'] as List?)?.whereType<String>().where((t) => t != me).toList() ?? const [];
+    if (consent) {
+      if (tagged.isEmpty || (mediaRefs?.isEmpty ?? true)) {
+        throw StateError('Asking first needs a picture and at least one tagged person');
+      }
+      for (final t in tagged) {
+        if (_exchangeKeyFor(t) == null) {
+          throw StateError('No key for ${authorNameFor(t) ?? t.substring(0, 8)} yet; '
+              'they need to be a contact or in a sphere with you');
+        }
+      }
+    }
 
     final post = Post(
       id: const Uuid().v4(),
@@ -1023,7 +1045,18 @@ class FeedService extends ChangeNotifier {
 
     if (_myPublicKey == null) return;
 
-    final relayPost = await _encodePostMedia(signed);
+    var relayPost = await _encodePostMedia(signed);
+    if (consent) {
+      relayPost = await lockMedia(relayPost, tagged);
+      // Our own copy keeps its local files but carries the lock too, so this
+      // device shows who is still to say yes and takes their releases.
+      final mine = _posts.indexWhere((p) => p.id == signed.id);
+      if (mine != -1) {
+        _posts[mine] = _posts[mine].copyWith(payload: {...?_posts[mine].payload, 'locked': relayPost.payload?['locked']});
+        await _persistPosts();
+        notifyListeners();
+      }
+    }
     for (final target in targets) {
       // Rebuilt per sphere so the copy names only where it is going.
       final copy = relayPost.copyWith(sphereId: target, sphereIds: {target});
@@ -1240,6 +1273,15 @@ class FeedService extends ChangeNotifier {
     } else if (json['type'] == 'coauthor_accept') {
       final index = _posts.indexWhere((p) => p.id == json['post_id']);
       if (index != -1) _applyCoAuthor(index, authorId);
+    } else if (json['type'] == 'media_release') {
+      // A tagged person's yes: their share of the key, attributed to the
+      // signer and honoured only if they are among the tagged.
+      final postId = json['post_id'];
+      final index = json['index'];
+      final share = json['share'];
+      if (postId is String && index is int && share is String) {
+        await _applyRelease(postId, index, authorId, share);
+      }
     } else if (json['type'] == 'report') {
       // Only admins of that sphere keep reports; everyone else drops them.
       final sphere = spheres.sphere(sphereId);
@@ -1485,16 +1527,157 @@ class FeedService extends ChangeNotifier {
     return post.copyWith(mediaRefs: encoded, provenance: provenance);
   }
 
+  /// Strip the key from every uploaded picture and seal it to the tagged
+  /// people instead, whole and as one share each; see [MediaLock].
+  @visibleForTesting
+  Future<Post> lockMedia(Post wire, List<String> tagged) async {
+    final items = <int, LockedItem>{};
+    final refs = <String>[];
+    for (var i = 0; i < wire.mediaRefs.length; i++) {
+      final ref = BlobRef.tryDecode(wire.mediaRefs[i]);
+      if (ref == null || ref.isLocked) {
+        refs.add(wire.mediaRefs[i]);
+        continue;
+      }
+      final shares = LockedItem.split(ref.seed, tagged.length);
+      final keys = <String, SealedKeys>{};
+      for (var j = 0; j < tagged.length; j++) {
+        final xk = _exchangeKeyFor(tagged[j]);
+        if (xk == null) throw StateError('No key for ${tagged[j]}');
+        keys[tagged[j]] = SealedKeys(
+          seed: await SealedBox.seal(peerExchangeKeyHex: xk, plaintext: ref.seed),
+          share: await SealedBox.seal(peerExchangeKeyHex: xk, plaintext: shares[j]),
+        );
+      }
+      items[i] = LockedItem(keys: keys);
+      // The preview is a smear too; the plain one would show the picture.
+      refs.add(ref.locked.withThumbnail(MediaService.smearOf(ref.thumbnail)).encode());
+    }
+    if (items.isEmpty) return wire;
+    return wire.copyWith(
+        mediaRefs: refs, payload: {...?wire.payload, 'locked': MediaLock(items).toJson()});
+  }
+
+  /// The key for a locked picture, when this device may have it: every share
+  /// is in, or we are one of the people it was sealed to.
+  Future<Uint8List?> _seedFor(Post post, int index) async {
+    final item = post.lock?[index];
+    if (item == null) return null;
+    if (item.complete) return item.seed;
+    final me = _myPublicKey;
+    final pair = _sessions?.myKeyExchangeKeyPair;
+    final mine = me == null ? null : item.keys[me];
+    if (mine == null || pair == null) return null;
+    return SealedBox.open(myKeyPair: pair, box: mine.seed);
+  }
+
+  /// Whether [post] has a picture waiting for our yes.
+  bool awaitsMyRelease(Post post) {
+    final me = _myPublicKey;
+    final lock = post.lock;
+    if (me == null || lock == null) return false;
+    return lock.items.values.any((i) => i.keys.containsKey(me) && !i.hasReleased(me));
+  }
+
+  /// Say yes to a picture we are in: release our share to the sphere, and
+  /// to our own copy first.
+  Future<void> releaseMedia(String postId) async {
+    final me = _myPublicKey;
+    final pair = _sessions?.myKeyExchangeKeyPair;
+    if (me == null || pair == null) throw StateError('No identity yet');
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (index == -1) return;
+    final lock = _posts[index].lock;
+    if (lock == null) return;
+    for (final e in lock.items.entries) {
+      final mine = e.value.keys[me];
+      if (mine == null || e.value.hasReleased(me)) continue;
+      final share = await SealedBox.open(myKeyPair: pair, box: mine.share);
+      if (share == null) {
+        throw StateError('The key for this picture was not sealed to this device');
+      }
+      final b64 = base64Encode(share);
+      await _applyRelease(postId, e.key, me, b64);
+      for (final sphereId in _posts[index].sphereIds) {
+        await _publishToSphere(
+          sphereId: sphereId,
+          type: 'media_release',
+          payloadJson: jsonEncode(
+              {'type': 'media_release', 'post_id': postId, 'index': e.key, 'share': b64}),
+        );
+      }
+    }
+  }
+
+  /// Releases that arrived before their post, applied when it does.
+  final Map<String, List<(int, String, String)>> _pendingReleases = {};
+
+  Future<void> _applyRelease(String postId, int index, String who, String share) async {
+    final at = _posts.indexWhere((p) => p.id == postId);
+    if (at == -1) {
+      _pendingReleases.putIfAbsent(postId, () => []).add((index, who, share));
+      return;
+    }
+    final post = _posts[at];
+    final lock = post.lock;
+    final item = lock?[index];
+    if (lock == null || item == null) return;
+    if (!item.keys.containsKey(who)) {
+      DebugLogService().warn('Feed', 'Dropping media release from someone not tagged');
+      return;
+    }
+    if (item.hasReleased(who)) return;
+    final updated = item.withRelease(who, share);
+    final refs = List.of(post.mediaRefs);
+    if (updated.complete && index < refs.length) {
+      final blob = BlobRef.tryDecode(refs[index]);
+      final seed = updated.seed;
+      if (blob != null && blob.isLocked && seed != null) {
+        final full = blob.withSeed(seed).encode();
+        refs[index] = post.isProtected || (dataSaver?.call() ?? false)
+            ? full
+            : (await MediaService.decodeAndSaveImage(full) ?? full);
+      }
+    }
+    final at2 = _posts.indexWhere((p) => p.id == postId);
+    if (at2 == -1) return;
+    _posts[at2] = _posts[at2].copyWith(
+        mediaRefs: refs,
+        payload: {...?_posts[at2].payload, 'locked': lock.withItem(index, updated).toJson()});
+    await _persistPosts();
+    notifyListeners();
+  }
+
+  Future<void> _applyPendingReleases(String postId) async {
+    final pending = _pendingReleases.remove(postId);
+    if (pending == null) return;
+    for (final (index, who, share) in pending) {
+      await _applyRelease(postId, index, who, share);
+    }
+  }
+
   /// Decode base64 data URIs received from relay into local file paths.
   ///
   /// Protected media is left as its reference: the viewer decrypts it in
   /// memory when it is held, and nothing of it is ever written to the cache.
+  /// A locked picture is opened only when this device may: the key is
+  /// filled in from the box sealed to us, or from the released shares.
   Future<Post> _decodePostMedia(Post post) async {
     if (post.mediaRefs.isEmpty) return post;
     if (post.isProtected) return post;
     if (dataSaver?.call() ?? false) return post;
     final decoded = <String>[];
-    for (final ref in post.mediaRefs) {
+    for (var i = 0; i < post.mediaRefs.length; i++) {
+      var ref = post.mediaRefs[i];
+      final blob = BlobRef.tryDecode(ref);
+      if (blob != null && blob.isLocked) {
+        final seed = await _seedFor(post, i);
+        if (seed == null) {
+          decoded.add(ref);
+          continue;
+        }
+        ref = blob.withSeed(seed).encode();
+      }
       if (BlobRef.looksLikeRef(ref)) {
         final localPath = await MediaService.decodeAndSaveImage(ref);
         // Keep the reference when the blob cannot be fetched right now: the
@@ -1540,6 +1723,7 @@ class FeedService extends ChangeNotifier {
     }
     _persistPosts();
     notifyListeners();
+    if (_pendingReleases.containsKey(post.id)) unawaited(_applyPendingReleases(post.id));
 
     if (post.authorId != _myPublicKey) {
       final name = post.authorName.trim().isNotEmpty

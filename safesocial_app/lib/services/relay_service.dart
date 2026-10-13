@@ -15,6 +15,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../crypto/mailbox.dart';
 import '../crypto/session_manager.dart';
 import 'debug_log_service.dart';
+import 'wake_service.dart';
 import 'relay_config.dart';
 
 /// Whether a channel is usable right now.
@@ -314,7 +315,11 @@ class RelayHub {
       listener.owner._setState(listener.channelKey, RelayConnectionState.connecting);
       if (_connected) {
         _sendSubscribe(sub);
-      } else {
+      } else if (!_resting) {
+        // Resting (off screen, or a headless window closed): the mailbox is
+        // remembered and subscribed when the socket next returns. Opening
+        // it here undid the rest on the Samsung, where services were still
+        // subscribing mailboxes as the app went behind the lock screen.
         _ensureConnected();
       }
       return;
@@ -1142,10 +1147,16 @@ class RelayService extends ChangeNotifier {
 
   /// Tell the relay where to knock when mail arrives for [mailbox] and nobody
   /// is listening. [target] is a UnifiedPush endpoint or `apns:<token>`; null
-  /// clears it. Returns an error message, or null on success.
-  Future<String?> registerWake(Mailbox mailbox, String? target) async {
+  /// clears it. [keys] are the device's Web Push keys for that endpoint, when
+  /// the distributor gave some, so the knock can carry an encrypted body.
+  /// Returns an error message, or null on success.
+  Future<String?> registerWake(Mailbox mailbox, String? target,
+      [WakeKeys? keys]) async {
     final path = '/mbx/${mailbox.id}/wake';
-    final body = jsonEncode({'url': target});
+    final body = jsonEncode({
+      'url': target,
+      if (keys != null && target != null) 'keys': keys.toJson(),
+    });
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       final response = await relayHttp((host) => http.post(
@@ -1167,6 +1178,19 @@ class RelayService extends ChangeNotifier {
     } catch (e) {
       return 'Could not reach the relay: $e';
     }
+  }
+
+  /// The relay's VAPID public key, which a push distributor may require to
+  /// accept knocks from it. Null when the relay has none configured; throws
+  /// when the relay cannot be reached, so the caller can tell the two apart.
+  Future<String?> vapidKey() async {
+    final response = await relayHttp((host) => http.get(Uri.parse('https://$host/')));
+    if (response.statusCode != 200) {
+      throw StateError('Relay answered ${response.statusCode}');
+    }
+    final info = jsonDecode(response.body) as Map<String, dynamic>;
+    final key = info['vapid'];
+    return key is String && key.isNotEmpty ? key : null;
   }
 
   String _signWithIdentity(String message, String secretKeyHex) {

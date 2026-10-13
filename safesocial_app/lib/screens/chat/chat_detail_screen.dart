@@ -31,6 +31,7 @@ import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_cards.dart';
 import '../../widgets/media_thumb.dart';
+import '../../services/send_alarms.dart';
 import '../../widgets/protected_sheet.dart';
 
 /// Messenger-style chat conversation detail view.
@@ -451,8 +452,32 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _sendLater() async {
-    final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    var text = _messageController.text.trim();
+    if (text.isEmpty) {
+      // Reached from the attach sheet with nothing typed yet.
+      final typed = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          final c = TextEditingController();
+          return AlertDialog(
+            title: const Text('Send later'),
+            content: TextField(
+                controller: c,
+                autofocus: true,
+                maxLines: 4,
+                minLines: 1,
+                decoration: const InputDecoration(hintText: 'What to send')),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Pick a time')),
+            ],
+          );
+        },
+      );
+      if (typed == null || typed.trim().isEmpty || !mounted) return;
+      text = typed.trim();
+    }
     final now = DateTime.now();
     final date = await showDatePicker(
         context: context, initialDate: now, firstDate: now, lastDate: now.add(const Duration(days: 365)));
@@ -463,9 +488,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final at = DateTime(date.year, date.month, date.day, time.hour, time.minute);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await context.read<ChatService>().scheduleMessage(widget.conversationId, text, at);
+      final chat = context.read<ChatService>();
+      await chat.scheduleMessage(widget.conversationId, text, at);
       _messageController.clear();
-      messenger.showSnackBar(SnackBar(content: Text('Will be sent ${_fmtWhen(at)}, if this device is running then')));
+      final exact = await SendAlarms.exactAllowed();
+      messenger.showSnackBar(SnackBar(
+          content: Text(exact
+              ? 'Will be sent ${_fmtWhen(at)} from this phone, even with the app closed'
+              : 'Will be sent ${_fmtWhen(at)} from this phone; Android may delay it unless '
+                  'exact alarms are allowed for Spheres'),
+          action: exact ? null : const SnackBarAction(label: 'Allow', onPressed: SendAlarms.openSettings)));
     } on ArgumentError catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('${e.message}')));
     }
@@ -748,6 +780,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               onTap: () => Navigator.pop(ctx, 'view_once'),
             ),
             ListTile(
+              leading: const Icon(Icons.schedule_send_outlined),
+              title: const Text('Send later'),
+              subtitle: const Text('At a day and time you choose, even with the app closed'),
+              onTap: () => Navigator.pop(ctx, 'later'),
+            ),
+            ListTile(
               leading: const Icon(Icons.lock_outline),
               title: const Text('Protected photo or video'),
               subtitle: const Text('Shown only while held, never saved or shared'),
@@ -793,6 +831,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (choice == 'contact') return _shareContact();
     if (choice == 'view_once') return _sendViewOnce();
     if (choice == 'protected') return _sendProtected();
+    if (choice == 'later') return _sendLater();
     if (choice == 'video_note') {
       final messenger = ScaffoldMessenger.of(context);
       try {

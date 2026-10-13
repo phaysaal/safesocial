@@ -136,6 +136,10 @@ class BlobService {
 
   /// Fetch and decrypt a blob, returning its plaintext bytes.
   Future<Uint8List?> download(BlobRef ref) async {
+    if (ref.isLocked) {
+      _log.warn('Blob', 'No key for this blob yet: the people in it have not all said yes');
+      return null;
+    }
     final assembled = BytesBuilder();
 
     for (var i = 0; i < ref.chunkCount; i++) {

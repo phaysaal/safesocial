@@ -799,6 +799,19 @@ talking to whom; push re-introduces one party that sees timing per device.
    iOS the APNs token is per device, so that linkage exists at the relay; it is recorded in
    `threat_model.md` rather than hidden.
 
+*Amendment, 13 October 2026.* The ntfy connection shows a persistent notification on
+Android, which the owner judged a poor first impression. Point 2 is kept and point 3
+sharpened: the Android build now has two flavours. `foss` is as above. `play` embeds the
+UnifiedPush FCM distributor (`org.unifiedpush.android:embedded-fcm-distributor`), which
+sits *behind* `WakeService` as one more distributor, registers with Google Play services
+the way a browser does (the relay's VAPID public key as the sender, so there is no
+Firebase project, no Google SDK and no proprietary code in the APK), and is used only
+when no external distributor is installed. Google then learns per-device wake timing,
+the same thing Apple learns on iOS, and nothing else: the relay signs each knock (RFC
+8292) and the body is the fixed word "wake" encrypted to the device (RFC 8291), sent
+only because Google drops an empty push. The "not doing" line below still holds: there is
+no FCM code path of its own, only a distributor behind the abstraction.
+
 **Why this is the long-term stable choice.** The app depends on a published open standard
 rather than a vendor SDK; the server component is one we operate and can move; FCM is
 available to users who need it without a second code path; and the mechanism is the same

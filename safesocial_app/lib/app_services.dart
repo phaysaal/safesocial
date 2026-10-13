@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
@@ -12,6 +14,7 @@ import 'services/mlkit_translator.dart';
 import 'services/translation_service.dart';
 import 'services/app_lock_service.dart';
 import 'services/call_config.dart';
+import 'services/background_rest.dart';
 import 'services/call_service.dart';
 import 'services/chat_service.dart';
 import 'services/contact_service.dart';
@@ -67,6 +70,16 @@ class AppServices {
   final notificationService = NotificationService();
   final appLockService = AppLockService();
   late final wakeService = WakeService(provider: defaultWakeProvider());
+
+  /// Off screen, the hub lets its socket go so the relay knocks; a call in
+  /// progress keeps it.
+  late final backgroundRest = BackgroundRest(
+    rest: RelayHub.instance.rest,
+    wake: () => unawaited(RelayService.verifyAll()),
+    busy: () =>
+        callService.state != CallState.idle &&
+        callService.state != CallState.ended,
+  );
 
   /// The one instance for this process, once [boot] has run.
   static AppServices? current;

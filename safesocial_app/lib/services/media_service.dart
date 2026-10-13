@@ -637,6 +637,20 @@ class MediaService extends ChangeNotifier {
   /// The long side of a protected item's inline preview, in pixels.
   static const int protectedThumbSide = 12;
 
+  /// The smear version of an inline preview that already exists, for a
+  /// picture locked after upload: a locked reference must not carry the
+  /// readable preview the plain upload made (seen on the tablet: the frame
+  /// said "waiting" over a perfectly clear picture).
+  static String? smearOf(String? thumbnail) {
+    if (thumbnail == null) return null;
+    try {
+      final decoded = img.decodeImage(base64Decode(thumbnail.split(',').last));
+      return decoded == null ? null : _thumbnailFor(decoded, protected: true);
+    } catch (_) {
+      return null;
+    }
+  }
+
   static String? _thumbnailFromJpeg(Uint8List? jpeg, {bool protected = false}) {
     if (jpeg == null) return null;
     final decoded = img.decodeImage(jpeg);

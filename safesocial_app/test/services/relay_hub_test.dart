@@ -259,6 +259,35 @@ void main() {
     expect(RelayHub.instance.debugRetryPending, isTrue);
   });
 
+  test('a mailbox subscribed while the hub rests waits for the next wake',
+      () async {
+    // Seen on the Samsung: the app went behind the lock screen while its
+    // services were still subscribing mailboxes, and every new subscription
+    // reopened the socket the rest had just closed, so the relay kept
+    // delivering to a socket Android had cut and never knocked.
+    final chat = RelayService();
+    final a = await mailbox('a');
+    await chat.connectMailbox('alice', a);
+    await settle();
+    sockets.current.receive({'t': 'ok', 'a': a.id});
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    RelayHub.instance.rest();
+    await settle();
+    expect(sockets.created.length, 1);
+
+    final b = await mailbox('b');
+    await chat.connectMailbox('bob', b);
+    await settle();
+    expect(sockets.created.length, 1, reason: 'resting means resting');
+    expect(RelayHub.instance.subscriptionCount, 2);
+    expect(chat.stateFor('bob'), RelayConnectionState.connecting);
+
+    await RelayService.verifyAll();
+    await settle();
+    expect(sockets.created.length, 2);
+    expect(sockets.current.ofType('sub').map((f) => f['a']), containsAll([a.id, b.id]));
+  });
+
   test('the hub id is stable across restarts once stored', () async {
     SharedPreferences.setMockInitialValues({});
     final first = RelayHub.instance.hubId;

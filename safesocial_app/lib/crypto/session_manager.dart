@@ -100,6 +100,9 @@ class SessionManager {
   /// Our own device's X25519 public key, hex. Known once configured.
   String? get myDeviceKey => _myDeviceKey;
 
+  /// Our exchange key pair, for opening a box sealed to us outside a session.
+  SimpleKeyPair? get myKeyExchangeKeyPair => _myKeyExchangeKeyPair;
+
   Future<void> configure({
     required SimpleKeyPair keyExchangeKeyPair,
     required String identityKey,

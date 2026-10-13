@@ -37,9 +37,18 @@ DO_JURISDICTION = "eu"
 #   APNS_TEAM_ID      Apple developer team id
 #   APNS_TOPIC        the iOS bundle id
 #   APNS_HOST         optional; api.sandbox.push.apple.com for development builds
+#   VAPID_PRIVATE_KEY the relay's Web Push signing key (PKCS#8 PEM); with
+#                     VAPID_PUBLIC_KEY it signs every UnifiedPush knock and
+#                     lets the Play build wake through Google Play services
+#   VAPID_PUBLIC_KEY  the matching uncompressed P-256 point, base64url;
+#                     advertised at GET / for clients to register with
+#   VAPID_SUBJECT     optional contact for the push service, https: or mailto:
+#                     (default https://spheres.dev)
 #
-# With none of these set the relay still works: /turn answers 501 and apns:
-# registrations are refused, and the client says so rather than pretending.
+# `node scripts/vapid_keygen.mjs` prints a VAPID pair.
+#
+# With none of these set the relay still works: /turn answers 501, apns: and
+# Google endpoints are refused, and the client says so rather than pretending.
 
 
 # Durable Objects for mailbox state. Also provides the alarm API, used to

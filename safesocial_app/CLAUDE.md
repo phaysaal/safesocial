@@ -75,9 +75,59 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   a reshare of a protected original too. The watermark is the viewer's own name across
   the middle, drawn only while shown, and only when the sender turned it on. Everything
   here is enforced by the viewer's app and the composer says so (`MediaProtection.disclaimer`).
+- **Pictures that wait for the people in them** (`models/media_lock.dart`,
+  `crypto/sealed_box.dart`): a post with tags and `payload['consent']` is sent with its
+  media keys stripped from the references (`BlobRef.isLocked`) and, per picture, the key
+  sealed to each tagged person plus one XOR share of it sealed to each
+  (`FeedService.lockMedia`, refused up front when a tagged person has no exchange key).
+  A tagged person opens the key from their box, so they see what they are asked about,
+  and says yes with a `media_release` feed item carrying their share; a release is
+  honoured only from someone tagged, and one that arrives before its post waits for it.
+  When every share is in, any member joins them back into the key, fills it into the
+  reference and fetches. Until then the rest of the sphere, the author aside, sees the
+  blurred frame and "Waiting for Al", and holds nothing that opens the blob: this is
+  arithmetic, not policy. The sealed box is an ephemeral X25519 key, HKDF and
+  XChaCha20-Poly1305, opened with the device's exchange key pair
+  (`SessionManager.myKeyExchangeKeyPair`). The locked reference's inline preview is the
+  twelve-pixel smear (`MediaService.smearOf`), because the first run on the tablet showed
+  "Waiting for Moto" over a perfectly readable preview. Ran between the three phones on
+  12 October 2026.
 - **Notifications** are built on-device from decrypted content (`notification_service.dart`);
   wakes are content-free through `wake_service.dart` (UnifiedPush on Android, APNs via the
   iOS runner). `main()` has a `--unifiedpush-bg` entry that runs `BackgroundSync` with no UI.
+  Two Android flavours (`build.gradle.kts`, dimension `store`): `foss` has no Google code
+  and needs a distributor such as ntfy, whose open socket shows a persistent notification;
+  `play` adds `org.unifiedpush.android:embedded-fcm-distributor`, which registers with
+  Google Play services the way a browser does (the relay's VAPID public key as the sender;
+  no Firebase project, no Google SDK, no proprietary code) and shows up as the distributor
+  `com.spheres.spheres_app`, named "Google Play services (built in)" in Settings; an
+  installed external distributor is preferred over it. The Dart code is the same
+  (`appFlavor` tells it which build it is). Google's service refuses an unsigned knock and
+  drops one with no bytes, so `WakeService` fetches the relay's VAPID key from `GET /`
+  before registering (`RelayService.vapidKey`) and sends the distributor's Web Push keys
+  with the endpoint (`WakeKeys`, `registerWake`); the relay signs every knock and, given
+  keys, encrypts the word "wake" to them (RFC 8292, RFC 8291, both proven from the
+  receiving side in `relay/test`). A relay without `VAPID_*` secrets refuses a Google
+  endpoint with 501 and the client says so; a `vapidRequired` refusal from the
+  distributor is retried once with a fresh ask. Every `flutter build`/`run` now needs
+  `--flavor foss` or `--flavor play`; the GitHub release and CI's reproducibility check
+  carry `foss`, `build_release.sh` also makes the `play` app bundle. The Google path ran on
+  13 October 2026 on the tablet, the Samsung and the Motorola: a killed app was started by
+  Play services and showed the chat notification seven seconds after the knock; the relay
+  log put the knock within a second of the publish. The run found three things, all fixed
+  with tests. Registrations to the distributor now go one at a time, once per process,
+  with one retry on an internal error (`WakeService`): five fired together timed out
+  inside Play services' IPC, and the same burst into a process the system had frozen
+  overflowed its binder buffer and crashed it with the knock unhandled. And an app that is
+  merely off screen now lets its hub socket go after a grace (`BackgroundRest`, fifteen
+  seconds; a call keeps it; a wake's window closing off screen releases it at once): on
+  the Samsung, Android 16 cut the background app's network a minute after it left the
+  screen while its socket still looked alive to the relay, so the relay delivered to that
+  socket, counted a listener and never knocked. With the socket gone the relay has nobody
+  to talk to and knocks, which is the headless rule applied to the UI. A mailbox
+  subscribed while the hub rests waits for the next wake instead of reopening the socket
+  (the Samsung went behind its lock screen while services were still subscribing), and
+  an app started off screen reads the state it started in, since no change event says so.
 - **Calls** get STUN/TURN from the relay (`CallConfig.resolve`); without an operator TURN
   they fall back to public STUN and say so. The operator's coturn runs on the Scaleway
   instance beside ntfy (`turn.spheres.dev`, UDP/TCP 3478 and TLS 5349 with a Let's
@@ -150,7 +200,20 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   comment, member row or chat bubble shows the picture the person has now, never one
   that travelled with the content.
 - **Messaging comforts.** Scheduled messages wait in `ChatService` (sealed key
-  `spheres_scheduled_messages_v1`) and go on the 30-second sweep while this device runs.
+  `spheres_scheduled_messages_v1`) and go on the 30-second sweep while this device runs;
+  scheduled posts are drafts with `scheduledFor` and go on the feed's one-minute sweep.
+  So that a phone asleep at the minute still sends, one platform alarm follows the
+  schedule (`services/send_alarms.dart`: the earliest pending time across chat and
+  feed, re-set on every change and at every start, since alarms do not survive a
+  reboot). On Android it is an exact alarm (`Alarms` in `MainActivity.kt`,
+  `SCHEDULE_EXACT_ALARM`); when it fires with the app alive Dart runs its sweeps, and
+  with the app closed `AlarmReceiver` starts a headless engine with `--scheduled-bg`,
+  which brings the hub up, sends what is due, re-sets the alarm and exits
+  (`BackgroundSync.runScheduled`). Android 12+ lets the person refuse exact alarms;
+  then the alarm set is inexact, the platform answers so, and the composer, the chat and
+  the drafts page say the send may be late and link to the setting. Where there is no
+  platform code nothing is set and nothing is promised. "Send later" is in the chat's
+  attach sheet as well as behind a long press on send.
   Vanish mode is `setVanish`: a five-minute disappearing preset that remembers and
   restores the previous setting. An ignored chat (`LibraryService.isChatIgnored`) raises
   no notification and sends no typing signal or read receipt; chat theme, nickname and
@@ -289,11 +352,12 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 789 tests in 72 files under test/{crypto,models,screens,services}
+flutter test                       # 818 tests in 76 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
-flutter run
-flutter build apk --debug
-flutter build apk                  # release — needs android/key.properties, refuses debug key
+flutter run --flavor foss          # or --flavor play; every build names a flavour now
+flutter build apk --debug --flavor foss
+flutter build apk --flavor foss    # release — needs android/key.properties, refuses debug key
+flutter build appbundle --flavor play   # the Google Play upload
 ```
 The toolchain is pinned in `FLUTTER_TOOLCHAIN` (Flutter 3.41.5, Dart 3.11.3, Gradle 8.14,
 AGP 8.11.1, Kotlin 2.2.20, Java 17). Bump it in a commit of its own.
