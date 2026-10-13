@@ -72,9 +72,9 @@ AAB="safesocial_app/build/app/outputs/bundle/playRelease/app-play-release.aab"
 # reproducing the build proves nothing because there is nothing to compare to.
 echo "Recording build hashes..."
 ( cd "$APK_DIR" && sha256sum \
-    app-foss-arm64-v8a-release.apk \
-    app-foss-armeabi-v7a-release.apk \
-    app-foss-x86_64-release.apk ) > "$APK_DIR/SHA256SUMS.txt"
+    app-arm64-v8a-foss-release.apk \
+    app-armeabi-v7a-foss-release.apk \
+    app-x86_64-foss-release.apk ) > "$APK_DIR/SHA256SUMS.txt"
 cat "$APK_DIR/SHA256SUMS.txt"
 
 # ── 3. Update the landing page ───────────────────────────────────────────────
@@ -108,9 +108,9 @@ git commit -m "Release v$VERSION"
 # ── 5. Publish the GitHub release ────────────────────────────────────────────
 echo "Creating GitHub release v$VERSION..."
 gh release create "$VERSION" \
-  "$APK_DIR/app-foss-arm64-v8a-release.apk" \
-  "$APK_DIR/app-foss-armeabi-v7a-release.apk" \
-  "$APK_DIR/app-foss-x86_64-release.apk" \
+  "$APK_DIR/app-arm64-v8a-foss-release.apk" \
+  "$APK_DIR/app-armeabi-v7a-foss-release.apk" \
+  "$APK_DIR/app-x86_64-foss-release.apk" \
   "$APK_DIR/SHA256SUMS.txt" \
   --repo phaysaal/safesocial \
   --title "v$VERSION" \
