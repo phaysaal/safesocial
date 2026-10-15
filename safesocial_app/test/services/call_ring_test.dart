@@ -17,4 +17,21 @@ void main() {
   test('a ring without a stamp, from an older client, is taken as current', () {
     expect(CallService.isStaleRing({'type': 'call_offer'}, now: now), isFalse);
   });
+
+  group('video in and out of a call', () {
+    test('when both sides offer at once, exactly one gives way', () {
+      expect(CallService.isPolite('aaa', 'bbb'), isTrue);
+      expect(CallService.isPolite('bbb', 'aaa'), isFalse);
+      expect(CallService.isPolite('aaa', 'aaa'), isFalse,
+          reason: 'our own other device is never deferred to twice');
+    });
+
+    test("a signal says whether the sender's picture is on; an older client's is read from the call's kind", () {
+      expect(CallService.remoteVideoFrom({'video': true}, fallback: false), isTrue);
+      expect(CallService.remoteVideoFrom({'video': false}, fallback: true), isFalse);
+      expect(CallService.remoteVideoFrom({'call_type': 'video'}, fallback: true), isTrue);
+      expect(CallService.remoteVideoFrom({'video': 'yes'}, fallback: false), isFalse,
+          reason: 'anything but a boolean is not a claim');
+    });
+  });
 }

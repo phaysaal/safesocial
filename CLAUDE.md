@@ -133,6 +133,15 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   instance beside ntfy (`turn.spheres.dev`, UDP/TCP 3478 and TLS 5349 with a Let's
   Encrypt certificate Caddy renews; secrets `TURN_SECRET`/`TURN_URLS` on the Worker). A "relay every call through TURN" switch under Call Servers sets the ICE
   policy to relay only; that is how the TURN path was proven on 11 October 2026. A
+  call's kind is only how it rang: either side turns its camera (or screen) on in a voice
+  call or off in a video call at any time (`CallService.setVideo`). The first picture on a
+  connection adds the track and renegotiates (`call_update`, answered by
+  `call_update_answer`); after that on and off are a track swap on the same sender plus a
+  `call_video` line for the other screen. Offers that cross are settled by key order
+  (`isPolite`: the smaller key rolls back, answers, offers again). The screen lays out for
+  video when anyone sends a picture (`hasVideo`, `remoteSendsVideo`) and re-assigns its
+  renderers when a track joins a stream they already hold (`mediaRevision`,
+  `RendererGate.reattach`). A
   sphere call (mesh, everyone rung) starts from the sphere header or the sphere chat bar
   (`screens/spheres/group_call.dart`); a voice note is a direct-chat thing (hold the
   microphone), not yet a sphere-chat one. A sphere chat's attach button offers a photo,
@@ -378,7 +387,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 846 tests in 78 files under test/{crypto,models,screens,services}
+flutter test                       # 849 tests in 78 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run --flavor foss          # or --flavor play; every build names a flavour now
 flutter build apk --debug --flavor foss

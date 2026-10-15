@@ -106,4 +106,25 @@ void main() {
     expect(sink.disposed, isTrue);
     expect(gate.isDisposed, isTrue);
   });
+
+  test('a track that joins the same stream later is seen by assigning it afresh', () async {
+    final sink = _StrictSink();
+    final gate = RendererGate<String>(sink);
+    final started = gate.start();
+    gate.attach('local-stream');
+    gate.reattach();
+    expect(sink.assigned, isEmpty, reason: 'not ready: nothing to do yet');
+    sink.finishInit();
+    await started;
+    expect(sink.assigned, ['local-stream']);
+
+    gate.attach('local-stream'); // the same object: a camera turned on in a voice call
+    expect(sink.assigned, ['local-stream'], reason: 'identical stream, nothing reassigned');
+    gate.reattach();
+    expect(sink.assigned, ['local-stream', null, 'local-stream']);
+
+    await gate.dispose();
+    gate.reattach();
+    expect(sink.assigned.length, 4, reason: 'only the release on dispose, nothing after');
+  });
 }

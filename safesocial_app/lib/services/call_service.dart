@@ -75,7 +75,6 @@ class CallService extends ChangeNotifier {
   String? _remoteContactKey; // For 1:1 calls
   String? _remoteContactName;
   bool _isMuted = false;
-  bool _isCameraOff = false;
   bool _isSpeakerOn = false;
   bool _isIncomingCall = false;
   RTCSessionDescription? _pendingOffer; // stored until callee accepts
@@ -97,7 +96,7 @@ class CallService extends ChangeNotifier {
       resolveName?.call(identityKey) ??
       (identityKey.length > 8 ? '${identityKey.substring(0, 8)}…' : identityKey);
   bool get isMuted => _isMuted;
-  bool get isCameraOff => _isCameraOff;
+  bool get isCameraOff => !sendingVideo;
   bool get isSpeakerOn => _isSpeakerOn;
   bool get isIncomingCall => _isIncomingCall;
   MediaStream? get localStream => _localStream;
@@ -185,41 +184,153 @@ class CallService extends ChangeNotifier {
     }
   }
 
-  // ── Screen sharing ────────────────────────────────────────────────────────
+  // ── Video in and out of a call ────────────────────────────────────────────
+  //
+  // A call's kind (audio or video) is only how it rang. Either side may turn
+  // its camera on in a voice call or off in a video call at any time. The
+  // first time a phone sends video on a connection it adds the track and
+  // renegotiates (`call_update`, answered by `call_update_answer`); after
+  // that, on and off are a track swap on the same sender plus a `call_video`
+  // line so the other side's screen knows. Both sides offering at once is
+  // settled by key order: the polite side rolls its offer back, answers, and
+  // offers again.
 
   bool _sharingScreen = false;
   bool get sharingScreen => _sharingScreen;
   MediaStream? _screenStream;
   MediaStreamTrack? _cameraTrack;
 
+  /// The sender that carries our video to each peer, once there is one.
+  final Map<String, RTCRtpSender> _videoSenders = {};
+
+  /// Peers we have a renegotiation offer out to.
+  final Set<String> _offering = {};
+
+  /// Peers whose offer we rolled back for, and still owe an offer.
+  final Set<String> _reoffer = {};
+
+  /// Whether each peer sends video now, as they told us.
+  final Map<String, bool> _remoteVideo = {};
+
+  /// Bumped whenever a track joins or leaves a stream the screen already
+  /// holds, since the stream object stays the same and a renderer attached
+  /// to it would not notice.
+  int _mediaRevision = 0;
+  int get mediaRevision => _mediaRevision;
+
+  /// Whether this phone sends a picture now: its camera or its screen.
+  bool get sendingVideo => _sharingScreen || _cameraTrack != null;
+
+  /// Whether [peer] sends a picture now.
+  bool remoteSendsVideo(String peer) => _remoteVideo[peer] ?? false;
+
+  /// Whether anyone in the call sends a picture, so the screen lays out for
+  /// video.
+  bool get hasVideo => sendingVideo || _remoteVideo.values.any((v) => v);
+
+  /// In a collision, the side with the smaller key gives way. Pure.
+  @visibleForTesting
+  static bool isPolite(String myKey, String peerKey) => myKey.compareTo(peerKey) < 0;
+
+  /// What a signal says about the sender's video, falling back to the call's
+  /// kind for an older client that does not say. Pure.
+  @visibleForTesting
+  static bool remoteVideoFrom(Map<String, dynamic> data, {required bool fallback}) {
+    final v = data['video'];
+    return v is bool ? v : fallback;
+  }
+
+  /// Turn our camera on or off in the call we are in. On needs the camera
+  /// permission and throws when it is refused, so the screen can say so.
+  Future<void> setVideo(bool on) async {
+    if (_state == CallState.idle || _state == CallState.ended) return;
+    if (on == (_cameraTrack != null)) return;
+    if (on) {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) throw StateError('Camera permission refused');
+      final cam = await navigator.mediaDevices
+          .getUserMedia({'audio': false, 'video': {'facingMode': 'user'}});
+      final track = cam.getVideoTracks().first;
+      final stream = _localStream;
+      if (stream == null) {
+        track.stop();
+        return;
+      }
+      await stream.addTrack(track);
+      _cameraTrack = track;
+      DebugLogService().info('Call', 'Camera on');
+      if (!_sharingScreen) await _publishVideo(track);
+    } else {
+      final track = _cameraTrack;
+      _cameraTrack = null;
+      DebugLogService().info('Call', 'Camera off');
+      if (!_sharingScreen) await _publishVideo(null);
+      if (track != null) {
+        track.stop();
+        await _localStream?.removeTrack(track);
+      }
+    }
+    _mediaRevision++;
+    notifyListeners();
+  }
+
+  /// The screen's camera button.
+  Future<void> toggleCamera() => setVideo(_cameraTrack == null);
+
   /// Replace the camera with the screen on every peer connection, or back.
   /// Android needs a foreground service for capture; if the platform refuses,
   /// the call carries on with the camera and the error is reported.
   Future<void> toggleScreenShare() async {
     if (_sharingScreen) {
-      final camera = _cameraTrack;
-      for (final pc in _peerConnections.values) {
-        for (final sender in await pc.getSenders()) {
-          if (sender.track?.kind == 'video') await sender.replaceTrack(camera);
-        }
-      }
       _screenStream?.getTracks().forEach((t) => t.stop());
       _screenStream = null;
       _sharingScreen = false;
+      await _publishVideo(_cameraTrack);
+      _mediaRevision++;
       notifyListeners();
       return;
     }
     final screen = await navigator.mediaDevices.getDisplayMedia({'video': true, 'audio': false});
     final track = screen.getVideoTracks().first;
-    _cameraTrack = _localStream?.getVideoTracks().firstOrNull;
-    for (final pc in _peerConnections.values) {
-      for (final sender in await pc.getSenders()) {
-        if (sender.track?.kind == 'video') await sender.replaceTrack(track);
-      }
-    }
     _screenStream = screen;
     _sharingScreen = true;
+    await _publishVideo(track);
+    _mediaRevision++;
     notifyListeners();
+  }
+
+  /// Put [track] (or nothing) on the video sender of every peer. A peer that
+  /// has no video sender yet gets one and a renegotiation; the rest get a
+  /// swap and a `call_video` line.
+  Future<void> _publishVideo(MediaStreamTrack? track) async {
+    final stream = _localStream;
+    for (final entry in _peerConnections.entries.toList()) {
+      final peer = entry.key, pc = entry.value;
+      final sender = _videoSenders[peer];
+      if (sender != null) {
+        await sender.replaceTrack(track);
+        unawaited(_sendSignal(peer, {'type': 'call_video', 'on': track != null}));
+      } else if (track != null && stream != null) {
+        _videoSenders[peer] = await pc.addTrack(track, stream);
+        await _renegotiate(peer);
+      }
+    }
+  }
+
+  Future<void> _renegotiate(String peer) async {
+    final pc = _peerConnections[peer];
+    if (pc == null) return;
+    _offering.add(peer);
+    _reoffer.remove(peer);
+    final offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    DebugLogService().info('Call', 'Renegotiating with ${peer.substring(0, 8)}… (video ${sendingVideo ? 'on' : 'off'})');
+    await _sendSignal(peer, {
+      'type': 'call_update',
+      'sdp': offer.sdp,
+      'sdp_type': offer.type,
+      'video': sendingVideo,
+    });
   }
 
   /// Fired when a group call starts, so the sphere chat can carry a "join"
@@ -245,6 +356,7 @@ class CallService extends ChangeNotifier {
       DebugLogService().info('Call', 'Permissions granted');
       await _initLocalStream(type);
       DebugLogService().info('Call', 'Local stream ready — tracks: ${_localStream?.getTracks().length}');
+      _remoteVideo[contactKey] = type == CallType.video;
       await _setupPeer(contactKey, isInitiator: true);
       _state = CallState.ringing;
       DebugLogService().info('Call', 'Offer sent — waiting for answer');
@@ -347,6 +459,7 @@ class CallService extends ChangeNotifier {
       'type': 'call_answer',
       'sdp': answer.sdp,
       'sdp_type': answer.type,
+      'video': sendingVideo,
     });
   }
 
@@ -378,8 +491,13 @@ class CallService extends ChangeNotifier {
     }
     _peerConnections.clear();
     _remoteStreams.clear();
+    _videoSenders.clear();
+    _offering.clear();
+    _reoffer.clear();
+    _remoteVideo.clear();
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream = null;
+    _cameraTrack = null;
     _pendingCandidates.clear();
     _pendingGroupMembers = const [];
     _state = CallState.idle;
@@ -412,6 +530,7 @@ class CallService extends ChangeNotifier {
       'audio': true,
       'video': type == CallType.video ? {'facingMode': 'user'} : false,
     });
+    _cameraTrack = _localStream!.getVideoTracks().firstOrNull;
     final tracks = _localStream!.getTracks();
     DebugLogService().info('Call', 'Local stream ready — ${tracks.length} track(s): ${tracks.map((t) => '${t.kind}(${t.id})').join(', ')}');
   }
@@ -463,13 +582,15 @@ class CallService extends ChangeNotifier {
     final localTracks = _localStream?.getTracks() ?? [];
     DebugLogService().info('Call', 'Adding ${localTracks.length} local track(s) to peer');
     for (final track in localTracks) {
-      pc.addTrack(track, _localStream!);
+      final sender = await pc.addTrack(track, _localStream!);
+      if (track.kind == 'video') _videoSenders[peerKey] = sender;
     }
 
     pc.onTrack = (event) {
-      DebugLogService().info('Call', 'Remote track received from $peerKey — streams: ${event.streams.length}');
+      DebugLogService().info('Call', 'Remote ${event.track.kind} track received from $peerKey — streams: ${event.streams.length}');
       if (event.streams.isNotEmpty) {
         _remoteStreams[peerKey] = event.streams[0];
+        _mediaRevision++;
         notifyListeners();
       }
     };
@@ -497,6 +618,7 @@ class CallService extends ChangeNotifier {
         'caller_name': _myPublicKey ?? 'Unknown',
         'sdp': offer.sdp,
         'sdp_type': offer.type,
+        'video': sendingVideo,
       });
     }
   }
@@ -602,6 +724,8 @@ class CallService extends ChangeNotifier {
             _remoteDeviceKey = opened.fromDevice;
             _remoteContactName = nameFor(senderKey);
             _callType = data['call_type'] == 'video' ? CallType.video : CallType.audio;
+            _remoteVideo[senderKey] =
+                remoteVideoFrom(data, fallback: _callType == CallType.video);
             _pendingOffer = RTCSessionDescription(data['sdp'], data['sdp_type']);
             _isIncomingCall = true;
             _state = CallState.ringing;
@@ -617,12 +741,14 @@ class CallService extends ChangeNotifier {
             onIncomingCall?.call(senderKey, _remoteContactName!, _callType);
           } else {
             DebugLogService().info('Call', 'call_offer received while busy ($state) — auto-answering as mesh peer');
+            _remoteVideo[senderKey] =
+                remoteVideoFrom(data, fallback: data['call_type'] == 'video');
             await _setupPeer(senderKey, isInitiator: false);
             await _peerConnections[senderKey]!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
             await _flushPendingCandidates(senderKey);
             final answer = await _peerConnections[senderKey]!.createAnswer();
             await _peerConnections[senderKey]!.setLocalDescription(answer);
-            _sendSignal(senderKey, {'type': 'call_answer', 'sdp': answer.sdp, 'sdp_type': answer.type});
+            _sendSignal(senderKey, {'type': 'call_answer', 'sdp': answer.sdp, 'sdp_type': answer.type, 'video': sendingVideo});
           }
           break;
         case 'call_answer':
@@ -646,6 +772,8 @@ class CallService extends ChangeNotifier {
             }
           }
           DebugLogService().info('Call', 'call_answer received from $senderKey — setting remote description');
+          _remoteVideo[senderKey] =
+              remoteVideoFrom(data, fallback: _callType == CallType.video);
           await _peerConnections[senderKey]?.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
           await _flushPendingCandidates(senderKey);
           _state = CallState.connected;
@@ -677,6 +805,7 @@ class CallService extends ChangeNotifier {
             // so a video call was joined as audio.
             _callType =
                 data['call_type'] == 'video' ? CallType.video : CallType.audio;
+            _remoteVideo[senderKey] = _callType == CallType.video;
             _pendingGroupMembers = (data['members'] as List<dynamic>? ?? [])
                 .whereType<String>()
                 .toList();
@@ -690,6 +819,11 @@ class CallService extends ChangeNotifier {
           if (_state == CallState.connected || _groupId == data['group_id']) {
             await _setupPeer(senderKey, isInitiator: true);
           }
+          break;
+        case 'call_update':
+        case 'call_update_answer':
+        case 'call_video':
+          await _handleVideoSignal(type as String, senderKey, opened.fromDevice, data);
           break;
         case 'call_end':
           if (senderKey == _remoteContactKey &&
@@ -712,6 +846,10 @@ class CallService extends ChangeNotifier {
           await _peerConnections[senderKey]?.close();
           _peerConnections.remove(senderKey);
           _remoteStreams.remove(senderKey);
+          _videoSenders.remove(senderKey);
+          _offering.remove(senderKey);
+          _reoffer.remove(senderKey);
+          _remoteVideo.remove(senderKey);
           if (_peerConnections.isEmpty) {
             _state = CallState.idle;
             DebugLogService().info('Call', 'All peers disconnected — state → idle');
@@ -733,10 +871,65 @@ class CallService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleCamera() {
-    _isCameraOff = !_isCameraOff;
-    _localStream?.getVideoTracks().forEach((t) => t.enabled = !_isCameraOff);
-    notifyListeners();
+  /// A mid-call change of picture from [senderKey]. In a one-to-one call
+  /// only the device we are talking to is heard; another of their devices
+  /// has nothing to say about this call.
+  Future<void> _handleVideoSignal(
+      String type, String senderKey, String? fromDevice, Map<String, dynamic> data) async {
+    if (_groupId == null &&
+        senderKey == _remoteContactKey &&
+        _remoteDeviceKey != null &&
+        fromDevice != _remoteDeviceKey) {
+      return;
+    }
+    final pc = _peerConnections[senderKey];
+    if (pc == null) return;
+    switch (type) {
+      case 'call_video':
+        _remoteVideo[senderKey] = data['on'] == true;
+        _mediaRevision++;
+        DebugLogService().info('Call', '${senderKey.substring(0, 8)}… turned video ${data['on'] == true ? 'on' : 'off'}');
+        break;
+      case 'call_update':
+        if (_offering.contains(senderKey)) {
+          final me = _myPublicKey ?? '';
+          if (!isPolite(me, senderKey)) {
+            DebugLogService().info('Call', 'Offers crossed; ours stands, theirs is dropped');
+            return;
+          }
+          DebugLogService().info('Call', 'Offers crossed; giving way and offering again after');
+          try {
+            await pc.setLocalDescription(RTCSessionDescription('', 'rollback'));
+          } catch (e) {
+            DebugLogService().warn('Call', 'Rollback refused: $e');
+            return;
+          }
+          _offering.remove(senderKey);
+          _reoffer.add(senderKey);
+        }
+        _remoteVideo[senderKey] = remoteVideoFrom(data, fallback: _remoteVideo[senderKey] ?? false);
+        await pc.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
+        final answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await _sendSignal(senderKey, {
+          'type': 'call_update_answer',
+          'sdp': answer.sdp,
+          'sdp_type': answer.type,
+          'video': sendingVideo,
+        });
+        _mediaRevision++;
+        if (_reoffer.contains(senderKey)) await _renegotiate(senderKey);
+        break;
+      case 'call_update_answer':
+        if (!_offering.remove(senderKey)) {
+          DebugLogService().warn('Call', 'An update answer with no offer out; ignored');
+          return;
+        }
+        _remoteVideo[senderKey] = remoteVideoFrom(data, fallback: _remoteVideo[senderKey] ?? false);
+        await pc.setRemoteDescription(RTCSessionDescription(data['sdp'], data['sdp_type']));
+        _mediaRevision++;
+        break;
+    }
   }
 
   Future<void> switchCamera() async {

@@ -26,6 +26,7 @@ class _CallScreenState extends State<CallScreen> {
   bool _listenerAdded = false;
   bool _gone = false;
   CallService? _callService;
+  int _seenRevision = 0;
 
   @override
   void initState() {
@@ -55,6 +56,7 @@ class _CallScreenState extends State<CallScreen> {
       // side), so take the current state now rather than waiting for a change.
       _local.attach(cs.localStream);
       _syncRemoteRenderers(cs.remoteStreams);
+      _seenRevision = cs.mediaRevision;
     }
   }
 
@@ -83,6 +85,14 @@ class _CallScreenState extends State<CallScreen> {
 
     _local.attach(cs.localStream);
     _syncRemoteRenderers(cs.remoteStreams);
+    // A track joined or left a stream the renderers already hold.
+    if (cs.mediaRevision != _seenRevision) {
+      _seenRevision = cs.mediaRevision;
+      _local.reattach();
+      for (final gate in _remote.values) {
+        gate.reattach();
+      }
+    }
   }
 
   /// One renderer per remote stream, created once and only shown when ready.
@@ -109,17 +119,17 @@ class _CallScreenState extends State<CallScreen> {
     _rebuildIfAlive();
   }
 
-  /// Remote renderers that can draw right now.
-  List<RTCVideoRenderer> get _readyRemoteRenderers => [
+  /// Remote renderers that can draw right now, for peers sending a picture.
+  List<RTCVideoRenderer> _readyRemoteRenderers(CallService cs) => [
         for (final entry in _remote.entries)
-          if (entry.value.isReady) _remoteRenderers[entry.key]!,
+          if (entry.value.isReady && cs.remoteSendsVideo(entry.key))
+            _remoteRenderers[entry.key]!,
       ];
 
   @override
   Widget build(BuildContext context) {
     final callService = context.watch<CallService>();
-    final isVideo = callService.callType == CallType.video;
-    final remoteReady = _readyRemoteRenderers;
+    final remoteReady = _readyRemoteRenderers(callService);
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -127,14 +137,14 @@ class _CallScreenState extends State<CallScreen> {
         child: Stack(
           children: [
             // ── Video Grid (Remotes) ──────────────────────────
-            if (isVideo && remoteReady.isNotEmpty)
+            if (remoteReady.isNotEmpty)
               _buildVideoGrid(remoteReady)
             else
               // Audio call or connecting — show avatars
               _buildAudioBackground(callService),
 
             // ── Local video (small, floating) ────────────────
-            if (isVideo && _local.isReady && callService.localStream != null)
+            if (callService.sendingVideo && _local.isReady && callService.localStream != null)
               Positioned(
                 top: 20,
                 right: 20,
@@ -239,26 +249,39 @@ class _CallScreenState extends State<CallScreen> {
                   onTap: () => callService.toggleMute(),
                   active: !callService.isMuted,
                 ),
-                if (callService.callType == CallType.video) ...[
+                // The camera and the screen go in any call, a voice call
+                // included, and come out again.
+                _CallActionButton(
+                  icon: callService.isCameraOff ? Icons.videocam_off : Icons.videocam,
+                  onTap: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    try {
+                      await callService.toggleCamera();
+                    } catch (e) {
+                      messenger.showSnackBar(
+                          SnackBar(content: Text('The camera could not be turned on: $e')));
+                    }
+                  },
+                  active: !callService.isCameraOff,
+                ),
+                if (callService.sendingVideo && !callService.sharingScreen)
                   _CallActionButton(
-                    icon: callService.isCameraOff ? Icons.videocam_off : Icons.videocam,
-                    onTap: () => callService.toggleCamera(),
-                    active: !callService.isCameraOff,
+                    icon: Icons.cameraswitch_outlined,
+                    onTap: () => callService.switchCamera(),
                   ),
-                  _CallActionButton(
-                    icon: callService.sharingScreen ? Icons.stop_screen_share : Icons.screen_share,
-                    onTap: () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      try {
-                        await callService.toggleScreenShare();
-                      } catch (e) {
-                        messenger.showSnackBar(SnackBar(
-                            content: Text('Screen sharing is not available here: $e')));
-                      }
-                    },
-                    active: !callService.sharingScreen,
-                  ),
-                ],
+                _CallActionButton(
+                  icon: callService.sharingScreen ? Icons.stop_screen_share : Icons.screen_share,
+                  onTap: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    try {
+                      await callService.toggleScreenShare();
+                    } catch (e) {
+                      messenger.showSnackBar(SnackBar(
+                          content: Text('Screen sharing is not available here: $e')));
+                    }
+                  },
+                  active: !callService.sharingScreen,
+                ),
                 _CallActionButton(
                   icon: Icons.call_end,
                   onTap: () {

@@ -67,6 +67,17 @@ class RendererGate<T> {
     _attached = _wanted;
   }
 
+  /// Show the same stream again. A renderer takes the stream's first video
+  /// track when the stream is assigned, so a track that joins or leaves
+  /// later (a camera turned on in a voice call) is not seen until the stream
+  /// is assigned afresh.
+  void reattach() {
+    if (!_ready || _disposed || _wanted == null) return;
+    sink.srcObject = null;
+    sink.srcObject = _wanted;
+    _attached = _wanted;
+  }
+
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
