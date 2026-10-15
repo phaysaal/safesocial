@@ -37,12 +37,14 @@ import 'screens/feed/story_archive_screen.dart';
 import 'screens/spheres/sphere_guides_screen.dart';
 import 'screens/spheres/sphere_settings_screen.dart';
 import 'screens/profile/avatar_editor_screen.dart';
+import 'screens/settings/adverts_screen.dart';
 import 'screens/settings/translation_screen.dart';
 import 'screens/wellbeing/crisis_screen.dart';
 import 'screens/wellbeing/privacy_checkup_screen.dart';
 import 'screens/wellbeing/wellbeing_screen.dart';
 import 'screens/wellbeing/year_review_screen.dart';
 import 'services/bubble_bridge.dart';
+import 'services/ad_service.dart';
 import 'services/wellbeing_service.dart';
 import 'services/feed_service.dart';
 import 'services/chat_service.dart';
@@ -88,6 +90,7 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     _initRouter();
     AppLifecycle.foreground = true;
     context.read<WellbeingService>().onForeground();
+    context.read<AdService>().onForeground();
     // Started behind the lock screen (a knock, a notification tap on a locked
     // phone): there is no change event to say so, only the state as it is.
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
@@ -121,8 +124,10 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
     AppLifecycle.foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       context.read<WellbeingService>().onForeground();
+      context.read<AdService>().onForeground();
     } else {
       context.read<WellbeingService>().onBackground();
+      context.read<AdService>().onBackground();
     }
     // Off screen, the hub lets its socket go after a grace so the relay knocks
     // (Android cuts a background app's network while its socket still looks
@@ -377,6 +382,10 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
         GoRoute(
           path: '/profile/avatar',
           builder: (context, state) => const AvatarEditorScreen(),
+        ),
+        GoRoute(
+          path: '/settings/adverts',
+          builder: (context, state) => const AdvertsScreen(),
         ),
         GoRoute(
           path: '/settings/translation',

@@ -79,6 +79,7 @@ class SecureStore {
     'spheres_invite_token_times_v1',
     'spheres_admin_keywords_v1',
     'spheres_wellbeing_v1',
+    'spheres_adverts_v1',
     'spheres_search_history_v1',
     'spheres_tag_review_v1',
     'spheres_archived_posts_v1',

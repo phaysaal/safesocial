@@ -881,6 +881,42 @@ the client already takes an arbitrary host.
   composer; there is no other audience. Download saves to the system gallery after a
   confirmation that explains the file leaves the encrypted store.
 
+### 12.5 Advertisements — decided 2026-10-14
+
+Spheres may one day carry adverts, and the way it does was decided before the first
+one so that it cannot drift towards the industry's: **like a television break, not like
+a feed**. After twenty minutes of watching, one advert on Home, until the person closes
+it; then the twenty minutes start again. What fills the slot is decided on the phone and
+nowhere else.
+
+- **No signal leaves the device.** The app never reads what the person does to choose an
+  advert, and never reports what was shown, closed or opened. The phone fetches the
+  whole catalogue, every category, with no identifier in the request, and picks locally.
+  The host sees a fetch and nothing more; whoever serves the catalogue cannot tell a
+  category on from one off.
+- **The person chooses the categories**, from a fixed list of twenty-four in the app.
+  On the free plan at least ten stay on; on a paid plan any number, down to none. No
+  plan is sold yet, and the app says so rather than pretending.
+- **Text only, marked sponsored, with a "why this?"** that is always true because the
+  rule above is the only rule. A link opens outside the app and only when it is http(s).
+- **Today there are none.** The framework (`AdService`, `AdCatalogue`, `AdChoice`,
+  `AdvertCard`, Settings, Advertisements) is in place and tested; the operator's source is
+  `NoAdverts`. Starting is one line in `AppServices`: a `JsonAdCatalogue` pointed at a
+  version-1 document. Everything the person chose before that day applies on it. Until
+  then the path is tried from a phone: Settings, Advertisements takes a catalogue address
+  for that phone alone and can fill the slot without the wait;
+  `https://spheres.dev/ads/test-catalogue.json` (from `landing/ads/`) carries three test
+  adverts and two the app must drop.
+- **Pricing, when it comes, is airtime.** The phone reports no impression, click or
+  close, so there is nothing to bill per view; an advertiser buys a slot in a category for
+  a period, as on television, and is told how many share it and nothing about reach. An
+  advertiser portal (a Worker with D1 and Stripe, publishing the same JSON after the
+  operator approves each advert by hand) is for the day there are advertisers; the app
+  needs no change for it.
+
+**Not doing:** any targeting beyond the chosen categories; frequency or conversion
+reporting; an SDK from an advertising network; adverts in chats, spheres or stories.
+
 ---
 
 ## 13. Plan to finish

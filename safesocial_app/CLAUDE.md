@@ -282,6 +282,32 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   post is hidden on arrival (`FeedService.restrictedKeys`); `unseenCount` feeds the Home
   dot; text scale, high contrast and reduced motion live in `ThemeService` and are applied
   in the `MaterialApp` builder. Language: English only, and Settings says so.
+- **Advertisements** (`models/advert.dart`, `services/ad_service.dart`,
+  `services/ad_catalogue.dart`; sealed key `spheres_adverts_v1`): the television rule.
+  `AdService` counts seconds on screen, any screen, and after twenty minutes puts one
+  advert in the slot on Home (`_AdvertSlot` above the posts, `AdvertCard`), where it stays
+  until closed; the clock does not run while one is up. Nothing about the person is read
+  or sent to choose it: the phone fetches the *whole* catalogue (`AdCatalogue`; the
+  operator's source is `NoAdverts` today, `JsonAdCatalogue(url)` is the one that serves a
+  version-1 JSON document with no identifier in the request) and picks on the device the
+  least recently shown advert in a category kept on, ties by id. Categories are a fixed
+  list of twenty-four in the app (`AdCategory.all`); a catalogue entry outside it, or
+  short of a whole advert, or with a link that is not http(s), is dropped. The choice is
+  `AdChoice` (pure): the free plan keeps at least ten categories on and refuses the
+  eleventh off with a `StateError` (the switch is disabled first); the paid plan may reach
+  zero; a move back to free turns categories on in list order up to the floor. There is no
+  way to buy a plan yet and Settings, Advertisements says so, as it says that no adverts
+  are shown at present; the choices are kept for the day they are. Which advert was shown,
+  when, and that one was shown at all stay on the phone. To try the path before the
+  operator carries anything, the same screen takes a catalogue address for this phone
+  alone (`AdService.setTestUrl`, plain preference `adverts_catalogue_url`, http(s) only;
+  it replaces the operator's source until cleared) and a "fill the slot now" action
+  (`fillSlotNow`); `landing/ads/test-catalogue.json` is served at
+  `https://spheres.dev/ads/test-catalogue.json` with three good adverts and two the app
+  must drop. The operator's real catalogue, when there is one, is the same shape at a
+  path beside it, named in `AppServices`. Billing can only ever be airtime (a slot in a
+  category for a period), since the phone reports no impression; an advertiser portal is
+  for later and needs no change in the app.
 - **Invite links** are `spheres://join?s=&t=&via=&n=&q=`; `q` carries the sphere's join
   questions, the request carries the answers, and approval makes the requester a contact
   and a member in one step, then posts the welcome line if the sphere has one.
@@ -352,7 +378,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 818 tests in 76 files under test/{crypto,models,screens,services}
+flutter test                       # 846 tests in 78 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run --flavor foss          # or --flavor play; every build names a flavour now
 flutter build apk --debug --flavor foss

@@ -10,6 +10,8 @@ import 'services/album_service.dart';
 import 'services/bubble_bridge.dart';
 import 'services/sphere_info_service.dart';
 import 'services/wellbeing_service.dart';
+import 'services/ad_catalogue.dart';
+import 'services/ad_service.dart';
 import 'services/mlkit_translator.dart';
 import 'services/translation_service.dart';
 import 'services/app_lock_service.dart';
@@ -65,6 +67,9 @@ class AppServices {
   late final sphereSyncService = SphereSyncService(sphereService);
   late final sphereInfoService = SphereInfoService(sphereService);
   final wellbeingService = WellbeingService();
+  /// No adverts are shown today. To start, put a `JsonAdCatalogue(url)`
+  /// here; the pick stays on the phone either way.
+  final adService = AdService(catalogue: const NoAdverts());
   final translationService = TranslationService(MlKitTranslator());
   final callConfig = CallConfig();
   final notificationService = NotificationService();
@@ -121,6 +126,8 @@ class AppServices {
     await libraryService.load();
     await notificationService.load();
     await wellbeingService.load();
+    await adService.load();
+    unawaited(adService.refreshCatalogue());
     await translationService.load();
     notificationService.inQuietHours = wellbeingService.inQuietHours;
     wellbeingService.onPauseChanged = (paused) async {
@@ -231,6 +238,7 @@ class AppServices {
         ChangeNotifierProvider.value(value: sphereSyncService),
         ChangeNotifierProvider.value(value: sphereInfoService),
         ChangeNotifierProvider.value(value: wellbeingService),
+        ChangeNotifierProvider.value(value: adService),
         ChangeNotifierProvider.value(value: translationService),
         ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),

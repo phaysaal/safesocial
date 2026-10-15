@@ -10,6 +10,8 @@ import '../../services/sphere_info_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/outbox_service.dart';
 import '../../services/identity_service.dart';
+import '../../services/ad_service.dart';
+import '../../widgets/advert_card.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/post_extras.dart';
@@ -175,6 +177,8 @@ class _FeedScreenState extends State<FeedScreen> {
                     SliverToBoxAdapter(child: _MemoriesBanner(count: memories.length)),
                   // Create-post bar
                   SliverToBoxAdapter(child: _CreatePostBar()),
+                  // The advert slot: one after every twenty minutes watched
+                  const SliverToBoxAdapter(child: _AdvertSlot()),
                   // Divider
                   SliverToBoxAdapter(
                     child: Container(height: 8, color: theme.scaffoldBackgroundColor),
@@ -212,6 +216,7 @@ class _FeedScreenState extends State<FeedScreen> {
         const SliverToBoxAdapter(child: _CelebrationsBanner()),
         const SliverToBoxAdapter(child: _FeedFilterRow()),
         SliverToBoxAdapter(child: _CreatePostBar()),
+        const SliverToBoxAdapter(child: _AdvertSlot()),
         SliverToBoxAdapter(
           child: Container(height: 8, color: theme.scaffoldBackgroundColor),
         ),
@@ -252,6 +257,27 @@ class _FeedScreenState extends State<FeedScreen> {
         ),
       ],
     );
+  }
+}
+
+// ─── Advert slot ─────────────────────────────────────────────────────────────
+
+/// Empty until [AdService] has an advert due; then the card, until closed.
+class _AdvertSlot extends StatelessWidget {
+  const _AdvertSlot();
+
+  @override
+  Widget build(BuildContext context) {
+    final ads = context.watch<AdService>();
+    final advert = ads.current;
+    if (advert == null) return const SizedBox.shrink();
+    final card = AdvertCard(advert: advert, onClose: ads.dismiss);
+    if (isTablet(context)) {
+      return Center(
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 600), child: card),
+      );
+    }
+    return card;
   }
 }
 

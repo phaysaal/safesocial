@@ -20,6 +20,7 @@ import '../../services/identity_service.dart';
 import '../../services/inbound_events.dart';
 import '../../services/notification_service.dart';
 import '../../services/wake_service.dart';
+import '../../services/ad_service.dart';
 import '../../services/app_lock_service.dart';
 import '../../services/library_service.dart';
 import '../../services/theme_service.dart';
@@ -415,6 +416,20 @@ class SettingsScreen extends StatelessWidget {
             subtitle: const Text('Counted on this device'),
             onTap: () => context.push('/year'),
           ),
+
+          // ── Advertisements ───────────────────────────────
+          _SectionHeader(title: 'Advertisements'),
+          Builder(builder: (context) {
+            final ads = context.watch<AdService>();
+            return ListTile(
+              leading: Icon(Icons.campaign_outlined, color: cs.primary),
+              title: const Text('Advertisements'),
+              subtitle: Text(ads.state == CatalogueState.notOffered
+                  ? 'None shown at present; ${ads.choice.on.length} categories chosen for when they are'
+                  : 'One every twenty minutes of watching; ${ads.choice.on.length} categories on'),
+              onTap: () => context.push('/settings/adverts'),
+            );
+          }),
 
           // ── Accessibility ────────────────────────────────
           _SectionHeader(title: 'Accessibility'),

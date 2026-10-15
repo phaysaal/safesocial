@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "ads": [
+    {
+      "id": "test-books-1",
+      "category": "books",
+      "title": "A test advert about books",
+      "body": "This is a sample from the Spheres test catalogue. It exists so the slot can be tried on a phone; nobody paid for it.",
+      "sponsor": "Spheres (test)",
+      "link": "https://spheres.dev"
+    },
+    {
+      "id": "test-music-1",
+      "category": "music",
+      "title": "A test advert about music",
+      "body": "Turn the music category off in Settings, Advertisements, and this one never fills the slot.",
+      "sponsor": "Spheres (test)"
+    },
+    {
+      "id": "test-outdoors-1",
+      "category": "outdoors",
+      "title": "A test advert about the outdoors",
+      "body": "Three adverts take turns: the one shown longest ago comes next.",
+      "sponsor": "Spheres (test)",
+      "link": "https://spheres.dev"
+    },
+    {
+      "id": "test-bad-link",
+      "category": "games",
+      "title": "This one must never show",
+      "body": "Its link is not http(s), so the app drops the whole advert.",
+      "sponsor": "Spheres (test)",
+      "link": "javascript:alert(1)"
+    },
+    {
+      "id": "test-bad-category",
+      "category": "gambling",
+      "title": "This one must never show either",
+      "body": "Its category is not one the app knows.",
+      "sponsor": "Spheres (test)"
+    }
+  ]
+}
