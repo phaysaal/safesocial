@@ -146,6 +146,31 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   (`screens/spheres/group_call.dart`); a voice note is a direct-chat thing (hold the
   microphone), not yet a sphere-chat one. A sphere chat's attach button offers a photo,
   the camera, a video, a file and a poll.
+- **Notes from a call** (`docs/call_notes.md`; off by default, Settings, Network): with
+  the person's say-so, their *own* words in a call become notes on the phone. A second
+  microphone capture is piped to Android's on-device recogniser (`CallNotes.kt`, Android
+  13 and up, channel `spheres/notes`) and each finalised segment goes to one AutoEar v2
+  engine session (`android/app/libs/autoear-engine.jar`, pure JVM, rule-based, English
+  only); `CallNotesService` starts it when a call connects, stops it when the call ends
+  and keeps the notes and summary sealed under the call's log entry
+  (`spheres_call_notes_v1`, entries now carry an `id`). A notes button in the call turns
+  them on for both phones: `CallService.setNotes` sends a `call_notes` line and the other
+  side starts its own (`applyNotesSignal`), each phone noting its own voice and its chip
+  saying who began; the setting makes this happen at every connect. When the call ends,
+  each phone with notes is asked once whether to send them to the other as a chat message
+  (`shareOffer`, `shareText`; the prompt lives in `HomeScreen`). Every note carries the
+  clock time it was said (`CallNote.at`, from the engine's offset and when notes began),
+  and the message goes as kind `call_notes` with the notes and the span in its payload
+  (`sharePayload`, `SharedCallNotes`); the receiving phone matches it to its own record of
+  the call by that span, two minutes of slack for clocks (`recordOverlapping`), and the
+  notes screen shows both sides as one list in the order things were said
+  (`CallNotesService.merge`), theirs labelled with their name and left as sent, ours
+  editable. The other party is not recorded;
+  the transcript is never stored, logged or passed over the channel. Every note is shown
+  as engine-made and uncertain, editable and deletable (`CallNotesScreen`, reached from
+  the call history). Where there is no platform code or the phone cannot, the switch says
+  why. Integrated on 16 October 2026 at the AutoEar session's request with the owner's
+  consent; untested on hardware.
 - **Hub identity.** The hub id in the socket URL is minted once per install and kept in
   plain `SharedPreferences`, because a mailbox holds one subscriber slot per hub and a
   fresh id per process filled the slots with dead hubs within a day. The relay evicts
@@ -162,7 +187,9 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   call still rings. Nothing of this is told to the other person.
 - **Message kinds.** `Message.kind` is text, poll, location, contact, video_note, sticker,
   file (any type, uploaded as it is with `name`, `mime` and `size` in the payload, opened
-  through the `spheres/files` channel), call or system, with structured content in `payload`; `Post.kind` is post, event, poll,
+  through the `spheres/files` channel), call_notes (one side's notes of a call, with their
+  clock times, in `payload`; the bubble opens them beside ours), call or system, with
+  structured content in `payload`; `Post.kind` is post, event, poll,
   life_event, recommend (one suggestion per member, via `post_suggest`) or reshare. Any
   post's payload may carry `bg` (a named background for short text), `feeling` or
   `activity`. Every post carries `authorSig`, the author's Ed25519 signature over
@@ -233,7 +260,27 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   `BubbleActivity` attaches to the cached engine (`FlutterEngineCache`, id `main`) so no
   second copy of the services starts, then asks the app to show the chat over the
   `spheres/bubbles` channel.
-- **Stories** are posts with `isStory` and a day's expiry. A story may carry a sticker
+- **Self sphere** (`SphereService.ensureSelf`, run at every start from `wireIdentity`):
+  every identity has one built-in sphere with one member, itself, named "Self". It is
+  derived, not minted: its id is a hash of the identity key (`selfSphereIdFor`) and its
+  first key is HKDF of the identity secret, so every device of the same identity arrives
+  at the same sphere with the same key without being told, and nothing is broadcast. It
+  cannot be renamed, left or opened to anyone (`StateError`); the list shows it as "Just
+  you, built in" and the sphere screen hides Leave and the lone-admin warning for it.
+- **A post's spheres can change after it is sent** (`FeedService.setPostSpheres`, author
+  only, at least one sphere, not for a flash; "Spheres it is in…" in the post menu). A
+  sphere added is sent the post as if new there (comments and reactions so far stay where
+  they were made); a sphere removed is sent `post_delete` with `sphere_id`, which a reader
+  honours by taking that sphere off the post and dropping it only when none is left. Both
+  sides remember the (post, sphere) pairs taken out (`_unshared`, sealed key
+  `spheres_unshared_v1`) so a sync round offering that copy back does not put it back. A
+  client from before this reads the scoped delete as a plain one and drops the whole post,
+  which errs towards less. The profile has "Your posts" and "Your activity" (posts,
+  comments and reactions read off the device, `own_activity_screen.dart`).
+- **Stories** are posts with `isStory` and a day's expiry. A person sees them as
+  *flashes*: "Flash" everywhere the UI speaks, `story` everywhere the code does. The strip
+  on Home starts folded as one thin row of rings (`_FlashStrip`) and a tap unfolds it,
+  since open it took a quarter of the screen. A story may carry a sticker
   (`poll`, `question`, `countdown`, `quiz`, `slider`, `feeling`, `link`) in its payload;
   answers to the first four travel as private replies to the author, a link opens only
   when it is `http(s)` and nothing is fetched to preview it. The source sheet offers the
@@ -317,6 +364,18 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   path beside it, named in `AppServices`. Billing can only ever be airtime (a slot in a
   category for a period), since the phone reports no impression; an advertiser portal is
   for later and needs no change in the app.
+- **Look.** The layout is the one people know from the big social apps, on purpose, so
+  that it feels like home; the marks that would make it read as a copy of one are not
+  used. No thumb and no "Like": `ReactionKinds` offers Respect (the tap default), Cool,
+  Wow!, Adorable, LOL, Sad, Angry and Not for me, and still accepts and names the five
+  kinds from before (`legacy`) so an older reaction or client keeps its meaning. The
+  action row is a reaction glyph, Comment and Pass on; the composer says "Say something
+  to your spheres"; the neutrals in `theme/app_theme.dart` carry a trace of the rose
+  rather than a palette lifted from elsewhere; headings use Outfit, bundled under
+  `assets/fonts` (SIL OFL) with the body in the system font. The runtime font package
+  that used to set Inter asked Google's servers for it at every start and is gone. The
+  bottom bar is Home, Spheres, Chat, Contacts, Profile, with the product's own object in
+  the middle. The sphere a post reached us through is named on its card.
 - **Invite links** are `spheres://join?s=&t=&via=&n=&q=`; `q` carries the sphere's join
   questions, the request carries the answers, and approval makes the requester a contact
   and a member in one step, then posts the welcome line if the sphere has one.
@@ -387,7 +446,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 849 tests in 78 files under test/{crypto,models,screens,services}
+flutter test                       # 876 tests in 81 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run --flavor foss          # or --flavor play; every build names a flavour now
 flutter build apk --debug --flavor foss

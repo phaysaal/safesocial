@@ -300,7 +300,7 @@ class ProfileView extends StatelessWidget {
                                     context: context,
                                     builder: (ctx) => AlertDialog(
                                       title: Text('Remove "${h.title}"?'),
-                                      content: const Text('The pictures stay in your story archive.'),
+                                      content: const Text('The pictures stay in your flash archive.'),
                                       actions: [
                                         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
                                         FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),

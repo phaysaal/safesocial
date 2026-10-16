@@ -74,7 +74,7 @@ android {
             }
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }
@@ -110,6 +110,12 @@ dependencies {
     // The Play build's built-in distributor; see productFlavors above. It
     // declares its own receivers in its manifest, so nothing is added to ours.
     "playImplementation"("org.unifiedpush.android:embedded-fcm-distributor:3.1.0")
+    // The AutoEar v2 note engine: a pure-JVM jar (no Android, no network)
+    // that turns English transcript text into notes. Built from the AutoEar
+    // repository (v2/engine) and copied here; see docs/call_notes.md.
+    implementation(files("libs/autoear-engine.jar"))
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    testImplementation("junit:junit:4.13.2")
 }
 
 // Two plugins pull in Google Tink under two artifact names — `tink` (via the

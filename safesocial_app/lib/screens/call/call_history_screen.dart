@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../services/call_notes_service.dart';
 import '../../services/call_service.dart';
 import '../../services/contact_service.dart';
 
@@ -40,7 +41,11 @@ class CallHistoryScreen extends StatelessWidget {
                         : (incoming ? Icons.call_received : Icons.call_made),
                     color: missed ? cs.error : cs.primary,
                   ),
-                  title: Text(name, style: TextStyle(color: missed ? cs.error : null)),
+                  title: Row(children: [
+                    Expanded(child: Text(name, style: TextStyle(color: missed ? cs.error : null))),
+                    if (context.watch<CallNotesService>().hasNotes(e['id'] as String? ?? ''))
+                      Icon(Icons.sticky_note_2_outlined, size: 16, color: cs.primary),
+                  ]),
                   subtitle: Text(
                     '${video ? 'Video' : 'Voice'} · '
                     '${missed ? 'Missed' : (seconds > 0 ? '${seconds ~/ 60}m ${seconds % 60}s' : 'Not connected')}'
@@ -53,7 +58,14 @@ class CallHistoryScreen extends StatelessWidget {
                       if (context.mounted) context.push('/call');
                     },
                   ),
-                  onTap: () => context.push('/chat/$peer'),
+                  onTap: () {
+                    final id = e['id'] as String?;
+                    if (id != null && context.read<CallNotesService>().hasNotes(id)) {
+                      context.push('/calls/notes/$id');
+                    } else {
+                      context.push('/chat/$peer');
+                    }
+                  },
                 );
               },
             ),

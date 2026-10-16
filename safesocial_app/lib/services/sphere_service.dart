@@ -793,9 +793,93 @@ class SphereService extends ChangeNotifier {
     return sphere;
   }
 
+  // ── Self ───────────────────────────────────────────────────────────────────
+  //
+  // Every identity has one built-in sphere with one member: itself. Notes to
+  // self, things to keep, a place to post with nobody else in it. It is
+  // derived, not minted: its id is a hash of the identity key and its first
+  // key is derived from the identity secret, so every device of the same
+  // identity arrives at the same sphere with the same key without being told,
+  // and two devices starting on the same day do not fight over it. It is not
+  // broadcast, cannot be renamed, left or opened to anyone.
+
+  static const selfName = 'Self';
+
+  /// The Self sphere's id for an identity. Pure.
+  static String selfSphereIdFor(String identityKey) =>
+      sha256.convert(utf8.encode('spheres/self-sphere/v1:$identityKey')).toString();
+
+  /// Whether [sphereId] is this identity's built-in sphere.
+  bool isSelf(String sphereId) {
+    final me = _myIdentityKey;
+    return me != null && sphereId == selfSphereIdFor(me);
+  }
+
+  /// The Self sphere, once [ensureSelf] has run.
+  Sphere? get selfSphere {
+    final me = _myIdentityKey;
+    return me == null ? null : _spheres[selfSphereIdFor(me)];
+  }
+
+  /// Make sure the Self sphere exists. Idempotent; run at every start.
+  Future<Sphere> ensureSelf() async {
+    _requireReady();
+    final me = _myIdentityKey!;
+    final id = selfSphereIdFor(me);
+    final existing = _spheres[id];
+    if (existing != null) {
+      // Its first key is derived, so a device whose keyring lost it (a
+      // restore that left sessions and keys behind) gets it back here.
+      if (keyring.keyFor(id, 1) == null) {
+        keyring.store(id, 1, await _selfKey());
+        await keyring.persist();
+      }
+      return existing;
+    }
+    final now = DateTime.now();
+    final sphere = Sphere(
+      id: id,
+      name: selfName,
+      description: 'Only you. Notes, drafts, things to keep.',
+      kind: SphereKind.group,
+      createdBy: me,
+      createdAt: now,
+      epoch: 1,
+      members: [
+        SphereMember(
+          identityKey: me,
+          role: SphereRole.owner,
+          joinedAt: now,
+          invitedBy: me,
+          keyExchangePublicKey: _myExchangeKey,
+        ),
+      ],
+    );
+    _spheres[id] = sphere;
+    keyring.store(id, 1, await _selfKey());
+    await keyring.persist();
+    await _record(sphere, MembershipOp.opCreate, '', me, detail: selfName);
+    await _persist();
+    notifyListeners();
+    DebugLogService().info('Sphere', 'Self sphere in place');
+    return sphere;
+  }
+
+  Future<Uint8List> _selfKey() => SpheresCrypto.hkdf(
+        secret: hex.decode(_myIdentitySecret!),
+        info: 'spheres/self-sphere/key/v1',
+      );
+
+  void _refuseForSelf(String sphereId, String what) {
+    if (isSelf(sphereId)) {
+      throw StateError('Self is built in and cannot be $what');
+    }
+  }
+
   /// Add someone. Rotates the key so the new member cannot read history they
   /// were not part of.
   Future<void> addMember(String sphereId, String identityKey) async {
+    _refuseForSelf(sphereId, 'opened to anyone');
     final sphere = _requireAdmin(sphereId);
     if (sphere.contains(identityKey)) return;
 
@@ -905,6 +989,7 @@ class SphereService extends ChangeNotifier {
     String? name,
     String? description,
   }) async {
+    _refuseForSelf(sphereId, 'renamed');
     final sphere = _requireAdmin(sphereId);
     final newName = (name ?? sphere.name).trim();
     final newDescription = (description ?? sphere.description).trim();
@@ -1267,6 +1352,7 @@ class SphereService extends ChangeNotifier {
   /// admin. Every device derives the same successor from the member list, so
   /// this needs no negotiation and cannot leave the sphere disagreeing.
   Future<void> leave(String sphereId) async {
+    _refuseForSelf(sphereId, 'left');
     final sphere = _spheres[sphereId];
     if (sphere == null) return;
     final me = _myIdentityKey!;

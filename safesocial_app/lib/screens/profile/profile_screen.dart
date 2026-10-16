@@ -148,6 +148,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 12),
                         _ProfileTile(
+                          icon: Icons.article_outlined,
+                          label: 'Your posts',
+                          hint: '${feed.posts.where((p) => p.authorId == profile.publicKey && !p.isStory).length} on this device',
+                          onTap: () => context.push('/profile/posts'),
+                        ),
+                        _ProfileTile(
+                          icon: Icons.history,
+                          label: 'Your activity',
+                          hint: 'Posts, comments and reactions, newest first',
+                          onTap: () => context.push('/profile/activity'),
+                        ),
+                        _ProfileTile(
                           icon: Icons.inventory_2_outlined,
                           label: 'Manage posts',
                           hint: 'Archive, trash, delete in bulk',
@@ -204,8 +216,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         _ProfileTile(
                           icon: Icons.history_outlined,
-                          label: 'Story archive and highlights',
-                          hint: 'Your stories, kept here; pick some for the profile',
+                          label: 'Flash archive and highlights',
+                          hint: 'Your flashes, kept here; pick some for the profile',
                           onTap: () => context.push('/stories/archive'),
                         ),
                         const SizedBox(height: 4),

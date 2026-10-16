@@ -37,6 +37,8 @@ import 'screens/feed/story_archive_screen.dart';
 import 'screens/spheres/sphere_guides_screen.dart';
 import 'screens/spheres/sphere_settings_screen.dart';
 import 'screens/profile/avatar_editor_screen.dart';
+import 'screens/profile/own_activity_screen.dart';
+import 'screens/call/call_notes_screen.dart';
 import 'screens/settings/adverts_screen.dart';
 import 'screens/settings/translation_screen.dart';
 import 'screens/wellbeing/crisis_screen.dart';
@@ -45,6 +47,7 @@ import 'screens/wellbeing/wellbeing_screen.dart';
 import 'screens/wellbeing/year_review_screen.dart';
 import 'services/bubble_bridge.dart';
 import 'services/ad_service.dart';
+import 'services/call_notes_service.dart';
 import 'services/wellbeing_service.dart';
 import 'services/feed_service.dart';
 import 'services/chat_service.dart';
@@ -250,6 +253,10 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
               builder: (context, state) => const FeedScreen(),
             ),
             GoRoute(
+              path: '/spheres',
+              builder: (context, state) => const SphereListScreen(),
+            ),
+            GoRoute(
               path: '/chats',
               builder: (context, state) => const ChatListScreen(),
             ),
@@ -336,10 +343,6 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           },
         ),
         GoRoute(
-          path: '/spheres',
-          builder: (context, state) => const SphereListScreen(),
-        ),
-        GoRoute(
           path: '/spheres/create',
           builder: (context, state) => const CreateSphereScreen(),
         ),
@@ -382,6 +385,22 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
         GoRoute(
           path: '/profile/avatar',
           builder: (context, state) => const AvatarEditorScreen(),
+        ),
+        GoRoute(
+          path: '/profile/posts',
+          builder: (context, state) => const OwnPostsScreen(),
+        ),
+        GoRoute(
+          path: '/profile/activity',
+          builder: (context, state) => const OwnActivityScreen(),
+        ),
+        GoRoute(
+          path: '/calls/notes/:id',
+          builder: (context, state) => CallNotesScreen(
+            logId: state.pathParameters['id']!,
+            peer: state.uri.queryParameters['peer'],
+            messageId: state.uri.queryParameters['msg'],
+          ),
         ),
         GoRoute(
           path: '/settings/adverts',
@@ -503,7 +522,7 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
   }
 }
 
-/// Home screen with bottom navigation bar and four tabs.
+/// Home screen with bottom navigation bar and five tabs.
 class HomeScreen extends StatefulWidget {
   final Widget child;
 
@@ -516,7 +535,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
-  static const _routes = ['/', '/chats', '/contacts', '/profile'];
+  static const _routes = ['/', '/spheres', '/chats', '/contacts', '/profile'];
 
   @override
   void initState() {
@@ -525,12 +544,58 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final callService = context.read<CallService>();
       callService.addListener(_onCallStateChanged);
+      _notes = context.read<CallNotesService>();
+      _notes?.addListener(_onNotesChanged);
     });
   }
 
+  CallNotesService? _notes;
+  bool _offering = false;
+
   @override
   void dispose() {
+    _notes?.removeListener(_onNotesChanged);
     super.dispose();
+  }
+
+  /// A call ended with notes: offer to send them to the other side, once.
+  Future<void> _onNotesChanged() async {
+    final notes = _notes;
+    final offer = notes?.shareOffer;
+    if (notes == null || offer == null || _offering || !mounted) return;
+    _offering = true;
+    final (logId, peer) = offer;
+    final text = notes.shareText(logId);
+    final name = context.read<CallService>().nameFor(peer);
+    final count = notes.recordFor(logId)?.notes.length ?? 0;
+    final send = text == null || peer.isEmpty
+        ? false
+        : await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: Text('Send your notes to $name?'),
+              content: Text(
+                '$count note${count == 1 ? '' : 's'} from your side of the call, made on this phone '
+                'and possibly wrong. They go as a chat message; you can read them first under the call in your history.',
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+              ],
+            ),
+          );
+    notes.clearShareOffer();
+    _offering = false;
+    if (send == true && mounted) {
+      try {
+        await context.read<ChatService>().sendMessage(peer, text!,
+            kind: 'call_notes', payload: notes.sharePayload(logId));
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not sent: $e')));
+        }
+      }
+    }
   }
 
   void _onCallStateChanged() {
@@ -591,24 +656,30 @@ class _HomeScreenState extends State<HomeScreen> {
         );
 
     final destinations = [
+      // Spheres, the thing the product is about, sits in the middle.
       NavigationDestination(
         icon: dotted(const Icon(Icons.home_outlined), unseenPosts),
-        selectedIcon: const Icon(Icons.home),
+        selectedIcon: const Icon(Icons.home_rounded),
         label: 'Home',
       ),
+      const NavigationDestination(
+        icon: Icon(Icons.workspaces_outlined),
+        selectedIcon: Icon(Icons.workspaces_rounded),
+        label: 'Spheres',
+      ),
       NavigationDestination(
-        icon: dotted(const Icon(Icons.chat_bubble_outline), unreadChats),
-        selectedIcon: const Icon(Icons.chat_bubble),
+        icon: dotted(const Icon(Icons.forum_outlined), unreadChats),
+        selectedIcon: const Icon(Icons.forum_rounded),
         label: 'Chat',
       ),
       NavigationDestination(
-        icon: dotted(const Icon(Icons.people_outline), requests),
-        selectedIcon: const Icon(Icons.people),
+        icon: dotted(const Icon(Icons.people_alt_outlined), requests),
+        selectedIcon: const Icon(Icons.people_alt_rounded),
         label: 'Contacts',
       ),
       const NavigationDestination(
-        icon: Icon(Icons.person_outline),
-        selectedIcon: Icon(Icons.person),
+        icon: Icon(Icons.account_circle_outlined),
+        selectedIcon: Icon(Icons.account_circle_rounded),
         label: 'Profile',
       ),
     ];

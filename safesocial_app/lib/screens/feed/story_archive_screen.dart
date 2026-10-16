@@ -21,13 +21,13 @@ class StoryArchiveScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final stories = feed.storyArchive;
     return Scaffold(
-      appBar: AppBar(title: const Text('Story archive')),
+      appBar: AppBar(title: const Text('Flash archive')),
       body: stories.isEmpty
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
                 child: Text(
-                  'Stories you share are kept here, on this device only, after they disappear from the sphere. Pick one to put it in a highlight on your profile.',
+                  'Flashes you share are kept here, on this device only, after they disappear from the sphere. Pick one to put it in a highlight on your profile.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium,
                 ),

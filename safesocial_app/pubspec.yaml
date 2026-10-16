@@ -19,7 +19,6 @@ dependencies:
   equatable: ^2.0.5
   cached_network_image: ^3.3.1
   flutter_animate: ^4.5.0
-  google_fonts: ^6.1.0
   qr_flutter: ^4.1.0
   app_links: ^6.3.2
   mobile_scanner: ^6.0.2
@@ -70,3 +69,12 @@ flutter:
     - assets/images/icon_1024.png
     - assets/images/logo.png
     - assets/emoticons/
+  fonts:
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/Outfit-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Outfit-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Outfit-Bold.ttf
+          weight: 700

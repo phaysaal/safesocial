@@ -183,16 +183,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         ),
                         child: _ActionButton(
                           icon: myReaction == null
-                              ? Icons.thumb_up_outlined
+                              ? Icons.add_reaction_outlined
                               : Icons.emoji_emotions,
                           label: myReaction == null
-                              ? 'Like'
+                              ? ReactionKinds.primary.$2
                               : ReactionKinds.labelFor(myReaction.emoji),
                           color: myReaction == null
                               ? cs.onSurfaceVariant
                               : cs.primary,
                           onTap: () => feedService.reactToPost(
-                              post.id, myReaction?.emoji ?? '👍'),
+                              post.id, myReaction?.emoji ?? ReactionKinds.primary.$1),
                         ),
                       ),
                     ),
@@ -537,7 +537,7 @@ class _CommentTile extends StatelessWidget {
                         ),
                       InkWell(
                         onTap: () => feed.reactToComment(
-                            post.id, comment.id, myReaction?.emoji ?? '👍'),
+                            post.id, comment.id, myReaction?.emoji ?? ReactionKinds.primary.$1),
                         onLongPress: () => showReactionPicker(
                           context,
                           current: myReaction?.emoji,
@@ -546,7 +546,7 @@ class _CommentTile extends StatelessWidget {
                         ),
                         child: Text(
                           myReaction == null
-                              ? 'Like'
+                              ? ReactionKinds.primary.$2
                               : ReactionKinds.labelFor(myReaction.emoji),
                           style: theme.textTheme.bodySmall?.copyWith(
                               fontSize: 11,

@@ -487,24 +487,44 @@ class Comment with EquatableMixin {
 }
 
 /// The reactions a person can leave on a post or a comment. One list for
-/// both, so every picker and every count row reads the same set.
+/// both, so every picker and every count row reads the same set. The set is
+/// the product's own: no thumb, no "Like". [primary] is what a plain tap
+/// leaves; the rest are behind a long press.
 class ReactionKinds {
   ReactionKinds._();
 
   static const List<(String, String)> all = [
+    ('🙌', 'Respect'),
+    ('😎', 'Cool'),
+    ('😮', 'Wow!'),
+    ('🥰', 'Adorable'),
+    ('😂', 'LOL'),
+    ('😢', 'Sad'),
+    ('😠', 'Angry'),
+    ('🙅', 'Not for me'),
+  ];
+
+  /// What one tap on the reaction button leaves.
+  static const (String, String) primary = ('🙌', 'Respect');
+
+  /// What clients before 0.11 could send. Still accepted and still named,
+  /// so a reaction left last month keeps its meaning, but no longer offered.
+  static const List<(String, String)> legacy = [
     ('👍', 'Like'),
     ('❤️', 'Love'),
     ('🤗', 'Care'),
     ('✅', 'Agree'),
     ('❌', 'Disagree'),
-    ('😢', 'Sad'),
-    ('😮', 'Wow'),
   ];
 
-  static bool contains(String emoji) => all.any((k) => k.$1 == emoji);
+  static bool contains(String emoji) =>
+      all.any((k) => k.$1 == emoji) || legacy.any((k) => k.$1 == emoji);
 
   static String labelFor(String emoji) {
     for (final k in all) {
+      if (k.$1 == emoji) return k.$2;
+    }
+    for (final k in legacy) {
       if (k.$1 == emoji) return k.$2;
     }
     return emoji;

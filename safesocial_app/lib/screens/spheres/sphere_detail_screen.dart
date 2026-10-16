@@ -305,7 +305,9 @@ class SphereDetailScreen extends StatelessWidget {
             );
           }),
           const Divider(),
-          if (iAmOwner && (sphere.members.length == 1 || sphere.admins.length == 1))
+          if (iAmOwner &&
+              !context.read<SphereService>().isSelf(sphere.id) &&
+              (sphere.members.length == 1 || sphere.admins.length == 1))
             Container(
               margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
               padding: const EdgeInsets.all(12),
@@ -326,6 +328,8 @@ class SphereDetailScreen extends StatelessWidget {
                 ),
               ]),
             ),
+          // Self is built in; there is nothing to leave.
+          if (!context.read<SphereService>().isSelf(sphere.id))
           ListTile(
             leading: Icon(Icons.logout, color: cs.error),
             title: Text('Leave sphere', style: TextStyle(color: cs.error)),

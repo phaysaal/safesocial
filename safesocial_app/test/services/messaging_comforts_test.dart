@@ -210,7 +210,7 @@ void main() {
       await library.load();
       expect(library.chatTheme('k'), 'default');
       expect(library.chatNickname('k'), isNull);
-      expect(library.chatEmoji('k'), '👍');
+      expect(library.chatEmoji('k'), '🙌');
       await library.setChatLook('k', theme: 'ocean', nickname: ' Bobby ', emoji: '🔥');
       final again = LibraryService();
       await again.load();

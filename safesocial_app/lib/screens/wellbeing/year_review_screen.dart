@@ -48,7 +48,7 @@ class YearReviewScreen extends StatelessWidget {
     final rows = <(IconData, String, String)>[
       (Icons.article_outlined, '${mine.length}', 'posts written'),
       (Icons.photo_outlined, '$photos', 'photos and clips shared'),
-      (Icons.auto_stories_outlined, '$stories', 'stories told'),
+      (Icons.auto_stories_outlined, '$stories', 'flashes told'),
       (Icons.mode_comment_outlined, '$comments', 'comments left'),
       (Icons.favorite_outline, '$reactionsGot', 'reactions received on your posts'),
       (Icons.chat_bubble_outline, '$messages', 'messages sent'),

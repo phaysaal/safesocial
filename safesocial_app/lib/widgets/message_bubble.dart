@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/media_provenance.dart';
 import '../models/message.dart';
 import '../models/post.dart';
+import '../services/call_notes_service.dart';
 import '../services/feed_service.dart';
 import '../services/translation_service.dart';
 import 'translation_line.dart';
@@ -341,6 +343,38 @@ class MessageBubble extends StatelessWidget {
         ],
       ];
     }
+    if (message.kind == 'call_notes') {
+      final shared = SharedCallNotes.tryParse(message.payload);
+      final n = shared?.notes.length ?? 0;
+      return [
+        InkWell(
+          onTap: shared == null
+              ? null
+              : () {
+                  // Opened beside our own notes of the same call, when we have any.
+                  final peer = isMine ? message.recipientId : message.senderId;
+                  final mine = context
+                      .read<CallNotesService>()
+                      .recordOverlapping(peer, shared.startedAt, shared.endedAt);
+                  context.push('/calls/notes/${mine?.logId ?? '-'}?peer=$peer&msg=${message.id}');
+                },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.sticky_note_2_outlined, size: 20),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  shared == null
+                      ? 'Notes from the call'
+                      : 'Notes from the call · $n note${n == 1 ? '' : 's'}\nTap to see them beside yours',
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ];
+    }
     if (message.kind == 'file') {
       return [
         FileCard(
@@ -619,8 +653,8 @@ class _StoryReplyContext extends StatelessWidget {
         (story.expiresAt != null && story.expiresAt!.isBefore(DateTime.now()));
 
     final label = expired
-        ? 'Replied to a story that has expired'
-        : (isMine ? 'You replied to a story' : 'Replied to your story');
+        ? 'Replied to a flash that has expired'
+        : (isMine ? 'You replied to a flash' : 'Replied to your flash');
 
     final preview = expired ? null : story.content;
 

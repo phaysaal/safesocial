@@ -671,7 +671,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                         textCapitalization: TextCapitalization.sentences,
                         style: theme.textTheme.bodyLarge,
                         decoration: InputDecoration(
-                          hintText: "What's on your mind?",
+                          hintText: 'Say something to your spheres',
                           border: InputBorder.none,
                           hintStyle: TextStyle(color: cs.onSurfaceVariant),
                         ),

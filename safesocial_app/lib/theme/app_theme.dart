@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 // ---------------------------------------------------------------------------
 // Spheres brand palette: the rose and violet of the logo's top two bands
@@ -12,24 +11,44 @@ const _lightOnPrimary = Colors.white;
 const _lightSecondary = Color(0xFF7B3FE4); // the logo's violet
 const _lightBackground = Color(0xFFF5F0EF); // Warm light gray
 const _lightSurface = Colors.white;
-const _lightOnSurface = Color(0xFF1C1E21);
-const _lightOnSurfaceVariant = Color(0xFF65676B);
-const _lightDivider = Color(0xFFDADDE1);
-const _lightError = Color(0xFFE41E3F);
+// Neutrals carry a trace of the rose, so greys read as ours and not as a
+// palette lifted from elsewhere.
+const _lightOnSurface = Color(0xFF2A1F22);
+const _lightOnSurfaceVariant = Color(0xFF75666A);
+const _lightDivider = Color(0xFFE8DEDE);
+const _lightError = Color(0xFFC8303F);
 
 // Dark theme colors
 const _darkPrimary = Color(0xFFE8556A); // Brighter coral for dark mode
 const _darkOnPrimary = Colors.white;
 const _darkSecondary = Color(0xFF9B6DFF); // Lighter purple for dark
-const _darkBackground = Color(0xFF18191A);
-const _darkSurface = Color(0xFF242526);
-const _darkOnSurface = Color(0xFFE4E6EB);
-const _darkOnSurfaceVariant = Color(0xFFB0B3B8);
-const _darkDivider = Color(0xFF3E4042);
-const _darkError = Color(0xFFFF4757);
+const _darkBackground = Color(0xFF161113);
+const _darkSurface = Color(0xFF221A1D);
+const _darkOnSurface = Color(0xFFF0E8E9);
+const _darkOnSurfaceVariant = Color(0xFFB7A9AD);
+const _darkDivider = Color(0xFF3D3236);
+const _darkError = Color(0xFFFF6B7A);
+
+/// Headings and titles in the product's own face (Outfit, bundled under
+/// `assets/fonts`, SIL Open Font License); body text stays the system font,
+/// which is the one people read fastest. Nothing is fetched from anywhere:
+/// the runtime font package that used to set Inter asked Google's servers
+/// for it at every start.
+const displayFace = 'Outfit';
+
+TextTheme _withDisplayFace(TextTheme t) => t.copyWith(
+      displayLarge: t.displayLarge?.copyWith(fontFamily: displayFace),
+      displayMedium: t.displayMedium?.copyWith(fontFamily: displayFace),
+      displaySmall: t.displaySmall?.copyWith(fontFamily: displayFace),
+      headlineLarge: t.headlineLarge?.copyWith(fontFamily: displayFace),
+      headlineMedium: t.headlineMedium?.copyWith(fontFamily: displayFace),
+      headlineSmall: t.headlineSmall?.copyWith(fontFamily: displayFace),
+      titleLarge: t.titleLarge?.copyWith(fontFamily: displayFace),
+      titleMedium: t.titleMedium?.copyWith(fontFamily: displayFace),
+    );
 
 // ---------------------------------------------------------------------------
-// Light theme — Facebook / Instagram look
+// Light theme
 // ---------------------------------------------------------------------------
 
 final ThemeData lightTheme = ThemeData(
@@ -50,7 +69,7 @@ final ThemeData lightTheme = ThemeData(
     error: _lightError,
     outline: _lightDivider,
   ),
-  textTheme: GoogleFonts.interTextTheme(
+  textTheme: _withDisplayFace(
     ThemeData.light().textTheme.copyWith(
           headlineLarge: const TextStyle(
             color: _lightOnSurface,
@@ -215,7 +234,7 @@ final ThemeData darkTheme = ThemeData(
     error: _darkError,
     outline: _darkDivider,
   ),
-  textTheme: GoogleFonts.interTextTheme(
+  textTheme: _withDisplayFace(
     ThemeData.dark().textTheme.copyWith(
           headlineLarge: const TextStyle(
             color: _darkOnSurface,

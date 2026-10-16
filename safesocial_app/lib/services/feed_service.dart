@@ -30,6 +30,12 @@ class FeedService extends ChangeNotifier {
   static const _postsKey = 'spheres_feed_posts';
   static const _hiddenKey = 'spheres_hidden_posts';
 
+  /// (post id, sphere id) pairs a post was taken out of after it was sent,
+  /// so a sync round offering that sphere's copy back does not put it back.
+  static const _unsharedKey = 'spheres_unshared_v1';
+  final Set<String> _unshared = {};
+  static String _pair(String postId, String sphereId) => '$postId|$sphereId';
+
   final List<Post> _posts = [];
   final Set<String> _hiddenPostIds = {};
   bool _isRefreshing = false;
@@ -583,6 +589,11 @@ class FeedService extends ChangeNotifier {
   @visibleForTesting
   void Function(String member)? onMemberQueued;
 
+  /// Told of every item sealed for a sphere, by sphere and type, so a test
+  /// can see what left without a relay.
+  @visibleForTesting
+  void Function(String sphereId, String type)? onPublished;
+
   /// Contacts whose comments on our posts are hidden for everyone but them,
   /// the moment they arrive. Set by the app from `Contact.restricted`.
   Set<String> Function()? restrictedKeys;
@@ -664,6 +675,7 @@ class FeedService extends ChangeNotifier {
       return;
     }
 
+    onPublished?.call(sphereId, type);
     final blocked = blockedForSending;
     final stamp = DateTime.now().microsecondsSinceEpoch;
     for (final member in sphere.members.map((m) => m.identityKey)) {
@@ -949,6 +961,7 @@ class FeedService extends ChangeNotifier {
           _posts.add(p);
         }
       }
+      _unshared.addAll(await prefs.getStringList(_unsharedKey) ?? const []);
       final hiddenJson = await prefs.getStringList(_hiddenKey);
       if (hiddenJson != null) {
         _hiddenPostIds.addAll(hiddenJson);
@@ -1058,13 +1071,73 @@ class FeedService extends ChangeNotifier {
       }
     }
     for (final target in targets) {
-      // Rebuilt per sphere so the copy names only where it is going.
-      final copy = relayPost.copyWith(sphereId: target, sphereIds: {target});
+      await _publishPostTo(relayPost, target, hideFrom: hideFrom);
+    }
+  }
+
+  /// One sphere's copy of a post: rebuilt so it names only where it is going.
+  Future<void> _publishPostTo(Post relayPost, String target,
+      {Set<String> hideFrom = const {}}) {
+    final copy = relayPost.copyWith(sphereId: target, sphereIds: {target});
+    return _publishToSphere(
+      sphereId: target,
+      type: 'post',
+      payloadJson: jsonEncode({'type': 'post', 'post': copy.toJson()}),
+      exclude: hideFrom,
+    );
+  }
+
+  /// Change where a post of ours goes, after it was sent. A sphere added gets
+  /// the post as if it were new there (its comments and reactions so far
+  /// stay where they were made); a sphere removed is sent a delete scoped
+  /// to itself, so a member who is also in another of its spheres keeps it
+  /// there. At least one sphere must remain; deleting is [deletePost].
+  Future<void> setPostSpheres(String postId, Set<String> sphereIds) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1) return;
+    final post = _posts[index];
+    if (post.authorId != me) throw StateError('Only the author may move a post');
+    if (post.isStory) throw StateError('A flash stays where it was told');
+    if (sphereIds.isEmpty) throw StateError('A post has to be in at least one sphere');
+    final spheres = _spheres;
+    for (final s in sphereIds) {
+      if (spheres?.sphere(s) == null) throw StateError('Not a sphere of yours');
+      if (isSuspended?.call(s, me) ?? false) {
+        throw StateError('You are suspended in "${spheres?.sphere(s)?.name}" for now');
+      }
+    }
+    final added = sphereIds.difference(post.sphereIds);
+    final removed = post.sphereIds.difference(sphereIds);
+    if (added.isEmpty && removed.isEmpty) return;
+
+    _posts[index] = post.copyWith(
+      sphereId: sphereIds.contains(post.sphereId) ? post.sphereId : sphereIds.first,
+      sphereIds: sphereIds,
+    );
+    for (final s in removed) {
+      _unshared.add(_pair(postId, s));
+    }
+    for (final s in added) {
+      _unshared.remove(_pair(postId, s));
+    }
+    await _persistHidden();
+    await _persistPosts();
+    notifyListeners();
+    DebugLogService().info('Feed',
+        'Post ${postId.substring(0, 8)}: +${added.length} sphere(s), -${removed.length}');
+
+    if (added.isNotEmpty) {
+      final relayPost = await _encodePostMedia(post);
+      for (final s in added) {
+        await _publishPostTo(relayPost, s);
+      }
+    }
+    for (final s in removed) {
       await _publishToSphere(
-        sphereId: target,
-        type: 'post',
-        payloadJson: jsonEncode({'type': 'post', 'post': copy.toJson()}),
-        exclude: hideFrom,
+        sphereId: s,
+        type: 'post_delete',
+        payloadJson: jsonEncode({'type': 'post_delete', 'post_id': postId, 'sphere_id': s}),
       );
     }
   }
@@ -1420,10 +1493,27 @@ class FeedService extends ChangeNotifier {
       final index = _posts.indexWhere((p) => p.id == postId);
       if (index == -1) return;
       final post = _posts[index];
+      final only = json['sphere_id'];
+      final scope = only is String ? only : sphereId;
       if (post.authorId != authorId &&
-          !(spheres.sphere(post.sphereId)?.isAdmin(authorId) ?? false)) {
+          !(spheres.sphere(scope)?.isAdmin(authorId) ?? false)) {
         DebugLogService().warn('Feed', 'Dropping post delete from a non-author');
         return;
+      }
+      if (only is String) {
+        // Taken out of one sphere. Someone in another of its spheres keeps
+        // it there; someone in this one alone loses it.
+        _unshared.add(_pair(postId, only));
+        final left = post.sphereIds.where((s) => s != only).toSet();
+        if (left.isNotEmpty) {
+          _posts[index] = post.copyWith(
+              sphereId: left.contains(post.sphereId) ? post.sphereId : left.first,
+              sphereIds: left);
+          await _persistHidden();
+          await _persistPosts();
+          notifyListeners();
+          return;
+        }
       }
       _posts.removeAt(index);
       // So a peer offering it back during a sync does not resurrect it.
@@ -1697,7 +1787,10 @@ class FeedService extends ChangeNotifier {
       // The same post reaching us through a second sphere we are in. One post,
       // now known to belong to both.
       final merged = _posts[existing];
-      final union = {...merged.sphereIds, ...post.sphereIds};
+      final union = {
+        ...merged.sphereIds,
+        ...post.sphereIds.where((s) => !_unshared.contains(_pair(post.id, s))),
+      };
       if (union.length != merged.sphereIds.length) {
         _posts[existing] = merged.copyWith(sphereIds: union);
         _persistPosts();
@@ -1709,7 +1802,9 @@ class FeedService extends ChangeNotifier {
     // back, refusing it here is what stops a post someone removed reappearing
     // every time they sync.
     if (_hiddenPostIds.contains(post.id)) return;
-    
+    // Taken out of every sphere this copy names: nothing to put back.
+    if (post.sphereIds.every((s) => _unshared.contains(_pair(post.id, s)))) return;
+
     // Don't merge if it's already an expired story
     if (post.isStory && post.expiresAt != null && post.expiresAt!.isBefore(DateTime.now())) {
       return;
@@ -1738,7 +1833,7 @@ class FeedService extends ChangeNotifier {
       InboundEvents.emit(InboundEvent(
         kind: InboundKind.post,
         id: 'post:${post.id}',
-        title: post.isStory ? '$name · story' : name,
+        title: post.isStory ? '$name · flash' : name,
         body: body,
         route: post.isStory ? '/' : '/post/${post.id}',
         thread: 'feed',
@@ -2598,6 +2693,7 @@ class FeedService extends ChangeNotifier {
   Future<void> _persistHidden() async {
     final prefs = SecureStore.instance;
     await prefs.setStringList(_hiddenKey, _hiddenPostIds.toList());
+    await prefs.setStringList(_unsharedKey, _unshared.toList());
   }
 
   Future<void> _persistPosts() async {

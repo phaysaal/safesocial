@@ -1537,6 +1537,7 @@ class ChatService extends ChangeNotifier {
   static String describeMessage(Message msg) {
     if (msg.isDeleted) return 'Message deleted';
     if (msg.kind == 'file') return 'File: ${msg.payload?['name'] ?? msg.content}';
+    if (msg.kind == 'call_notes') return 'Notes from the call';
     if (msg.kind == 'poke') return 'Poked you 👉';
     if (msg.isPoll) return 'Poll: ${msg.payload?['question'] ?? msg.content}';
     if (msg.isLocation) return 'Shared a location';

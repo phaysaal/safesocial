@@ -208,6 +208,8 @@ class _PostCardState extends State<PostCard> {
                     const PopupMenuItem(value: 'hide', child: Text('Hide post')),
                     if (post.authorId == myKey) ...[
                       const PopupMenuItem(value: 'edit', child: Text('Edit post')),
+                      if (!post.isStory)
+                        const PopupMenuItem(value: 'spheres', child: Text('Spheres it is in…')),
                       PopupMenuItem(
                         value: 'comments',
                         child: Text(post.commentsOff
@@ -442,7 +444,7 @@ class _PostCardState extends State<PostCard> {
                   if (post.reactions.isNotEmpty) ...[
                     Expanded(child: ReactionTally(reactions: post.reactions)),
                   ] else if (post.likes.isNotEmpty) ...[
-                    Icon(Icons.thumb_up, size: 16, color: cs.primary),
+                    Text(ReactionKinds.primary.$1, style: const TextStyle(fontSize: 14)),
                     const SizedBox(width: 4),
                     Text('${post.likes.length}', style: theme.textTheme.bodySmall),
                     const Spacer(),
@@ -468,7 +470,8 @@ class _PostCardState extends State<PostCard> {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Row(
               children: [
-                // Like button — tap to react 👍, long-press for full picker
+                // Reaction button: a tap leaves the primary one, a long press
+                // opens the set; once left, the emoji itself is the button.
                 GestureDetector(
                     onLongPress: () => showReactionPicker(context,
                         current: post.reactions
@@ -478,36 +481,38 @@ class _PostCardState extends State<PostCard> {
                         onPick: (e) => context.read<FeedService>().reactToPost(post.id, e)),
                     child: _ActionButton(
                       icon: _selfReactionIcon(post, myKey),
+                      emoji: post.reactions
+                          .where((r) => r.reactorId == myKey)
+                          .firstOrNull
+                          ?.emoji,
                       label: _selfReactionLabel(post, myKey),
                       count: post.reactions.isNotEmpty ? post.reactions.length : post.likes.length,
                       color: _hasSelfReaction(post, myKey)
                           ? cs.primary
                           : cs.onSurfaceVariant,
                       onTap: () {
-                        final selfReaction = post.reactions
+                        // Reacting again with what we left takes it back.
+                        final mine = post.reactions
                             .where((r) => r.reactorId == myKey)
-                            .toList();
-                        if (selfReaction.isNotEmpty && selfReaction.first.emoji == '👍') {
-                          // Already liked with 👍 — toggle off
-                          context.read<FeedService>().reactToPost(post.id, '👍');
-                        } else {
-                          // React with 👍
-                          context.read<FeedService>().reactToPost(post.id, '👍');
-                        }
+                            .firstOrNull
+                            ?.emoji;
+                        context
+                            .read<FeedService>()
+                            .reactToPost(post.id, mine ?? ReactionKinds.primary.$1);
                       },
                     ),
                   ),
                 const Spacer(),
                 _ActionButton(
-                  icon: Icons.chat_bubble_outline,
+                  icon: Icons.forum_outlined,
                   label: 'Comment',
                   count: post.visibleComments(myKey).length,
                   color: cs.onSurfaceVariant,
                   onTap: () => _showCommentSheet(context, post),
                 ),
                 _ActionButton(
-                  icon: Icons.share_outlined,
-                  label: 'Share',
+                  icon: Icons.send_outlined,
+                  label: 'Pass on',
                   color: cs.onSurfaceVariant,
                   onTap: () {},
                 ),
@@ -754,6 +759,9 @@ class _PostCardState extends State<PostCard> {
         );
       case 'edit':
         _editPost(context, post);
+        break;
+      case 'spheres':
+        _editSpheres(context, post);
       case 'report':
         showReportDialog(context).then((reason) {
           if (reason == null || !context.mounted) return;
@@ -807,6 +815,66 @@ class _PostCardState extends State<PostCard> {
     }
   }
 
+  /// Add the post to spheres or take it out of them, after the fact. A
+  /// sphere added is sent the post; a sphere removed is told to drop it.
+  Future<void> _editSpheres(BuildContext context, Post post) async {
+    final feed = context.read<FeedService>();
+    final all = context.read<SphereService>().spheres.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final chosen = {...post.sphereIds};
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Spheres it is in'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'A sphere you add gets the post now; one you take it out of is told to drop it. '
+                    'Comments and reactions stay where they were made.',
+                    style: Theme.of(ctx).textTheme.bodySmall,
+                  ),
+                ),
+                for (final s in all)
+                  CheckboxListTile(
+                    dense: true,
+                    title: Text(s.name),
+                    value: chosen.contains(s.id),
+                    onChanged: (v) => setState(() {
+                      if (v == true) {
+                        chosen.add(s.id);
+                      } else if (chosen.length > 1) {
+                        chosen.remove(s.id);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, chosen),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    try {
+      await feed.setPostSpheres(post.id, result);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   Future<void> _editPost(BuildContext context, Post post) async {
     final controller = TextEditingController(text: post.content);
     final feed = context.read<FeedService>();
@@ -847,7 +915,7 @@ class _PostCardState extends State<PostCard> {
 
   IconData _selfReactionIcon(Post post, String? myKey) {
     if (_hasSelfReaction(post, myKey)) return Icons.emoji_emotions;
-    return Icons.thumb_up_outlined;
+    return Icons.add_reaction_outlined;
   }
 
   String _selfReactionLabel(Post post, String? myKey) {
@@ -856,7 +924,7 @@ class _PostCardState extends State<PostCard> {
     if (selfReaction.isNotEmpty) {
       return ReactionKinds.labelFor(selfReaction.first.emoji);
     }
-    return 'Like';
+    return ReactionKinds.primary.$2;
   }
 
   Future<void> _confirmDelete(BuildContext context, Post post) async {
@@ -932,7 +1000,7 @@ class _PostCardState extends State<PostCard> {
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
             FilledButton(
                 onPressed: chosen.isEmpty ? null : () => Navigator.pop(ctx, true),
-                child: const Text('Share')),
+                child: const Text('Pass on')),
           ],
         ),
       ),
@@ -1385,6 +1453,9 @@ class _CommentThread extends StatelessWidget {
 class _ActionButton extends StatelessWidget {
   final IconData icon;
 
+  /// Drawn in place of [icon] when set: the reaction we left.
+  final String? emoji;
+
   /// Spoken and shown on a long press; drawn only when [count] is given.
   final String label;
   final Color color;
@@ -1397,6 +1468,7 @@ class _ActionButton extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.count,
+    this.emoji,
   });
 
   @override
@@ -1419,7 +1491,10 @@ class _ActionButton extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(icon, size: 20, color: color),
+                  if (emoji != null)
+                    Text(emoji!, style: const TextStyle(fontSize: 17))
+                  else
+                    Icon(icon, size: 20, color: color),
                   if (count != null && count! > 0) ...[
                     const SizedBox(width: 5),
                     Text('$count', style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w600)),

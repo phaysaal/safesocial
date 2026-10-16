@@ -79,7 +79,7 @@ class PrivacyCheckupScreen extends StatelessWidget {
           step(
             Icons.done_all,
             'Read receipts and typing',
-            'Read receipts ${chat.sendReadReceipts ? 'on' : 'off'}, typing ${chat.sendTypingSignals ? 'on' : 'off'}, story views ${feed.sendViewReceipts ? 'on' : 'off'}.',
+            'Read receipts ${chat.sendReadReceipts ? 'on' : 'off'}, typing ${chat.sendTypingSignals ? 'on' : 'off'}, flash views ${feed.sendViewReceipts ? 'on' : 'off'}.',
             '/settings',
           ),
           step(

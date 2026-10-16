@@ -12,6 +12,7 @@ import 'services/sphere_info_service.dart';
 import 'services/wellbeing_service.dart';
 import 'services/ad_catalogue.dart';
 import 'services/ad_service.dart';
+import 'services/call_notes_service.dart';
 import 'services/mlkit_translator.dart';
 import 'services/translation_service.dart';
 import 'services/app_lock_service.dart';
@@ -70,6 +71,9 @@ class AppServices {
   /// No adverts are shown today. To start, put a `JsonAdCatalogue(url)`
   /// here; the pick stays on the phone either way.
   final adService = AdService(catalogue: const NoAdverts());
+  final callNotesService = CallNotesService();
+  CallState _lastCallState = CallState.idle;
+  bool _lastNotesOn = false;
   final translationService = TranslationService(MlKitTranslator());
   final callConfig = CallConfig();
   final notificationService = NotificationService();
@@ -127,6 +131,8 @@ class AppServices {
     await notificationService.load();
     await wellbeingService.load();
     await adService.load();
+    await callNotesService.load();
+    callService.addListener(_followCallForNotes);
     unawaited(adService.refreshCatalogue());
     await translationService.load();
     notificationService.inQuietHours = wellbeingService.inQuietHours;
@@ -218,6 +224,35 @@ class AppServices {
     }
   }
 
+  /// Notes in a call. The call's `notesOn` is the one switch for both
+  /// phones: the button or the setting turns it on here and tells the other
+  /// side, the other side's button turns it on here. The engine follows it,
+  /// and the call ending keeps what was gathered under the log entry.
+  void _followCallForNotes() {
+    final state = callService.state;
+    final on = callService.notesOn;
+    if (on != _lastNotesOn) {
+      _lastNotesOn = on;
+      if (on) {
+        final peer = callService.remoteContactKey ?? 'call';
+        unawaited(callNotesService.start('${peer.substring(0, 8)}-${DateTime.now().millisecondsSinceEpoch}'));
+      } else if (state != CallState.idle) {
+        unawaited(callNotesService.stop());
+      }
+    }
+    if (state == _lastCallState) return;
+    _lastCallState = state;
+    if (state == CallState.connected && callNotesService.enabled && !on) {
+      unawaited(callService.setNotes(true));
+    } else if (state == CallState.idle) {
+      _lastNotesOn = false;
+      final entry = callService.callLog.firstOrNull;
+      final logId = entry?['id'] as String? ?? 'call-${DateTime.now().millisecondsSinceEpoch}';
+      final peer = entry?['peer'] as String? ?? '';
+      unawaited(callNotesService.finish(logId: logId, peer: peer));
+    }
+  }
+
   /// Providers for the widget tree.
   List<SingleChildWidget> providers() => [
         ChangeNotifierProvider.value(value: themeService),
@@ -239,6 +274,7 @@ class AppServices {
         ChangeNotifierProvider.value(value: sphereInfoService),
         ChangeNotifierProvider.value(value: wellbeingService),
         ChangeNotifierProvider.value(value: adService),
+        ChangeNotifierProvider.value(value: callNotesService),
         ChangeNotifierProvider.value(value: translationService),
         ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),

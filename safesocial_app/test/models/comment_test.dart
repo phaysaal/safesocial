@@ -136,17 +136,30 @@ void main() {
     });
   });
 
-  test('reaction kinds are one shared list', () {
-    expect(ReactionKinds.all.length, 7);
-    expect(ReactionKinds.contains('👍'), isTrue);
+  test('reaction kinds are one shared list, with no thumb and no "Like" on offer', () {
+    expect(ReactionKinds.all.length, 8);
+    expect(ReactionKinds.all.map((k) => k.$2), isNot(contains('Like')));
+    expect(ReactionKinds.all.map((k) => k.$1), isNot(contains('👍')));
+    expect(ReactionKinds.all, contains(ReactionKinds.primary));
+    expect(ReactionKinds.contains('🙅'), isTrue);
+    expect(ReactionKinds.labelFor('🙅'), 'Not for me');
     expect(ReactionKinds.contains('🍕'), isFalse);
-    expect(ReactionKinds.labelFor('❤️'), 'Love');
     final tally = ReactionKinds.tally([
-      Reaction(reactorId: 'a', emoji: '👍', timestamp: DateTime(2026)),
-      Reaction(reactorId: 'b', emoji: '❤️', timestamp: DateTime(2026)),
-      Reaction(reactorId: 'c', emoji: '❤️', timestamp: DateTime(2026)),
+      Reaction(reactorId: 'a', emoji: '🙌', timestamp: DateTime(2026)),
+      Reaction(reactorId: 'b', emoji: '😂', timestamp: DateTime(2026)),
+      Reaction(reactorId: 'c', emoji: '😂', timestamp: DateTime(2026)),
     ]);
-    expect(tally.keys.first, '❤️');
-    expect(tally['👍'], 1);
+    expect(tally.keys.first, '😂');
+    expect(tally['🙌'], 1);
+  });
+
+  test('a reaction from before the set changed is still accepted and still named', () {
+    // A thumb left in September, or sent by a client not yet updated, keeps
+    // its meaning; it is only no longer offered.
+    for (final old in ['👍', '❤️', '🤗', '✅', '❌']) {
+      expect(ReactionKinds.contains(old), isTrue, reason: old);
+    }
+    expect(ReactionKinds.labelFor('👍'), 'Like');
+    expect(ReactionKinds.labelFor('✅'), 'Agree');
   });
 }

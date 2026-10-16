@@ -402,7 +402,7 @@ class LibraryService extends ChangeNotifier {
   }
 
   /// The chat's own emoji: one tap sends it, and it leads the reactions.
-  String chatEmoji(String chatKey) => _chatLooks[chatKey]?['emoji'] ?? '👍';
+  String chatEmoji(String chatKey) => _chatLooks[chatKey]?['emoji'] ?? '🙌';
 
   /// Change any of a chat's look; an empty string clears that part.
   Future<void> setChatLook(String chatKey, {String? theme, String? nickname, String? emoji}) async {

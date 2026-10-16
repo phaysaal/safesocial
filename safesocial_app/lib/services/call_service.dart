@@ -162,6 +162,7 @@ class CallService extends ChangeNotifier {
     int seconds = 0,
   }) async {
     _log.insert(0, {
+      'id': '$peer:${DateTime.now().millisecondsSinceEpoch}',
       'peer': peer,
       'incoming': incoming,
       'answered': answered,
@@ -227,6 +228,46 @@ class CallService extends ChangeNotifier {
   /// Whether anyone in the call sends a picture, so the screen lays out for
   /// video.
   bool get hasVideo => sendingVideo || _remoteVideo.values.any((v) => v);
+
+  // ── Notes ──────────────────────────────────────────────────────────────────
+  //
+  // Either side may start notes; the other side is told with a `call_notes`
+  // line and starts its own, so both phones note their own voice and each
+  // screen says who began it. Nothing of what is said travels here.
+
+  bool _notesOn = false;
+  String? _notesBy;
+
+  /// Whether notes are on in this call, on both phones.
+  bool get notesOn => _notesOn;
+
+  /// 'me', or the identity key of the peer who started them.
+  String? get notesStartedBy => _notesBy;
+
+  /// Turn notes on or off for everyone in the call.
+  Future<void> setNotes(bool on) async {
+    if (_state != CallState.connected && _state != CallState.connecting) return;
+    if (_notesOn == on) return;
+    _notesOn = on;
+    _notesBy = on ? 'me' : null;
+    notifyListeners();
+    final targets = <String>{..._peerConnections.keys, if (_remoteContactKey != null) _remoteContactKey!};
+    for (final peer in targets) {
+      await _sendSignal(peer, {'type': 'call_notes', 'on': on});
+    }
+  }
+
+  /// The other side turned notes on or off. Public so the rule is testable
+  /// without a socket.
+  @visibleForTesting
+  void applyNotesSignal(String sender, Map<String, dynamic> data) {
+    final on = data['on'] == true;
+    if (_notesOn == on) return;
+    _notesOn = on;
+    _notesBy = on ? sender : null;
+    DebugLogService().info('Call', 'Notes turned ${on ? 'on' : 'off'} by ${sender.substring(0, 8)}…');
+    notifyListeners();
+  }
 
   /// In a collision, the side with the smaller key gives way. Pure.
   @visibleForTesting
@@ -498,6 +539,8 @@ class CallService extends ChangeNotifier {
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream = null;
     _cameraTrack = null;
+    _notesOn = false;
+    _notesBy = null;
     _pendingCandidates.clear();
     _pendingGroupMembers = const [];
     _state = CallState.idle;
@@ -824,6 +867,11 @@ class CallService extends ChangeNotifier {
         case 'call_update_answer':
         case 'call_video':
           await _handleVideoSignal(type as String, senderKey, opened.fromDevice, data);
+          break;
+        case 'call_notes':
+          if (_peerConnections.containsKey(senderKey) || senderKey == _remoteContactKey) {
+            applyNotesSignal(senderKey, data);
+          }
           break;
         case 'call_end':
           if (senderKey == _remoteContactKey &&

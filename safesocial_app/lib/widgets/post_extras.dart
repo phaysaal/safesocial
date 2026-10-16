@@ -565,7 +565,7 @@ Future<Map<String, dynamic>?> showStoryComposer(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Your story', style: Theme.of(ctx).textTheme.titleMedium),
+              Text('Your flash', style: Theme.of(ctx).textTheme.titleMedium),
               TextField(
                 controller: caption,
                 decoration: const InputDecoration(labelText: 'Caption (shown over the photo)'),
@@ -654,7 +654,7 @@ Future<Map<String, dynamic>?> showStoryComposer(
               ),
               if (members.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                Text('Hide this story from', style: Theme.of(ctx).textTheme.labelLarge),
+                Text('Hide this flash from', style: Theme.of(ctx).textTheme.labelLarge),
                 Wrap(spacing: 6, runSpacing: 4, children: [
                   for (final (key, name) in members)
                     FilterChip(
@@ -716,7 +716,7 @@ Future<Map<String, dynamic>?> showStoryComposer(
                       },
                   });
                   },
-                  child: const Text('Share story'),
+                  child: const Text('Share flash'),
                 ),
               ),
             ],

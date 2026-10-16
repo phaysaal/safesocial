@@ -18,6 +18,28 @@ void main() {
     expect(CallService.isStaleRing({'type': 'call_offer'}, now: now), isFalse);
   });
 
+  group('notes in a call', () {
+    test('the other side turning notes on turns them on here and says who began', () {
+      final c = CallService();
+      expect(c.notesOn, isFalse);
+      c.applyNotesSignal('bob-key-0001', {'type': 'call_notes', 'on': true});
+      expect(c.notesOn, isTrue);
+      expect(c.notesStartedBy, 'bob-key-0001');
+      c.applyNotesSignal('bob-key-0001', {'type': 'call_notes', 'on': false});
+      expect(c.notesOn, isFalse);
+      expect(c.notesStartedBy, isNull);
+      // Anything but a plain true is off.
+      c.applyNotesSignal('bob-key-0001', {'type': 'call_notes', 'on': 'yes'});
+      expect(c.notesOn, isFalse);
+    });
+
+    test('the button does nothing outside a call', () async {
+      final c = CallService();
+      await c.setNotes(true);
+      expect(c.notesOn, isFalse);
+    });
+  });
+
   group('video in and out of a call', () {
     test('when both sides offer at once, exactly one gives way', () {
       expect(CallService.isPolite('aaa', 'bbb'), isTrue);

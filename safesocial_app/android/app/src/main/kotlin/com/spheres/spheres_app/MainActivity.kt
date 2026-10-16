@@ -80,6 +80,19 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // Notes from our side of a call, made on the phone; see CallNotes.
+        CallNotes.channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CallNotes.CHANNEL)
+        CallNotes.channel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "available" -> result.success(CallNotes.unavailable(this))
+                "start" -> {
+                    val why = CallNotes.start(this, call.argument<String>("callId") ?: "call")
+                    if (why == null) result.success(null) else result.error("unavailable", why, null)
+                }
+                "stop" -> result.success(CallNotes.stop())
+                else -> result.notImplemented()
+            }
+        }
         // The device's calendar and share sheet, for events. Nothing here
         // talks to the network; it hands data to apps the user picks.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "spheres/calendar")

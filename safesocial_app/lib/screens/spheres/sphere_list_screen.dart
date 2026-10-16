@@ -106,15 +106,19 @@ class _SphereTile extends StatelessWidget {
     // usually because a rotation has not reached us yet.
     final canPost = sphereService.keyring.hasKey(sphere.id, sphere.epoch);
 
+    final self = sphereService.isSelf(sphere.id);
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: cs.primaryContainer,
-        child: Icon(_iconFor(sphere.kind), color: cs.onPrimaryContainer),
+        child: Icon(self ? Icons.bookmark_outline : _iconFor(sphere.kind),
+            color: cs.onPrimaryContainer),
       ),
       title: Text(sphere.name),
       subtitle: Text(
-        '${sphere.members.length} member${sphere.members.length == 1 ? '' : 's'}'
-        '${canPost ? '' : ' · waiting for key'}',
+        self
+            ? 'Just you, built in'
+            : '${sphere.members.length} member${sphere.members.length == 1 ? '' : 's'}'
+                '${canPost ? '' : ' · waiting for key'}',
       ),
       trailing: canPost ? null : Icon(Icons.hourglass_empty, size: 18, color: cs.outline),
       onTap: () => context.push('/sphere/${sphere.id}'),

@@ -21,6 +21,7 @@ import '../../services/inbound_events.dart';
 import '../../services/notification_service.dart';
 import '../../services/wake_service.dart';
 import '../../services/ad_service.dart';
+import '../../services/call_notes_service.dart';
 import '../../services/app_lock_service.dart';
 import '../../services/library_service.dart';
 import '../../services/theme_service.dart';
@@ -211,6 +212,20 @@ class SettingsScreen extends StatelessWidget {
               onTap: () => _showCallServersDialog(context, config),
             );
           }),
+          Builder(builder: (context) {
+            final notes = context.watch<CallNotesService>();
+            final why = notes.unavailable;
+            return SwitchListTile(
+              secondary: Icon(Icons.sticky_note_2_outlined, color: cs.primary),
+              title: const Text('Notes from your side of a call'),
+              subtitle: Text(
+                '${CallNotesService.disclaimer}${why != null && notes.enabled ? '\n\nNot here: $why.' : ''}',
+              ),
+              isThreeLine: true,
+              value: notes.enabled,
+              onChanged: notes.setEnabled,
+            );
+          }),
           const Divider(indent: 56),
           Builder(builder: (context) {
             final library = context.watch<LibraryService>();
@@ -261,9 +276,9 @@ class SettingsScreen extends StatelessWidget {
             final feed = context.watch<FeedService>();
             return SwitchListTile(
               secondary: Icon(Icons.visibility_outlined, color: cs.primary),
-              title: const Text('Story View Receipts'),
+              title: const Text('Flash View Receipts'),
               subtitle: const Text(
-                'Let authors see that you watched their story. Turning this '
+                'Let authors see that you watched their flash. Turning this '
                 'off means you watch without telling them.',
               ),
               isThreeLine: true,
@@ -1039,7 +1054,7 @@ class SettingsScreen extends StatelessWidget {
       case InboundKind.sphereChat:
         return 'Sphere chats';
       case InboundKind.post:
-        return 'New posts and stories';
+        return 'New posts and flashes';
       case InboundKind.comment:
         return 'Comments on your posts';
       case InboundKind.reaction:

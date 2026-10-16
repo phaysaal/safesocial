@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
+import '../../services/call_notes_service.dart';
 import '../../services/call_service.dart';
 import '../../widgets/avatar.dart';
 import 'renderer_gate.dart';
@@ -162,6 +163,22 @@ class _CallScreenState extends State<CallScreen> {
                 ),
               ),
 
+            // Notes being taken from our own words, with the count so far.
+            if (callService.notesOn)
+              Positioned(
+                top: 20,
+                left: 20,
+                child: Chip(
+                  avatar: const Icon(Icons.sticky_note_2_outlined, size: 16),
+                  label: Text(
+                    'Notes · ${context.watch<CallNotesService>().count}'
+                    '${callService.notesStartedBy == null || callService.notesStartedBy == 'me' ? '' : ' · by ${callService.nameFor(callService.notesStartedBy!)}'}'
+                    '${context.watch<CallNotesService>().taking ? '' : ' · not here: ${context.watch<CallNotesService>().unavailable ?? context.watch<CallNotesService>().lastError ?? 'starting'}'}',
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+
             // ── Controls ────────────────────────────────────
             _buildControls(context, callService),
           ],
@@ -248,6 +265,13 @@ class _CallScreenState extends State<CallScreen> {
                   icon: callService.isMuted ? Icons.mic_off : Icons.mic,
                   onTap: () => callService.toggleMute(),
                   active: !callService.isMuted,
+                ),
+                // Notes, for both phones: each notes its own voice and the
+                // other side is told who began.
+                _CallActionButton(
+                  icon: callService.notesOn ? Icons.sticky_note_2 : Icons.sticky_note_2_outlined,
+                  onTap: () => callService.setNotes(!callService.notesOn),
+                  active: callService.notesOn,
                 ),
                 // The camera and the screen go in any call, a voice call
                 // included, and come out again.

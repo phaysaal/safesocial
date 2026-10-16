@@ -433,7 +433,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             const SizedBox(height: 12),
             Text('Chat emoji', style: Theme.of(ctx).textTheme.labelLarge),
             Wrap(spacing: 6, children: [
-              for (final e in const ['👍', '❤️', '🔥', '😂', '🎉', '🙏', '👀', '💯'])
+              for (final e in const ['🙌', '❤️', '🔥', '😂', '🎉', '🙏', '👀', '💯'])
                 ChoiceChip(
                   label: Text(e),
                   selected: emoji == e,

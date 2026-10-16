@@ -164,7 +164,7 @@ class _FeedScreenState extends State<FeedScreen> {
             : CustomScrollView(
                 slivers: [
                   // Stories row
-                  SliverToBoxAdapter(child: _StoriesRow()),
+                  const SliverToBoxAdapter(child: _FlashStrip()),
                   // Quick-access icon row
                   const SliverToBoxAdapter(child: _QuickAccessRow()),
                   // Birthdays and anniversaries today
@@ -211,7 +211,7 @@ class _FeedScreenState extends State<FeedScreen> {
   Widget _buildEmptyFeed(BuildContext context, ThemeData theme) {
     return CustomScrollView(
       slivers: [
-        SliverToBoxAdapter(child: _StoriesRow()),
+        const SliverToBoxAdapter(child: _FlashStrip()),
         const SliverToBoxAdapter(child: _QuickAccessRow()),
         const SliverToBoxAdapter(child: _CelebrationsBanner()),
         const SliverToBoxAdapter(child: _FeedFilterRow()),
@@ -387,6 +387,90 @@ class _MemoriesBanner extends StatelessWidget {
 
 // ─── Stories row ──────────────────────────────────────────────────────────────
 
+/// Flashes take a quarter of the screen when open, so they start folded: one
+/// thin row of tiny rings, and a tap unfolds the strip. The choice is kept
+/// for the process, not stored.
+class _FlashStrip extends StatefulWidget {
+  const _FlashStrip();
+
+  @override
+  State<_FlashStrip> createState() => _FlashStripState();
+}
+
+class _FlashStripState extends State<_FlashStrip> {
+  static bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_open) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _StoriesRow(),
+          InkWell(
+            onTap: () => setState(() => _open = false),
+            child: Container(
+              color: Theme.of(context).colorScheme.surface,
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: const Center(child: Icon(Icons.expand_less, size: 18)),
+            ),
+          ),
+        ],
+      );
+    }
+    final cs = Theme.of(context).colorScheme;
+    final feed = context.watch<FeedService>();
+    final me = context.watch<IdentityService>().publicKey ?? 'self';
+    final byAuthor = feed.storiesByAuthor;
+    final authors = [me, ...byAuthor.keys.where((k) => k != me)];
+    return InkWell(
+      onTap: () => setState(() => _open = true),
+      child: Container(
+        color: cs.surface,
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            Icon(Icons.bolt_outlined, size: 18, color: cs.primary),
+            const SizedBox(width: 6),
+            Text('Flashes', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (final a in authors)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Container(
+                        padding: const EdgeInsets.all(1.5),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: (byAuthor[a]?.isNotEmpty ?? false)
+                              ? LinearGradient(colors: [cs.primary, cs.secondary])
+                              : null,
+                          border: (byAuthor[a]?.isNotEmpty ?? false)
+                              ? null
+                              : Border.all(color: cs.outline),
+                        ),
+                        child: UserAvatar(
+                          displayName: a == me ? 'You' : (byAuthor[a]?.first.authorName ?? '?'),
+                          identityKey: a,
+                          size: AvatarSize.small,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Icon(Icons.expand_more, size: 18, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _StoriesRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -409,7 +493,7 @@ class _StoriesRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         children: [
           _StoryItem(
-            label: myStories.isEmpty ? 'Add story' : 'Your story',
+            label: myStories.isEmpty ? 'Add flash' : 'Your flash',
             displayName: myName,
             identityKey: myPubKey,
             isAddStory: myStories.isEmpty,
@@ -454,7 +538,7 @@ class _StoriesRow extends StatelessWidget {
                         hideFrom: hideFrom,
                       );
                   ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Story added')));
+                      const SnackBar(content: Text('Flash added')));
                 }
               }
             },
@@ -611,7 +695,7 @@ class _CreatePostBar extends StatelessWidget {
                   border: Border.all(color: cs.outline),
                 ),
                 child: Text(
-                  "What's on your mind?",
+                  'Say something to your spheres',
                   style: TextStyle(color: cs.onSurfaceVariant),
                 ),
               ),

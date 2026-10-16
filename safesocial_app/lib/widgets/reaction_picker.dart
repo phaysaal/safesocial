@@ -20,8 +20,9 @@ Future<void> showReactionPicker(
     builder: (ctx) => SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Wrap(
+          alignment: WrapAlignment.spaceEvenly,
+          runSpacing: 8,
           children: [
             for (final kind in ReactionKinds.all)
               InkWell(

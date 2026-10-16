@@ -248,6 +248,9 @@ Future<void> wireIdentity({
   // Membership changes and sphere keys travel over the pairwise chat channels
   // that already exist, so there is no separate transport to keep alive.
   sphereService.sendToPeer = chatService.sendRawToPeer;
+  // The built-in sphere with one member. Derived from the identity, so
+  // every device of it has the same one.
+  await sphereService.ensureSelf();
   chatService.wantsOriginalQuality = () => libraryService.originalQualityMedia;
   chatService.isIgnored = libraryService.isChatIgnored;
   unawaited(chatService.sendDueScheduled());
