@@ -10,7 +10,9 @@ import '../../crypto/blob.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/library_service.dart';
+import '../../models/look.dart';
 import '../../services/media_service.dart';
+import '../../widgets/looked.dart';
 import '../../widgets/media_thumb.dart';
 import '../feed/compose_screen.dart';
 
@@ -32,7 +34,10 @@ class MediaViewerScreen extends StatefulWidget {
   /// A full 360° picture: panned around instead of shown flat.
   final bool panorama;
 
-  const MediaViewerScreen({super.key, this.mediaRef, this.panorama = false});
+  /// Colour and light the poster chose; the original is one hold away.
+  final Look look;
+
+  const MediaViewerScreen({super.key, this.mediaRef, this.panorama = false, this.look = Look.none});
 
   @override
   State<MediaViewerScreen> createState() => _MediaViewerScreenState();
@@ -46,6 +51,9 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
 
   VideoPlayerController? _video;
   bool _busy = false;
+
+  /// Held down: the picture as the camera made it.
+  bool _showOriginal = false;
 
   bool get _isVideo => _path != null && MediaService.looksLikeVideo(_path!);
 
@@ -278,10 +286,50 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
 
     if (widget.panorama) return PanoramaViewer(path: _path!);
 
-    return InteractiveViewer(
+    final picture = InteractiveViewer(
       minScale: 0.5,
       maxScale: 4.0,
       child: Image.file(File(_path!), fit: BoxFit.contain),
+    );
+    if (widget.look.isNone) return picture;
+    return Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        Positioned.fill(child: Looked(look: _showOriginal ? Look.none : widget.look, child: picture)),
+        Positioned(
+          bottom: 16,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  _showOriginal ? 'Original' : 'Look: ${widget.look.label}',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTapDown: (_) => setState(() => _showOriginal = true),
+                onTapUp: (_) => setState(() => _showOriginal = false),
+                onTapCancel: () => setState(() => _showOriginal = false),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Text('Hold for original', style: TextStyle(color: Colors.white, fontSize: 12)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -299,9 +347,12 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          AspectRatio(
-            aspectRatio: v.value.aspectRatio,
-            child: VideoPlayer(v),
+          Looked(
+            look: _showOriginal ? Look.none : widget.look,
+            child: AspectRatio(
+              aspectRatio: v.value.aspectRatio,
+              child: VideoPlayer(v),
+            ),
           ),
           if (!v.value.isPlaying)
             Container(

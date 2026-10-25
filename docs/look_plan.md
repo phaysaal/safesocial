@@ -104,6 +104,25 @@ band, as now, because those change the frame.
 - **Save to gallery** writes the picture as shown, with the look baked in, and says so;
   the original is one toggle away first.
 
+## Status
+
+L3 built on 25 October 2026: `ImageStats` from a 48-pixel copy (a file, or a blob's
+inline thumbnail when that is all the phone holds), `Look.trueSkin` with its dead zones
+and clips, the True skin chip in the editor and the after-sheets, and the look on every
+video surface including flashes and the protected viewer. All three milestones are built;
+album items remain.
+
+L2 built on 25 October 2026: the look rides `post_edit` and `chat_edit` as numbers (null
+removes), applied by the receiver without touching the words, the edit mark or the
+signature; "Change the look" in the post menu and the photo's long-press menu; one set of
+controls for the editor and the sheet. Album items are not yet covered. No history of
+looks is kept: the original is always one hold away, and that is the reversibility.
+
+L1 built on 25 October 2026: the model and matrix, `Looked`, looks at send time from the
+editor's presets and sliders, the viewer's line and hold-for-original, the composer's
+thumbnails. The origin sentence does not yet say "shown with a look"; the viewer's line
+does. L2 and L3 are to come.
+
 ## Milestones
 
 | # | Milestone | Size | What lands | Exit criterion |

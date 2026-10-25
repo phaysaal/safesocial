@@ -44,6 +44,26 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   posters, trimmed and given a chosen cover frame through a `.trim` sidecar applied at
   send time; everything chunked and encrypted (`blob_service.dart`). `MediaThumb`
   renders every reference kind.
+- **The look** (`models/look.dart`, pure; `widgets/looked.dart`; `docs/look_plan.md`): colour
+  and light as numbers, exposure, warmth, tint, contrast, highlights, shadows, saturation,
+  vibrance, vignette, grain, carried in `payload['look']` (one per picture index, or `*`
+  for all) and applied by every viewer at draw time as one colour matrix plus two overlays,
+  so the pixels stay the camera's and an older client shows the original. The image
+  editor's filters are now presets of the look (Office light, Window, Restaurant, Noon,
+  Evening indoors, Mono, Fade) with sliders behind Adjust; a look alone leaves the file
+  and the origin score untouched (`EditResult`), only a crop, turn or drawing rewrites
+  pixels. The viewer names the look and shows the original while held. Nothing in the
+  model changes a face, by decision. After posting or sending, "Change the look" in the
+  post menu (author) and the photo's long-press menu (sender) sends a `post_edit` or
+  `chat_edit` carrying only `look` (null removes), which the receiver applies without
+  touching the words, the edit mark or the signature (`setPostLook`, `setMessageLook`,
+  `applyChatEdit`); one set of controls (`LookControls`, `showLookSheet`) serves the
+  editor and the after-menu. True skin (`Look.trueSkin(ImageStats)`, `services/image_stats.dart`):
+  a grey-world white balance clipped to a sane range and a midtone lift, read from a
+  48-pixel copy of the picture (a local file, or a blob's inline thumbnail) on this phone,
+  no face found, nothing judged; a neutral picture gets nothing. Every video surface is
+  wrapped too: the viewer, flashes, the protected viewer under its veil. L1 to L3 of the
+  plan are built; album items are not covered.
 - **Media origin score.** Before an image is re-encoded, `ProvenanceScanner` reads what the
   file says about itself (camera EXIF, editing software, date disagreement, XMP and Content
   Credentials marks, PNG generator chunks, file name, dimensions) and produces a
@@ -465,7 +485,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 885 tests in 83 files under test/{crypto,models,screens,services}
+flutter test                       # 908 tests in 86 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run --flavor foss          # or --flavor play; every build names a flavour now
 flutter build apk --debug --flavor foss

@@ -8,7 +8,11 @@ import 'package:image/image.dart' as img;
 import 'package:provider/provider.dart';
 
 import '../../services/library_service.dart';
+import '../../models/look.dart';
+import '../../services/image_stats.dart';
 import '../../services/media_service.dart';
+import '../../widgets/look_controls.dart';
+import '../../widgets/looked.dart';
 
 /// Crop, rotate, flip, filter, draw on, and put text or stickers on a picked
 /// picture.
@@ -21,13 +25,24 @@ import '../../services/media_service.dart';
 class EditImageScreen extends StatefulWidget {
   final String path;
 
-  const EditImageScreen({super.key, required this.path});
+  /// The look the picture already has, to start from.
+  final Look initialLook;
+
+  const EditImageScreen({super.key, required this.path, this.initialLook = Look.none});
 
   @override
   State<EditImageScreen> createState() => _EditImageScreenState();
 }
 
-enum _Filter { none, mono, sepia, warm, cool, fade }
+/// What the editor hands back: the file (the same one when only the look
+/// changed, since a look is numbers and leaves the pixels alone) and the look.
+class EditResult {
+  final String path;
+  final Look look;
+  const EditResult(this.path, this.look);
+}
+
+
 
 enum _Crop { free, square, fourThree, sixteenNine }
 
@@ -58,7 +73,8 @@ class _EditImageScreenState extends State<EditImageScreen> {
   Uint8List? _preview;
   int _rotation = 0; // quarter turns
   bool _flipped = false;
-  _Filter _filter = _Filter.none;
+  late Look _look = widget.initialLook;
+  Look? _trueSkin;
   _Crop _crop = _Crop.free;
   _Tool _tool = _Tool.move;
   final List<_Overlay> _overlays = [];
@@ -88,6 +104,7 @@ class _EditImageScreenState extends State<EditImageScreen> {
       return;
     }
     _original = decoded;
+    _trueSkin = Look.trueSkin(ImageStatsLoader.of(decoded));
     await _rebuild();
   }
 
@@ -116,22 +133,8 @@ class _EditImageScreenState extends State<EditImageScreen> {
       }
       work = img.copyCrop(work, x: (w - cw) ~/ 2, y: (h - ch) ~/ 2, width: cw, height: ch);
     }
-    switch (_filter) {
-      case _Filter.none:
-        break;
-      case _Filter.mono:
-        work = img.grayscale(work);
-      case _Filter.sepia:
-        work = img.sepia(work);
-      case _Filter.warm:
-        work = img.adjustColor(work, saturation: 1.15, gamma: 0.95);
-        work = img.colorOffset(work, red: 12, blue: -8);
-      case _Filter.cool:
-        work = img.adjustColor(work, saturation: 0.95);
-        work = img.colorOffset(work, red: -8, blue: 14);
-      case _Filter.fade:
-        work = img.adjustColor(work, contrast: 0.85, saturation: 0.8, brightness: 1.05);
-    }
+    // Colour and light are not done here: they are a look, applied at draw
+    // time by every viewer, so the pixels stay the camera's.
     _working = work;
     // The preview is a smaller JPEG; the saved file is full size.
     final small = work.width > 1200 ? img.copyResize(work, width: 1200) : work;
@@ -141,9 +144,18 @@ class _EditImageScreenState extends State<EditImageScreen> {
 
   bool get _hasOverlay => _overlays.isNotEmpty || _strokes.isNotEmpty;
 
+  /// Whether anything here changed the frame itself.
+  bool get _pixelsChanged => _rotation != 0 || _flipped || _crop != _Crop.free || _hasOverlay;
+
   Future<void> _save() async {
     final work = _working;
     if (work == null) return;
+    // Only the look changed: the file stays as the camera made it, and the
+    // origin score with it.
+    if (!_pixelsChanged) {
+      Navigator.pop(context, EditResult(widget.path, _look));
+      return;
+    }
     setState(() => _saving = true);
     try {
       Uint8List out;
@@ -161,7 +173,7 @@ class _EditImageScreenState extends State<EditImageScreen> {
         out = Uint8List.fromList(img.encodeJpg(sized, quality: 90));
       }
       final replaced = await MediaService.replaceEdited(widget.path, out);
-      if (mounted) Navigator.pop(context, replaced);
+      if (mounted) Navigator.pop(context, EditResult(replaced, _look));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
@@ -290,7 +302,11 @@ class _EditImageScreenState extends State<EditImageScreen> {
             child: Center(
               child: _preview == null
                   ? const CircularProgressIndicator()
-                  : RepaintBoundary(
+                  : Looked(
+                      // Outside the boundary: a capture for overlays keeps
+                      // the pixels as they are; the look travels as numbers.
+                      look: _look,
+                      child: RepaintBoundary(
                       key: _boundary,
                       child: _Canvas(
                         preview: _preview!,
@@ -303,11 +319,12 @@ class _EditImageScreenState extends State<EditImageScreen> {
                         onChanged: () => setState(() {}),
                       ),
                     ),
+                    ),
             ),
           ),
-          // ── Filters, or pen colours while drawing ────────────────
+          // ── The look, or pen colours while drawing ───────────────
           SizedBox(
-            height: 44,
+            height: _tool == _Tool.draw ? 44 : null,
             child: _tool == _Tool.draw
                 ? ListView(
                     scrollDirection: Axis.horizontal,
@@ -347,24 +364,7 @@ class _EditImageScreenState extends State<EditImageScreen> {
                       ),
                     ],
                   )
-                : ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    children: [
-                      for (final f in _Filter.values)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(f.name[0].toUpperCase() + f.name.substring(1)),
-                            selected: _filter == f,
-                            onSelected: (_) {
-                              _filter = f;
-                              _rebuild();
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
+                : LookControls(look: _look, onDark: true, trueSkin: _trueSkin, onChanged: (l) => setState(() => _look = l)),
           ),
           // ── Tools ────────────────────────────────────────────────
           SafeArea(

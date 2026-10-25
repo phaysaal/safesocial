@@ -578,6 +578,45 @@ class ChatService extends ChangeNotifier {
         {'message_id': messageId, 'content': trimmed, 'edited_at': at.toIso8601String(), 'peer': contactKey});
   }
 
+  /// Change the look of a photo we sent; null removes it. Not words, so no
+  /// edit window and no "edited" mark.
+  Future<void> setMessageLook(String contactKey, String messageId, Map<String, dynamic>? look) async {
+    final msg = _find(contactKey, messageId);
+    if (msg == null || msg.senderId != _myPublicKey) {
+      throw StateError('Only your own photos can be given a look');
+    }
+    _replace(contactKey, msg.copyWith(payload: _withLook(msg.payload, look)));
+    await _sendControl(contactKey, 'chat_edit', {'message_id': messageId, 'look': look, 'peer': contactKey});
+  }
+
+  static Map<String, dynamic>? _withLook(Map<String, dynamic>? payload, Object? look) {
+    final next = {...?payload};
+    if (look is Map) {
+      next['look'] = Map<String, dynamic>.from(look);
+    } else {
+      next.remove('look');
+    }
+    return next; // empty, not null: null would mean "keep" to copyWith
+  }
+
+  /// A `chat_edit` from [from] about a message in [conversation]: words, a
+  /// look, or both. Public so the rule is testable without a socket.
+  @visibleForTesting
+  void applyChatEdit(String conversation, String from, Map<String, dynamic> payload) {
+    final msg = _find(conversation, payload['message_id'] as String? ?? '');
+    if (msg == null || msg.senderId != from) return;
+    final hasWords = payload['content'] is String;
+    final at = DateTime.tryParse(payload['edited_at'] as String? ?? '') ?? DateTime.now();
+    _replace(
+      conversation,
+      msg.copyWith(
+        content: hasWords ? payload['content'] as String : msg.content,
+        editedAt: hasWords ? at : msg.editedAt,
+        payload: payload.containsKey('look') ? _withLook(msg.payload, payload['look']) : msg.payload,
+      ),
+    );
+  }
+
   Future<void> deleteForEveryone(String contactKey, String messageId) async {
     final msg = _find(contactKey, messageId);
     if (msg == null || msg.senderId != _myPublicKey) {
@@ -1294,10 +1333,7 @@ class ChatService extends ChangeNotifier {
 
     switch (opened.type) {
       case 'chat_edit':
-        final msg = _find(conversation, payload['message_id'] as String? ?? '');
-        if (msg == null || msg.senderId != from) return;
-        final at = DateTime.tryParse(payload['edited_at'] as String? ?? '') ?? DateTime.now();
-        _replace(conversation, msg.copyWith(content: payload['content'] as String? ?? msg.content, editedAt: at));
+        applyChatEdit(conversation, from, payload);
       case 'chat_delete':
         final msg = _find(conversation, payload['message_id'] as String? ?? '');
         if (msg == null || msg.senderId != from) return;

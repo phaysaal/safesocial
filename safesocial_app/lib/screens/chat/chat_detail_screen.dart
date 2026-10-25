@@ -16,6 +16,10 @@ import '../../models/contact.dart';
 import '../../models/message.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
+import '../../models/look.dart';
+import '../../services/image_stats.dart';
+import '../../widgets/look_controls.dart';
+import '../../widgets/media_thumb.dart';
 import '../../widgets/writing_guide_sheet.dart';
 import '../../services/identity_service.dart';
 import '../../services/call_service.dart';
@@ -31,7 +35,6 @@ import '../../widgets/chat_themes.dart';
 import '../../widgets/emoticon_picker.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_cards.dart';
-import '../../widgets/media_thumb.dart';
 import '../../services/send_alarms.dart';
 import '../../widgets/protected_sheet.dart';
 
@@ -224,6 +227,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _changeLook(Message msg) async {
+    final stats = await ImageStatsLoader.forRef(msg.mediaRefs.first);
+    if (!mounted) return;
+    final look = await showLookSheet(
+      context,
+      preview: MediaThumb(ref: msg.mediaRefs.first, fit: BoxFit.contain),
+      initial: Look.forIndex(msg.payload, 0),
+      trueSkin: stats == null ? null : Look.trueSkin(stats),
+    );
+    if (look == null || !mounted) return;
+    await _guard(() => context.read<ChatService>().setMessageLook(
+        widget.conversationId, msg.id,
+        look.isNone ? null : Look.payloadFor(List.filled(msg.mediaRefs.length, look))));
   }
 
   Future<void> _editMessage(Message msg) async {
@@ -1220,6 +1238,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 chatService.deleteForEveryone(widget.conversationId, msg.id))
                             : null,
                         onEdit: (msg) => _editMessage(msg),
+                        onLook: isMine ? (msg) => _changeLook(msg) : null,
                         onForward: _forward,
                         onStar: (msg) => library.toggleStar(widget.conversationId, msg.id),
                         onPin: (msg) => _guard(() => chatService.pinMessage(

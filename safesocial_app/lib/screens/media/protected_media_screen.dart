@@ -8,7 +8,9 @@ import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../crypto/blob.dart';
+import '../../models/look.dart';
 import '../../models/media_protection.dart';
+import '../../widgets/looked.dart';
 import '../../services/blob_service.dart';
 import '../../services/debug_log_service.dart';
 import '../../services/media_service.dart';
@@ -30,11 +32,14 @@ class ProtectedMediaScreen extends StatefulWidget {
   /// The viewer's own name, for the watermark.
   final String? viewerName;
 
+  /// Colour and light the sender chose, drawn under the veil.
+  final Look look;
+
   /// Overridable so a test can hand in bytes without a relay.
   static Future<Uint8List?> Function(BlobRef ref)? fetchOverride;
 
   const ProtectedMediaScreen(
-      {super.key, required this.mediaRef, required this.protection, this.viewerName});
+      {super.key, required this.mediaRef, required this.protection, this.viewerName, this.look = Look.none});
 
   @override
   State<ProtectedMediaScreen> createState() => _ProtectedMediaScreenState();
@@ -234,9 +239,12 @@ class _ProtectedMediaScreenState extends State<ProtectedMediaScreen>
     } else if (_bytes == null && _video == null) {
       body = const CircularProgressIndicator(color: Colors.white);
     } else {
-      final content = _isVideo
-          ? VideoPlayer(_video!)
-          : Image.memory(_bytes!, fit: BoxFit.contain, gaplessPlayback: true);
+      final content = Looked(
+        look: widget.look,
+        child: _isVideo
+            ? VideoPlayer(_video!)
+            : Image.memory(_bytes!, fit: BoxFit.contain, gaplessPlayback: true),
+      );
       body = AspectRatio(
         aspectRatio: _aspect,
         child: ProtectedVeil(

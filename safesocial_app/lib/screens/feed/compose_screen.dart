@@ -6,7 +6,9 @@ import 'package:provider/provider.dart';
 import '../../models/sphere.dart';
 import '../../services/feed_service.dart';
 import '../../services/identity_service.dart';
+import '../../models/look.dart';
 import '../../services/media_service.dart';
+import '../../widgets/looked.dart';
 import '../../services/sphere_info_service.dart';
 import '../../services/sphere_service.dart';
 import '../../services/video_transcoder.dart';
@@ -47,6 +49,9 @@ class ComposeScreen extends StatefulWidget {
 class _ComposeScreenState extends State<ComposeScreen> {
   final _controller = TextEditingController();
   final _media = <String>[];
+
+  /// The look each picture carries, by path; numbers, not pixels.
+  final _looks = <String, Look>{};
   final _altTexts = <String, String>{};
   final _targets = <String>{};
   final _coAuthors = <String>{};
@@ -348,6 +353,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
       if (_protection != null && _media.isNotEmpty) 'protected': _protection!.toJson(),
       if (_consent && _media.isNotEmpty && _tags.isNotEmpty) 'consent': true,
     };
+    final look = Look.payloadFor([for (final m in _media) _looks[m] ?? Look.none]);
+    if (look != null) extras['look'] = look;
     if (_payload == null && extras.isEmpty) return null;
     return {...?_payload, ...extras};
   }
@@ -375,13 +382,20 @@ class _ComposeScreenState extends State<ComposeScreen> {
       if (mounted) setState(() {});
       return;
     }
-    final edited = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => EditImageScreen(path: path)),
+    final edited = await Navigator.of(context).push<EditResult>(
+      MaterialPageRoute(
+          builder: (_) => EditImageScreen(path: path, initialLook: _looks[path] ?? Look.none)),
     );
     if (edited != null && mounted) {
       // Same path, new bytes: evict the cached image so the thumb redraws.
-      await FileImage(File(edited)).evict();
-      setState(() {});
+      await FileImage(File(edited.path)).evict();
+      setState(() {
+        if (edited.look.isNone) {
+          _looks.remove(path);
+        } else {
+          _looks[path] = edited.look;
+        }
+      });
     }
   }
 
@@ -983,12 +997,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 onTap: () => _editMedia(path),
                 onLongPress: () => _editAltText(path),
                 child: Stack(children: [
-                  MediaThumb(
+                  Looked(look: _looks[path] ?? Look.none, child: MediaThumb(
                     ref: path,
                     width: 120,
                     height: 120,
                     borderRadius: BorderRadius.circular(12),
-                  ),
+                  )),
                   Positioned(
                     left: 4,
                     top: 4,

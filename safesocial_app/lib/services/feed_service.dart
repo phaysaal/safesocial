@@ -424,6 +424,38 @@ class FeedService extends ChangeNotifier {
 
   // ── Editing ───────────────────────────────────────────────────────────────
 
+  /// Change the look of one of our own posts, everywhere it was shared: a
+  /// few numbers on the edit path, no new upload. Null removes it. The words
+  /// and their signature are untouched, and the post is not marked edited,
+  /// because nothing it says has changed.
+  Future<void> setPostLook(String postId, Map<String, dynamic>? look) async {
+    final me = _myPublicKey;
+    final index = _posts.indexWhere((p) => p.id == postId);
+    if (me == null || index == -1) return;
+    final post = _posts[index];
+    if (post.authorId != me) throw StateError('Only the author can change the look');
+    final payload = {...?post.payload};
+    if (look == null) {
+      payload.remove('look');
+    } else {
+      payload['look'] = look;
+    }
+    // An empty map, not null: null would mean "keep" to copyWith.
+    _posts[index] = post.copyWith(payload: payload);
+    await _persistPosts();
+    notifyListeners();
+    final wire = jsonEncode({
+      'type': 'post_edit',
+      'post_id': postId,
+      // Null travels as an explicit removal; absent means "not this".
+      'look': look,
+      'sig': post.authorSig,
+    });
+    for (final sphereId in post.sphereIds) {
+      await _publishToSphere(sphereId: sphereId, type: 'post_edit', payloadJson: wire);
+    }
+  }
+
   /// Change the text of one of our own posts, everywhere it was shared.
   Future<void> editPost(String postId, String content) async {
     final me = _myPublicKey;
@@ -1395,11 +1427,27 @@ class FeedService extends ChangeNotifier {
         DebugLogService().warn('Feed', 'Dropping edit from a non-author');
         return;
       }
+      final current = _posts[index];
+      final hasWords = json['content'] is String;
       final editedAt = DateTime.tryParse(json['edited_at'] as String? ?? '');
-      _posts[index] = _posts[index].copyWith(
-        content: json['content'] as String? ?? _posts[index].content,
-        editedAt: editedAt ?? DateTime.now(),
-        authorSig: json['sig'] is String ? json['sig'] as String : null,
+      // The look is numbers beside the words: present means set it (null
+      // removes), absent means this edit is not about it.
+      var payload = current.payload;
+      if (json.containsKey('look')) {
+        final next = {...?current.payload};
+        final look = json['look'];
+        if (look is Map) {
+          next['look'] = Map<String, dynamic>.from(look);
+        } else {
+          next.remove('look');
+        }
+        payload = next; // empty, not null: null would mean "keep"
+      }
+      _posts[index] = current.copyWith(
+        content: hasWords ? json['content'] as String : current.content,
+        editedAt: hasWords ? (editedAt ?? DateTime.now()) : current.editedAt,
+        authorSig: json['sig'] is String ? json['sig'] as String : current.authorSig,
+        payload: payload,
       );
       await _persistPosts();
       notifyListeners();

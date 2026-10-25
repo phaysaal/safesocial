@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../models/look.dart';
 import '../models/media_provenance.dart';
 import '../models/message.dart';
 import '../models/post.dart';
@@ -30,6 +31,9 @@ class MessageBubble extends StatelessWidget {
   final void Function(Message)? onDelete;
   final void Function(Message)? onDeleteForEveryone;
   final void Function(Message)? onEdit;
+
+  /// Change the look of a photo we sent; see `models/look.dart`.
+  final void Function(Message)? onLook;
   final void Function(Message)? onReply;
   final void Function(Message)? onForward;
   final void Function(Message)? onStar;
@@ -86,6 +90,7 @@ class MessageBubble extends StatelessWidget {
     this.onDelete,
     this.onDeleteForEveryone,
     this.onEdit,
+    this.onLook,
     this.onReply,
     this.onForward,
     this.onStar,
@@ -424,6 +429,7 @@ class MessageBubble extends StatelessWidget {
               provenance: MediaProvenance.at(message.provenance, i),
               blurred: blurMedia,
               protection: message.protection,
+              look: Look.forIndex(message.payload, i),
             ),
         ],
       ));
@@ -605,6 +611,22 @@ class MessageBubble extends StatelessWidget {
                   onTap: () {
                     Navigator.pop(ctx);
                     onEdit!(message);
+                  },
+                ),
+              if (onLook != null &&
+                  isMine &&
+                  !message.isDeleted &&
+                  message.mediaRefs.isNotEmpty &&
+                  message.kind != 'sticker' &&
+                  !message.viewOnce &&
+                  message.protection == null)
+                ListTile(
+                  leading: const Icon(Icons.palette_outlined),
+                  title: const Text('Change the look'),
+                  subtitle: const Text('Colour and light, as numbers; nothing is re-sent'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onLook!(message);
                   },
                 ),
               if (onDelete != null)

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../models/look.dart';
 import '../models/media_protection.dart';
 import '../models/media_provenance.dart';
+import 'looked.dart';
 import 'media_thumb.dart';
 import 'protected_veil.dart';
 import 'provenance_badge.dart';
@@ -20,12 +22,16 @@ class MediaPreview extends StatelessWidget {
   /// Shown only while held, in its own viewer; see [MediaProtection].
   final MediaProtection? protection;
 
+  /// Colour and light the sender chose, applied here at draw time.
+  final Look look;
+
   const MediaPreview({
     super.key,
     required this.mediaRef,
     this.provenance,
     this.blurred = false,
     this.protection,
+    this.look = Look.none,
   });
 
   @override
@@ -33,9 +39,13 @@ class MediaPreview extends StatelessWidget {
     final radius = BorderRadius.circular(8);
     final thumb = GestureDetector(
       onTap: () {
-        context.push('/media/view?ref=${Uri.encodeComponent(mediaRef)}${protection?.query ?? ''}');
+        context.push('/media/view?ref=${Uri.encodeComponent(mediaRef)}${protection?.query ?? ''}'
+            '${look.isNone ? '' : '&look=${look.toQuery()}'}');
       },
-      child: MediaThumb(ref: mediaRef, width: 120, height: 120, borderRadius: radius),
+      child: Looked(
+        look: look,
+        child: MediaThumb(ref: mediaRef, width: 120, height: 120, borderRadius: radius),
+      ),
     );
     final p = provenance;
     final withBadge = p == null && protection == null

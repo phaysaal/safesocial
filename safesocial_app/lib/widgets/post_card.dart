@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../models/look.dart';
 import '../models/media_provenance.dart';
 import '../models/post.dart';
 import 'post_kinds.dart';
@@ -10,6 +11,7 @@ import 'author_name.dart';
 import '../models/sphere.dart';
 import '../services/contact_service.dart';
 import '../services/feed_service.dart';
+import '../services/image_stats.dart';
 import '../services/notification_service.dart';
 import '../services/media_service.dart';
 import '../services/event_reminders.dart';
@@ -23,6 +25,8 @@ import '../services/translation_service.dart';
 import 'translation_line.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
+import 'look_controls.dart';
+import 'looked.dart';
 import 'media_thumb.dart';
 import 'protected_veil.dart';
 import 'provenance_badge.dart';
@@ -210,6 +214,8 @@ class _PostCardState extends State<PostCard> {
                       const PopupMenuItem(value: 'edit', child: Text('Edit post')),
                       if (!post.isStory)
                         const PopupMenuItem(value: 'spheres', child: Text('Spheres it is in…')),
+                      if (post.mediaRefs.isNotEmpty && !post.isProtected)
+                        const PopupMenuItem(value: 'look', child: Text('Change the look…')),
                       PopupMenuItem(
                         value: 'comments',
                         child: Text(post.commentsOff
@@ -619,6 +625,7 @@ class _PostCardState extends State<PostCard> {
     final provenance = MediaProvenance.at(post.provenance, index);
     final blurred = context.watch<LibraryService>().blursAnyOf(post.sphereIds);
     final pano = (post.payload?['pano'] as List?)?.contains(index) ?? false;
+    final look = Look.forIndex(post.payload, index);
     final protection = post.protection;
     final myKey = context.read<IdentityService>().currentIdentity?.publicKey;
     final locked = post.lock?[index];
@@ -652,11 +659,12 @@ class _PostCardState extends State<PostCard> {
       image: true,
       child: GestureDetector(
         onTap: () => context.push(
-            '/media/view?ref=${Uri.encodeComponent(ref)}${pano ? '&pano=1' : ''}${protection?.query ?? ''}'),
+            '/media/view?ref=${Uri.encodeComponent(ref)}${pano ? '&pano=1' : ''}${protection?.query ?? ''}'
+            '${look.isNone ? '' : '&look=${look.toQuery()}'}'),
         onLongPress: alt.isEmpty
             ? null
             : () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(alt))),
-        child: MediaThumb(ref: ref, width: width, height: height),
+        child: Looked(look: look, child: MediaThumb(ref: ref, width: width, height: height)),
       ),
     );
     final withBadge = provenance == null && !pano && protection == null
@@ -762,6 +770,9 @@ class _PostCardState extends State<PostCard> {
         break;
       case 'spheres':
         _editSpheres(context, post);
+        break;
+      case 'look':
+        _changeLook(context, post);
       case 'report':
         showReportDialog(context).then((reason) {
           if (reason == null || !context.mounted) return;
@@ -812,6 +823,28 @@ class _PostCardState extends State<PostCard> {
               ? 'Unfollowed; their posts leave your feed'
               : 'Following again'),
         ));
+    }
+  }
+
+  /// Colour and light, after posting: numbers on the edit path, no upload.
+  /// One look for every picture of the post.
+  Future<void> _changeLook(BuildContext context, Post post) async {
+    final feed = context.read<FeedService>();
+    final messenger = ScaffoldMessenger.of(context);
+    final stats = await ImageStatsLoader.forRef(post.mediaRefs.first);
+    if (!context.mounted) return;
+    final look = await showLookSheet(
+      context,
+      preview: MediaThumb(ref: post.mediaRefs.first, fit: BoxFit.contain),
+      initial: Look.forIndex(post.payload, 0),
+      trueSkin: stats == null ? null : Look.trueSkin(stats),
+    );
+    if (look == null) return;
+    try {
+      await feed.setPostLook(
+          post.id, look.isNone ? null : Look.payloadFor(List.filled(post.mediaRefs.length, look)));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 

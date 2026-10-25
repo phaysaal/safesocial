@@ -6,7 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/look.dart';
 import '../../models/post.dart';
+import '../../widgets/looked.dart';
 import '../../services/chat_service.dart';
 import '../../crypto/session_manager.dart';
 import '../../services/contact_service.dart';
@@ -166,11 +168,14 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> with SingleTicker
       fit: StackFit.expand,
       children: [
         if (story.mediaRefs.isNotEmpty)
-          _StoryMedia(
-            ref: story.mediaRefs.first,
-            active: index == _currentIndex,
-            loop: story.payload?['loop'] == true,
-            onVideoDuration: (d) => _useVideoDuration(index, d),
+          Looked(
+            look: Look.forIndex(story.payload, 0),
+            child: _StoryMedia(
+              ref: story.mediaRefs.first,
+              active: index == _currentIndex,
+              loop: story.payload?['loop'] == true,
+              onVideoDuration: (d) => _useVideoDuration(index, d),
+            ),
           )
         else
           Container(
