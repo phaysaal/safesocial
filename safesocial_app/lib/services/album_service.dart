@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'secure_store.dart';
@@ -88,7 +89,8 @@ class AlbumService extends ChangeNotifier {
     DebugLogService().success('Media', 'Shared album "$name" created');
   }
 
-  Future<void> addMediaToAlbum(String dhtKey, String mediaRef, String type) async {
+  Future<void> addMediaToAlbum(String dhtKey, String mediaRef, String type,
+      {Map<String, dynamic>? look}) async {
     final index = _albums.indexWhere((a) => a.dhtKey == dhtKey);
     if (index == -1) return;
 
@@ -98,6 +100,7 @@ class AlbumService extends ChangeNotifier {
       mediaRef: mediaRef,
       type: type,
       addedAt: DateTime.now(),
+      look: look,
     );
 
     final album = _albums[index].copyWith(
@@ -170,6 +173,42 @@ class AlbumService extends ChangeNotifier {
     }
   }
 
+  /// Change the look of an item of ours, for everyone in the sphere: a few
+  /// numbers in an `album_look` item, no new upload. Null removes it.
+  Future<void> setItemLook(String dhtKey, String itemId, Map<String, dynamic>? look) async {
+    final index = _albums.indexWhere((a) => a.dhtKey == dhtKey);
+    if (index == -1) return;
+    final album = _albums[index];
+    final item = album.items.where((i) => i.id == itemId).firstOrNull;
+    if (item == null) return;
+    if (item.authorId != _myPublicKey) throw StateError('Only whoever added a picture can change its look');
+    _albums[index] = album.copyWith(
+      items: [for (final i in album.items) i.id == itemId ? i.copyWith(look: look, clearLook: look == null) : i],
+    );
+    await _persist();
+    notifyListeners();
+
+    final spheres = _spheres;
+    final sphere = spheres?.sphere(album.sphereId);
+    final queue = queueForMember;
+    if (spheres == null || sphere == null || queue == null) return;
+    final String sealed;
+    try {
+      sealed = await spheres.sealContent(
+        sphereId: album.sphereId,
+        type: 'album_look',
+        plaintext: jsonEncode({'type': 'album_look', 'album_id': dhtKey, 'item_id': itemId, 'look': look}),
+      );
+    } catch (e) {
+      DebugLogService().error('Media', 'Could not seal the look: $e');
+      return;
+    }
+    for (final member in sphere.members.map((m) => m.identityKey)) {
+      if (member == _myPublicKey) continue;
+      await queue(id: 'look:$itemId:${DateTime.now().microsecondsSinceEpoch}:$member', member: member, sealed: sealed);
+    }
+  }
+
   Future<void> _handleIncomingContribution(String channelKey, String data) async {
     final spheres = _spheres;
     if (spheres == null) return;
@@ -177,6 +216,10 @@ class AlbumService extends ChangeNotifier {
     try {
       final opened = await spheres.openContent(data);
       final json = jsonDecode(opened.plaintext);
+      if (json['type'] == 'album_look') {
+        _applyLook(opened.sphereId, opened.from, json);
+        return;
+      }
       if (json['type'] != 'album_add') return;
 
       final albumId = json['album_id'];
@@ -215,6 +258,35 @@ class AlbumService extends ChangeNotifier {
     } catch (e) {
       DebugLogService().warn('Media', 'Rejected album item: $e');
     }
+  }
+
+  /// An `album_look` from [from]: honoured only from whoever added the item,
+  /// and only for an album in the sphere it was sealed to. Public so the rule
+  /// is testable without a socket.
+  @visibleForTesting
+  void applyLook(String sphereId, String from, Map<String, dynamic> json) => _applyLook(sphereId, from, json);
+
+  void _applyLook(String sphereId, String from, Map<String, dynamic> json) {
+    final index = _albums.indexWhere((a) => a.dhtKey == json['album_id']);
+    if (index == -1 || _albums[index].sphereId != sphereId) return;
+    final album = _albums[index];
+    final itemId = json['item_id'];
+    final item = album.items.where((i) => i.id == itemId).firstOrNull;
+    if (item == null || item.authorId != from) {
+      DebugLogService().warn('Media', 'Dropping a look from someone who did not add the picture');
+      return;
+    }
+    final look = json['look'];
+    _albums[index] = album.copyWith(
+      items: [
+        for (final i in album.items)
+          i.id == itemId
+              ? i.copyWith(look: look is Map ? Map<String, dynamic>.from(look) : null, clearLook: look is! Map)
+              : i
+      ],
+    );
+    unawaited(_persist());
+    notifyListeners();
   }
 
   Album? getAlbum(String dhtKey) {

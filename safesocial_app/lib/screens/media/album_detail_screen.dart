@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../models/album.dart';
+import '../../models/look.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../services/album_service.dart';
+import '../../services/identity_service.dart';
+import '../../services/image_stats.dart';
 import '../../services/media_service.dart';
 import '../../services/video_transcoder.dart';
 import '../../widgets/media_thumb.dart';
+import '../../widgets/looked.dart';
+import '../../widgets/look_controls.dart';
 import '../../services/contact_service.dart';
 import '../../widgets/avatar.dart';
 
@@ -52,11 +58,16 @@ class AlbumDetailScreen extends StatelessWidget {
               itemCount: album.items.length,
               itemBuilder: (ctx, i) {
                 final item = album.items[i];
+                final look = Look.tryParse(item.look?['*'] ?? item.look?['0']) ?? Look.none;
+                final mine = item.authorId == context.read<IdentityService>().publicKey;
                 return GestureDetector(
-                  onTap: () => context.push('/media/view?ref=${Uri.encodeComponent(item.mediaRef)}'),
+                  onTap: () => context.push('/media/view?ref=${Uri.encodeComponent(item.mediaRef)}'
+                      '${look.isNone ? '' : '&look=${look.toQuery()}'}'),
+                  // Whoever added a picture may change its look; numbers, no upload.
+                  onLongPress: mine ? () => _changeLook(context, album.dhtKey, item, look) : null,
                   child: Hero(
                     tag: item.mediaRef,
-                    child: MediaThumb(ref: item.mediaRef, fit: BoxFit.cover),
+                    child: Looked(look: look, child: MediaThumb(ref: item.mediaRef, fit: BoxFit.cover)),
                   ),
                 );
               },
@@ -66,6 +77,25 @@ class AlbumDetailScreen extends StatelessWidget {
         child: const Icon(Icons.add_a_photo),
       ),
     );
+  }
+
+  Future<void> _changeLook(BuildContext context, String albumId, AlbumItem item, Look current) async {
+    final albums = context.read<AlbumService>();
+    final messenger = ScaffoldMessenger.of(context);
+    final stats = await ImageStatsLoader.forRef(item.mediaRef);
+    if (!context.mounted) return;
+    final look = await showLookSheet(
+      context,
+      preview: MediaThumb(ref: item.mediaRef, fit: BoxFit.contain),
+      initial: current,
+      trueSkin: stats == null ? null : Look.trueSkin(stats),
+    );
+    if (look == null) return;
+    try {
+      await albums.setItemLook(albumId, item.id, look.isNone ? null : {'*': look.toJson()});
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   Widget _buildEmptyAlbum(BuildContext context, ThemeData theme) {

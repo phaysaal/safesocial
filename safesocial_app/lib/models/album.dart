@@ -82,21 +82,28 @@ class AlbumItem with EquatableMixin {
   final String type; // 'image' or 'video'
   final DateTime addedAt;
 
+  /// Colour and light as numbers (`models/look.dart`), applied by every
+  /// viewer at draw time; null for none.
+  final Map<String, dynamic>? look;
+
   const AlbumItem({
     required this.id,
     required this.authorId,
     required this.mediaRef,
     required this.type,
     required this.addedAt,
+    this.look,
   });
 
   factory AlbumItem.fromJson(Map<String, dynamic> json) {
+    final look = json['look'];
     return AlbumItem(
       id: json['id'] as String,
       authorId: json['authorId'] as String,
       mediaRef: json['mediaRef'] as String,
       type: json['type'] as String,
       addedAt: DateTime.parse(json['addedAt'] as String),
+      look: look is Map ? Map<String, dynamic>.from(look) : null,
     );
   }
 
@@ -107,17 +114,19 @@ class AlbumItem with EquatableMixin {
       'mediaRef': mediaRef,
       'type': type,
       'addedAt': addedAt.toIso8601String(),
+      if (look != null) 'look': look,
     };
   }
 
-  AlbumItem copyWith({String? mediaRef}) => AlbumItem(
+  AlbumItem copyWith({String? mediaRef, Map<String, dynamic>? look, bool clearLook = false}) => AlbumItem(
         id: id,
         authorId: authorId,
         mediaRef: mediaRef ?? this.mediaRef,
         type: type,
         addedAt: addedAt,
+        look: clearLook ? null : (look ?? this.look),
       );
 
   @override
-  List<Object?> get props => [id, authorId, mediaRef, type, addedAt];
+  List<Object?> get props => [id, authorId, mediaRef, type, addedAt, look];
 }

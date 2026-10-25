@@ -109,8 +109,10 @@ band, as now, because those change the frame.
 L3 built on 25 October 2026: `ImageStats` from a 48-pixel copy (a file, or a blob's
 inline thumbnail when that is all the phone holds), `Look.trueSkin` with its dead zones
 and clips, the True skin chip in the editor and the after-sheets, and the look on every
-video surface including flashes and the protected viewer. All three milestones are built;
-album items remain.
+video surface including flashes and the protected viewer. All three milestones are built.
+Album items, 25 October 2026: an item carries its look in `album_add`; whoever added it
+changes it with a long press on the grid, sent as an `album_look` item honoured only from
+that person and only for an album in the sphere it was sealed to.
 
 L2 built on 25 October 2026: the look rides `post_edit` and `chat_edit` as numbers (null
 removes), applied by the receiver without touching the words, the edit mark or the

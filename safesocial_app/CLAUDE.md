@@ -62,8 +62,11 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   a grey-world white balance clipped to a sane range and a midtone lift, read from a
   48-pixel copy of the picture (a local file, or a blob's inline thumbnail) on this phone,
   no face found, nothing judged; a neutral picture gets nothing. Every video surface is
-  wrapped too: the viewer, flashes, the protected viewer under its veil. L1 to L3 of the
-  plan are built; album items are not covered.
+  wrapped too: the viewer, flashes, the protected viewer under its veil. Album items carry
+  a look of their own (`AlbumItem.look`, in the `album_add` item) and whoever added one
+  changes it with a long press, sent as an `album_look` item honoured only from that
+  person and only in the album's sphere (`AlbumService.setItemLook`, `applyLook`). L1 to
+  L3 of the plan are built, album items included.
 - **Media origin score.** Before an image is re-encoded, `ProvenanceScanner` reads what the
   file says about itself (camera EXIF, editing software, date disagreement, XMP and Content
   Credentials marks, PNG generator chunks, file name, dimensions) and produces a
@@ -485,7 +488,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 908 tests in 86 files under test/{crypto,models,screens,services}
+flutter test                       # 910 tests in 87 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run --flavor foss          # or --flavor play; every build names a flavour now
 flutter build apk --debug --flavor foss
