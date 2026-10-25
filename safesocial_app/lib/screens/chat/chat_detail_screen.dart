@@ -16,6 +16,7 @@ import '../../models/contact.dart';
 import '../../models/message.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
+import '../../widgets/writing_guide_sheet.dart';
 import '../../services/identity_service.dart';
 import '../../services/call_service.dart';
 import '../../services/app_lock_service.dart';
@@ -780,6 +781,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               onTap: () => Navigator.pop(ctx, 'view_once'),
             ),
             ListTile(
+              leading: const Icon(Icons.edit_note_outlined),
+              title: const Text('Write for an occasion'),
+              subtitle: const Text('Questions to help you find your own words; nothing is written for you'),
+              onTap: () => Navigator.pop(ctx, 'guide'),
+            ),
+            ListTile(
               leading: const Icon(Icons.schedule_send_outlined),
               title: const Text('Send later'),
               subtitle: const Text('At a day and time you choose, even with the app closed'),
@@ -832,6 +839,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (choice == 'view_once') return _sendViewOnce();
     if (choice == 'protected') return _sendProtected();
     if (choice == 'later') return _sendLater();
+    if (choice == 'guide') {
+      final name = context.read<ContactService>().getContact(widget.conversationId)?.displayName ?? 'them';
+      final words = await showWritingGuide(
+        context,
+        name: name,
+        initial: _messageController.text,
+        onSpeakInstead: _startRecording,
+      );
+      if (words != null) {
+        // Into the box, not sent: one more look is the writer's.
+        _messageController.text = words;
+        _messageController.selection = TextSelection.collapsed(offset: words.length);
+      }
+      return;
+    }
     if (choice == 'video_note') {
       final messenger = ScaffoldMessenger.of(context);
       try {

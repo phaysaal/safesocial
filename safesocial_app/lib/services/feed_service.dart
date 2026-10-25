@@ -19,6 +19,7 @@ import '../models/post.dart';
 import '../models/sphere.dart';
 import 'chat_service.dart';
 import 'debug_log_service.dart';
+import 'appreciation_service.dart';
 import 'inbound_events.dart';
 import 'outbox_service.dart';
 import 'media_service.dart';
@@ -1479,6 +1480,7 @@ class FeedService extends ChangeNotifier {
           (r) => r.reactorId == authorId && r.emoji == emoji);
       if (existing != -1) {
         newReactions.removeAt(existing);
+        appreciation?.forget(postId: postId, reactor: authorId);
       } else {
         newReactions.add(Reaction(reactorId: authorId, emoji: emoji, timestamp: DateTime.now()));
         _notifyReaction(postId, authorId, emoji, onComment: false,
@@ -2600,11 +2602,18 @@ class FeedService extends ChangeNotifier {
       ..addAll(await prefs.getStringList(_mutedPostsKey) ?? const []);
   }
 
+  /// Holds reactions for the day's delivery when the person wants them so;
+  /// set by the app.
+  AppreciationService? appreciation;
+
   void _notifyReaction(String postId, String reactor, String emoji,
       {required bool onComment, required String target}) {
     final me = _myPublicKey;
     if (me == null || reactor == me || target != me) return;
     if (_mutedPosts.contains(postId)) return;
+    if (appreciation?.record(postId: postId, reactor: reactor, emoji: emoji, onComment: onComment) ?? false) {
+      return;
+    }
     final name = resolveName?.call(reactor) ?? 'Someone';
     InboundEvents.emit(InboundEvent(
       kind: InboundKind.reaction,
@@ -2615,6 +2624,17 @@ class FeedService extends ChangeNotifier {
       thread: 'post:$postId',
       from: reactor,
     ));
+  }
+
+  /// "your post 'first words…'" or "your flash", for the day's appreciation.
+  String describeForAppreciation(String postId) {
+    final post = _posts.where((p) => p.id == postId).firstOrNull;
+    if (post == null) return 'your post';
+    if (post.isStory) return 'your flash';
+    final words = post.content.trim();
+    if (words.isEmpty) return 'your post';
+    final cut = words.length > 40 ? '${words.substring(0, 40).trimRight()}…' : words;
+    return "your post '$cut'";
   }
 
   void reactToPost(String postId, String emoji) {

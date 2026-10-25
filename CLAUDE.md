@@ -338,6 +338,25 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   post is hidden on arrival (`FeedService.restrictedKeys`); `unseenCount` feeds the Home
   dot; text scale, high contrast and reduced motion live in `ThemeService` and are applied
   in the `MaterialApp` builder. Language: English only, and Settings says so.
+- **Desires served, not exploited** (plan §12.6, decided 25 October 2026): the rule the next
+  feature is measured against. Forbidden mechanics: variable-time rewards, numbers shown
+  to everyone, anything timed to pull, loops with no end, pressure from what others see,
+  anything derived from behaviour unsaid. Built so far: `AppreciationService` holds
+  reactions to our posts and delivers them once a day at the person's hour as one line
+  per post with every name (`spheres_appreciation_pending_v1` sealed; the hour and the
+  mode in plain prefs; a reaction taken back before the hour is never mentioned; "as it
+  happens" remains a choice and delivers what was held when chosen), and the feed ends
+  with "You're caught up" and "Done for now" (`_CaughtUp`). The reaction count row shown
+  to everyone is the standing breach, to become private.
+- **The writing guide** (`models/writing_guide.dart`, pure; `widgets/writing_guide_sheet.dart`;
+  "Write for an occasion" in the chat's attach sheet): the second principle of §12.6, the
+  app carries words and never supplies them. For each `Occasion` (declared by the writer)
+  the guide holds questions only the writer can answer, in the order a message goes,
+  shown faintly and skippable, never in the draft; `notice` gives one gentle line when a
+  draft over a length could be said to anyone (no name as a whole word, no memory word),
+  never blocking; `canSend` needs words and nothing else. There are no templates and no
+  one-tap send: the words go into the chat box, not out. "Say it instead" hands over to
+  the voice note. Tests pin that no question is a sentence to send.
 - **Advertisements** (`models/advert.dart`, `services/ad_service.dart`,
   `services/ad_catalogue.dart`; sealed key `spheres_adverts_v1`): the television rule.
   `AdService` counts seconds on screen, any screen, and after twenty minutes puts one
@@ -446,7 +465,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 876 tests in 81 files under test/{crypto,models,screens,services}
+flutter test                       # 885 tests in 83 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run --flavor foss          # or --flavor play; every build names a flavour now
 flutter build apk --debug --flavor foss

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 
@@ -201,6 +202,9 @@ class _FeedScreenState extends State<FeedScreen> {
                       childCount: posts.length,
                     ),
                   ),
+                  // The end. Said plainly, with a way out, so the feed is a
+                  // thing one finishes rather than a thing one checks.
+                  SliverToBoxAdapter(child: _CaughtUp(newest: posts.first.createdAt)),
                   const SliverToBoxAdapter(child: SizedBox(height: 80)),
                 ],
               ),
@@ -256,6 +260,52 @@ class _FeedScreenState extends State<FeedScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Caught up ────────────────────────────────────────────────────────────────
+
+/// The feed ends here, and says so. Nothing more is coming until someone you
+/// know posts; the button puts the app away.
+class _CaughtUp extends StatelessWidget {
+  final DateTime newest;
+  const _CaughtUp({required this.newest});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final d = DateTime.now().difference(newest);
+    final since = d.inMinutes < 1
+        ? 'just now'
+        : d.inHours < 1
+            ? '${d.inMinutes} min ago'
+            : d.inDays < 1
+                ? '${d.inHours} h ago'
+                : '${d.inDays} d ago';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 8),
+      child: Column(
+        children: [
+          Icon(Icons.check_circle_outline, size: 36, color: cs.primary),
+          const SizedBox(height: 8),
+          Text("You're caught up", style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Nothing more from your spheres. The newest post is from $since; '
+            'there is no feed beyond the people you know.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.done, size: 18),
+            label: const Text('Done for now'),
+            onPressed: () => SystemNavigator.pop(),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -917,6 +917,88 @@ nowhere else.
 **Not doing:** any targeting beyond the chosen categories; frequency or conversion
 reporting; an SDK from an advertising network; adverts in chats, spheres or stories.
 
+### 12.6 Desires served, not exploited — decided 2026-10-25
+
+People want to be seen, to know what others think of them, to miss nothing, to belong
+and to stand a little above the group, to look without being looked at, to have a
+private self, to be surprised. None of this is shameful. All of it is a lever, and the
+large social apps and most attackers pull the same levers. Spheres will **serve these
+desires and never exploit them**, and takes limited success over the alternative.
+
+The difference is mechanics, not intent. Exploitation keeps the loop open so you come
+back; service closes it so you leave satisfied. So the rule is about mechanics, and the
+next feature is measured against it:
+
+| Forbidden | Required instead |
+|---|---|
+| Rewards that arrive at variable, unpredictable times | Rewards that are certain, arriving when the person chose |
+| Numbers shown to everyone | Numbers private to the person, shown on request |
+| Anything timed to pull the person back | Anything timed to inform, at an hour they set |
+| Loops with no end | An end state, said plainly |
+| Pressure from what others can see about you | Nothing about you that you did not choose to show |
+| Anything derived from behaviour without saying so | Nothing derived from behaviour, or every derivation named and switchable |
+
+Served inside a sphere, the desires look like this, and this is the list to build from:
+
+- **To be seen.** Appreciation that completes: reactions held and delivered once a day,
+  at an hour the person picks, one line per post with every name (`AppreciationService`,
+  Settings, Notifications, "Appreciation arrives"; "as it happens" remains a choice).
+- **To know what people think of you.** A sphere can be asked, by one member, on an
+  occasion, each answer a line delivered together. Consented, bounded, from people who
+  know you. *Not yet built.*
+- **To have done something, and have it known.** Achievements, announced in the form of
+  their kind, answered by a book the sphere writes that closes, kept as chapters on the
+  profile: `achievements_plan.md`. *Planned, not built.*
+- **To miss nothing.** Certainty, not vigilance: the feed ends with "You're caught up"
+  and a way out (`_CaughtUp` on Home, with "Done for now"). A digest at a set hour in
+  place of the dots is the next step. *Dots remain for now.*
+- **To belong and to matter.** Recognition given by people, never by a formula: admin
+  badges exist; "member since", sphere anniversaries and a weekly prompt that becomes a
+  ritual are to come.
+- **To look without being seen.** Flash receipts are a switch; there is no "active now";
+  this stays so on purpose.
+- **A private self.** The Self sphere, vanish mode, protected media.
+- **Curiosity and play.** Memories, polls, quizzes, a daily question: novelty from one's
+  own people, which needs no algorithm.
+
+The reactions' count row on a post card is shown to everyone today and is the one
+standing breach of the second rule; it is to become private, shown on request.
+
+**The second principle, 25 October 2026: the app carries words and never supplies them.**
+What makes the large professional network feel metallic is separate from its hooks: the
+machine speaks for people ("congratulate Sam on five years", one tap, "Congrats!" from
+forty hands that typed nothing), occasions are detected from fields rather than declared
+by anyone, everything is one template, and it answers instantly. Spheres keeps the warmth
+and drops the metal, with balance, because people do forget and do struggle for words:
+
+- **Reminding is good.** An occasion a person declared (a birthday they entered, an
+  anniversary they announced, a moment they shared) may be brought to mind, at the hour
+  the person set, as information. Never as a task, never with a count of the undone.
+- **Helping to write is good.** The app may guide a message: show the occasion, ask
+  questions that only this person can answer ("what did they do this year that you
+  noticed?", "what do you wish for them?"), suggest a shape (a greeting, a memory, a
+  wish), notice gently when nothing in the draft is particular to the person, offer to
+  speak it instead of typing it. It never offers a sentence to send. There is no
+  template to pick from and nothing goes with a single tap: sending needs words the
+  person wrote or spoke.
+- **Occasions are declared, not derived.** A date in a profile field that its owner
+  entered is a declaration; a pattern in someone's activity is not. "Remind me about
+  people I have gone quiet with" would be derived, so it exists only if named as such
+  and switched on by the person, off by default.
+- **A person's hand stays visible.** Colour, voice, a drawn line, uneven lengths, a
+  silence where someone said nothing. Nothing is evened out, filled in or shown as
+  missing.
+- **Slowness and restraint.** A book that opens tomorrow; one quiet movement, once; no
+  sound unless asked for.
+- **Words.** "Moments" or "news" over "achievements", wherever the UI speaks.
+
+Reactions stay as they are: a glyph is a gesture, not words the app put in a mouth.
+
+**On the business worry.** Hooks buy early growth and sell it back as churn and distrust.
+The moat is the one thing the large apps cannot copy without dismantling themselves:
+people can trust this. Growth comes from the sphere itself, people inviting people they
+know. Limited success is the honest expectation and may be wrong.
+
 ---
 
 ## 13. Plan to finish
@@ -950,6 +1032,24 @@ touches the message path and none has been seen on hardware.
 
 Roughly **three to four months** was the original estimate at the pace of the earlier
 phases; the remaining work is M1, the operator infrastructure, and M9.
+
+**Occasions, 25 October 2026.** The celebration of events inside a sphere, from an award
+read aloud to a birthday table laid by people, is planned in `achievements_plan.md` as
+six milestones C1 to C6 with exit criteria; C1 (the occasion post, the page item, the
+clock and the chapter) is the first to build.
+
+**Teenagers, 25 October 2026.** The crew sphere, a guardian who approves contacts and
+sees nothing else, and fifteen features that end rather than hook (pass the camera, the
+story we wrote, the capsule, study hall, pass a note, sleep on it, our words, the quote
+board, the mask, who knows me, the scrapbook, I'm not okay, lights out, not now, the
+eighteenth) are planned in `teen_plan.md` as milestones T1 to T5; T1 (age, guardian,
+crew) comes first because everything about minors depends on knowing who is one.
+
+**The look, 25 October 2026.** Colour and light as numbers in the payload, applied by
+every viewer at draw time to the original pixels, changed after posting through the
+existing edit path with no new upload, the original one toggle away; a true-skin
+correction computed from the picture; nothing that changes a face. Planned in
+`look_plan.md` as L1 to L3.
 
 **Not doing**, so that nobody re-opens it by accident: Veilid or any DHT transport (§3);
 a public audience of any kind (§1); server-side moderation; an in-app FCM code path that

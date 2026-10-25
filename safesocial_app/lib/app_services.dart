@@ -12,6 +12,7 @@ import 'services/sphere_info_service.dart';
 import 'services/wellbeing_service.dart';
 import 'services/ad_catalogue.dart';
 import 'services/ad_service.dart';
+import 'services/appreciation_service.dart';
 import 'services/call_notes_service.dart';
 import 'services/mlkit_translator.dart';
 import 'services/translation_service.dart';
@@ -72,6 +73,7 @@ class AppServices {
   /// here; the pick stays on the phone either way.
   final adService = AdService(catalogue: const NoAdverts());
   final callNotesService = CallNotesService();
+  final appreciationService = AppreciationService();
   CallState _lastCallState = CallState.idle;
   bool _lastNotesOn = false;
   final translationService = TranslationService(MlKitTranslator());
@@ -132,6 +134,12 @@ class AppServices {
     await wellbeingService.load();
     await adService.load();
     await callNotesService.load();
+    await appreciationService.load();
+    appreciationService.describePost = feedService.describeForAppreciation;
+    appreciationService.resolveName = (k) => contactService.getContact(k)?.displayName ?? 'Someone';
+    feedService.appreciation = appreciationService;
+    appreciationService.start();
+    unawaited(appreciationService.tick());
     callService.addListener(_followCallForNotes);
     unawaited(adService.refreshCatalogue());
     await translationService.load();
@@ -275,6 +283,7 @@ class AppServices {
         ChangeNotifierProvider.value(value: wellbeingService),
         ChangeNotifierProvider.value(value: adService),
         ChangeNotifierProvider.value(value: callNotesService),
+        ChangeNotifierProvider.value(value: appreciationService),
         ChangeNotifierProvider.value(value: translationService),
         ChangeNotifierProvider.value(value: feedOutboxService),
         ChangeNotifierProvider.value(value: relayConfig),

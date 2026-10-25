@@ -21,6 +21,7 @@ import '../../services/inbound_events.dart';
 import '../../services/notification_service.dart';
 import '../../services/wake_service.dart';
 import '../../services/ad_service.dart';
+import '../../services/appreciation_service.dart';
 import '../../services/call_notes_service.dart';
 import '../../services/app_lock_service.dart';
 import '../../services/library_service.dart';
@@ -242,6 +243,18 @@ class SettingsScreen extends StatelessWidget {
 
           // ── Notifications ──────────────────────────────
           _SectionHeader(title: 'Notifications'),
+          Builder(builder: (context) {
+            final a = context.watch<AppreciationService>();
+            return ListTile(
+              leading: Icon(Icons.favorite_border, color: cs.primary),
+              title: const Text('Appreciation arrives'),
+              subtitle: Text(
+                '${a.summary}. Reactions to your posts are held and delivered together, one line per post with every name, so they arrive whole rather than one at a time.',
+              ),
+              isThreeLine: true,
+              onTap: () => _showAppreciationDialog(context, a),
+            );
+          }),
           Builder(builder: (context) {
             final notifications = context.watch<NotificationService>();
             final wake = context.watch<WakeService>();
@@ -1066,6 +1079,54 @@ class SettingsScreen extends StatelessWidget {
       case InboundKind.security:
         return 'Security notices (keys changed, new devices)';
     }
+  }
+
+  Future<void> _showAppreciationDialog(BuildContext context, AppreciationService a) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Appreciation arrives'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(a.daily ? Icons.radio_button_checked : Icons.radio_button_off),
+                title: const Text('Once a day'),
+                subtitle: Text('At ${a.hour.toString().padLeft(2, '0')}:${a.minute.toString().padLeft(2, '0')}, everything together'),
+                onTap: () async {
+                  await a.setDaily(true);
+                  setDialogState(() {});
+                },
+              ),
+              if (a.daily)
+                TextButton.icon(
+                  icon: const Icon(Icons.schedule),
+                  label: const Text('Change the hour'),
+                  onPressed: () async {
+                    final t = await showTimePicker(
+                        context: ctx, initialTime: TimeOfDay(hour: a.hour, minute: a.minute));
+                    if (t != null) {
+                      await a.setTime(t.hour, t.minute);
+                      setDialogState(() {});
+                    }
+                  },
+                ),
+              ListTile(
+                leading: Icon(a.daily ? Icons.radio_button_off : Icons.radio_button_checked),
+                title: const Text('As it happens'),
+                subtitle: const Text('One notification per reaction, when it arrives'),
+                onTap: () async {
+                  await a.setDaily(false);
+                  setDialogState(() {});
+                },
+              ),
+            ],
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
+        ),
+      ),
+    );
   }
 
   Future<void> _showCallServersDialog(
