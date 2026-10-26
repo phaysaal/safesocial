@@ -5,6 +5,6 @@
 class AppInfo {
   const AppInfo._();
 
-  static const String version = '0.10.0';
+  static const String version = '0.11.0';
   static const String channel = 'pre-alpha';
 }
