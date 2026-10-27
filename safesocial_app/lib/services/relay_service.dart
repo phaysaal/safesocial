@@ -1107,6 +1107,28 @@ class RelayService extends ChangeNotifier {
     }
   }
 
+  /// Take our prekey bundle off the relay: the first step of leaving. True
+  /// when the relay confirmed; false when it could not be reached, in which
+  /// case the bundle ages out with the relay's retention.
+  Future<bool> deletePrekey(String myIdentityPublicKeyHex, String myIdentitySecretHex) async {
+    final address = Mailbox.inboxIdFor(myIdentityPublicKeyHex);
+    final path = '/prekey/$address';
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final response = await relayHttp((host) => http.delete(
+            Uri.parse('https://$host$path'),
+            headers: {
+              'X-Spheres-Signature': _signWithIdentity('DELETE$path$timestamp', myIdentitySecretHex),
+              'X-Spheres-Timestamp': timestamp,
+            },
+          ));
+      return response.statusCode == 200;
+    } catch (e) {
+      _log.error('Relay', 'Could not delete the prekey bundle: $e');
+      return false;
+    }
+  }
+
   Future<String?> fetchPrekey(String identityPublicKeyHex) async {
     final address = Mailbox.inboxIdFor(identityPublicKeyHex);
     try {

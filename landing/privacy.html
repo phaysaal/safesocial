@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spheres privacy policy</title>
+  <style>
+    :root { --primary: #C93D4E; --text: #2A1F22; --muted: #75666A; --bg: #F5F0EF; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text); background: var(--bg); line-height: 1.6; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { font-size: 28px; margin-bottom: 4px; }
+    h2 { font-size: 20px; margin-top: 32px; }
+    .muted { color: var(--muted); }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 6px; border-bottom: 1px solid #E8DEDE; font-size: 15px; }
+    a { color: var(--primary); }
+  </style>
+</head>
+<body>
+<main>
+  <p><a href="/">Spheres</a></p>
+  <h1>Privacy policy</h1>
+  <p class="muted">Last changed 27 October 2026. Applies to the Spheres app and the servers it uses.</p>
+
+  <p>Spheres is a social network in which nothing has a public audience. What you write,
+  post, send and say in a call goes only to the people in the sphere you chose, encrypted
+  on your phone with keys that only those people hold. This page says, in plain words,
+  what the app keeps, what the servers see, and what you can do about it.</p>
+
+  <h2>Who runs it</h2>
+  <p>Spheres is made by the SafeSelf project. The relay runs on Cloudflare in the European
+  Union; the push server and the call relay run on a Scaleway machine in Amsterdam. Contact:
+  through <a href="https://github.com/phaysaal/safesocial">the project on GitHub</a>.</p>
+
+  <h2>What stays on your phone</h2>
+  <p>Your identity keys, your contacts, every message, post, comment, reaction, album and
+  flash, your profile, your settings, your call history and any notes from your side of a
+  call. All of it is encrypted at rest on the phone. None of it is sent to us. Backups are
+  files you make, encrypted with a passphrase only you know, and they stay where you put
+  them.</p>
+
+  <h2>What the relay sees</h2>
+  <p>The relay carries sealed envelopes between phones and holds them until they are
+  collected. It cannot read them and cannot tell who is talking to whom: mailbox addresses
+  are derived from secrets only the participants hold. What it does see, because any server
+  on the internet does:</p>
+  <table>
+    <tr><th>Seen</th><th>Why</th><th>Kept for</th></tr>
+    <tr><td>Your IP address and the time of each connection</td><td>To deliver</td><td>Not stored by us; Cloudflare's standard logs apply</td></tr>
+    <tr><td>Sealed envelopes, their size and when they arrived</td><td>To deliver</td><td>Until collected, then at most 30 days</td></tr>
+    <tr><td>Your public key bundle</td><td>So a contact can start an encrypted session with you</td><td>Until you delete it, or it ages out</td></tr>
+    <tr><td>A wake address per mailbox (a push endpoint)</td><td>So your phone is woken when something arrives; the knock carries no content</td><td>Until you delete it, or it ages out</td></tr>
+    <tr><td>Encrypted media blobs</td><td>To deliver pictures and clips</td><td>Until collected, then by the retention sweep</td></tr>
+  </table>
+  <p>On a <em>play</em> build, the wake goes through Google Play services: Google sees that a
+  knock was sent to your phone and nothing else. On a <em>foss</em> build it goes through
+  our own push server, or one you chose. The call relay (TURN) sees the addresses of both
+  phones in a call and the shape of the traffic, never its content, and only when a direct
+  path is not possible.</p>
+
+  <h2>What we never do</h2>
+  <p>No analytics, no crash reporting, no advertising network, no tracking of what you read
+  or how long. No behaviour is read to decide what you see; the feed is in time order. The
+  advertisement slot, when it carries anything, shows adverts chosen on your phone from a
+  catalogue fetched whole, and reports nothing back. Nothing is sold, shared or used to
+  train anything.</p>
+
+  <h2>Notes from a call</h2>
+  <p>If you turn it on, your own voice in a call is transcribed on your phone by its own
+  speech recognition and turned into notes by rules, on the phone. The other person is not
+  recorded. The transcript is never stored and never sent; only the notes are kept, on your
+  phone, and sent to the other person only if you say so at the end of the call.</p>
+
+  <h2>Children</h2>
+  <p>Spheres is not designed for children under 13 and asks no age today. A guardian role
+  that approves a minor's new contacts, and sees nothing else, is planned.</p>
+
+  <h2>Deleting everything</h2>
+  <p>Settings, Reset Everything deletes your identity, contacts and all content from the
+  phone and tells the relay to drop your key bundle and your wake registrations. Mail still
+  waiting in shared mailboxes cannot be singled out and ages out within 30 days. There is
+  no account on our side to delete beyond that, because there is no account: your identity
+  is a key pair on your phone. If you cannot reach the app, nothing of yours is on a server
+  that we could act on except the bundle and the registrations, which age out on their
+  own.</p>
+
+  <h2>Your rights</h2>
+  <p>Under the GDPR you may ask what we hold. The honest answer is the table above, and
+  the relay cannot connect any of it to a name. Questions go to the project page.</p>
+
+  <h2>Changes</h2>
+  <p>This page changes when the app does. The date at the top says when.</p>
+</main>
+</body>
+</html>

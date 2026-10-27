@@ -657,3 +657,36 @@ test("a signed post from another relay is delivered and queued without a subscri
   const res = await box.fetch(await mb.signedRequest("GET", `/mbx/${mb.address}/sync`));
   assert.equal((await res.json()).length, 1);
 });
+
+// ── Leaving: the prekey bundle is deleted by its owner alone ─────────────────
+
+test("the owner deletes their prekey bundle; nobody else can; deleting twice is fine", async () => {
+  const env = makeEnv();
+  const me = await mailbox();
+  const other = await mailbox();
+  const path = `/prekey/${me.address}`;
+  const bundle = JSON.stringify({ identity: me.address, devices: [] });
+
+  let res = await worker.fetch(await me.signedRequest("POST", path, bundle), env);
+  assert.equal(res.status, 200);
+  res = await worker.fetch(new Request(`https://relay${path}`), env);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), bundle);
+
+  // Unsigned, and signed by someone else: refused, and the bundle stays.
+  res = await worker.fetch(new Request(`https://relay${path}`, { method: "DELETE" }), env);
+  assert.equal(res.status, 401);
+  const forged = await other.signedRequest("DELETE", path);
+  res = await worker.fetch(new Request(`https://relay${path}`, { method: "DELETE", headers: forged.headers }), env);
+  assert.equal(res.status, 401);
+  res = await worker.fetch(new Request(`https://relay${path}`), env);
+  assert.equal(res.status, 200);
+
+  // The owner: gone, and a second delete is still fine.
+  res = await worker.fetch(await me.signedRequest("DELETE", path), env);
+  assert.equal(res.status, 200);
+  res = await worker.fetch(new Request(`https://relay${path}`), env);
+  assert.equal(res.status, 404);
+  res = await worker.fetch(await me.signedRequest("DELETE", path), env);
+  assert.equal(res.status, 200);
+});

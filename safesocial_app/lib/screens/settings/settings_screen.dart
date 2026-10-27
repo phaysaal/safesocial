@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import '../../app_info.dart';
+import '../../app_services.dart';
 import '../../services/chat_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/call_config.dart';
@@ -550,10 +551,10 @@ class SettingsScreen extends StatelessWidget {
                 applicationVersion: AppInfo.version,
                 applicationLegalese:
                     'Your data. Your network. Your rules.\n\n'
-                    'Spheres is an early prototype of a private social network. '
-                    'Its encryption is not yet implemented and its traffic is '
-                    'relayed through a single server. Do not use it for '
-                    'anything sensitive.',
+                    'Spheres is a pre-alpha of a private social network. Messages, posts '
+                    'and calls are end-to-end encrypted and the relay cannot see who talks '
+                    'to whom, but none of it has been independently audited yet. '
+                    'Licences for the bundled font and dictionary are under "View licenses".',
               );
             },
           ),
@@ -1336,8 +1337,10 @@ class SettingsScreen extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('Reset Everything?'),
         content: const Text(
-          'This will permanently delete your identity, contacts, and all '
-          'messages from this device — including any backup files saved here.\n\n'
+          'This deletes your identity, contacts and all messages from this device, '
+          'including any backup files saved here, and tells the relay to drop what it '
+          'holds about you: your key bundle and the registrations that let it wake this phone. '
+          'Mail still waiting in shared mailboxes ages out on its own.\n\n'
           'Your identity cannot be recovered afterwards. If you want to keep '
           'it, copy your backup file off this device first.\n\n'
           'This action cannot be undone.',
@@ -1346,10 +1349,16 @@ class SettingsScreen extends StatelessWidget {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
             onPressed: () async {
-              await service.resetEverything();
+              final messenger = ScaffoldMessenger.of(context);
+              final leftBehind = await (AppServices.current?.deleteEverywhere() ??
+                  service.resetEverything().then((_) => null));
               if (ctx.mounted) {
                 Navigator.pop(ctx);
                 context.go('/onboarding');
+              }
+              if (leftBehind != null) {
+                messenger.showSnackBar(SnackBar(
+                    content: Text('The relay could not be reached; $leftBehind will age out there.')));
               }
             },
             child: const Text('Reset', style: TextStyle(color: Colors.red)),

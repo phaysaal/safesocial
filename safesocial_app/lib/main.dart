@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
@@ -13,6 +15,15 @@ import 'background_sync.dart';
 /// the mailboxes drain into notifications, and exit when the wake window ends.
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // What is bundled and under what terms: the heading face and the
+  // dictionary behind call notes. Shown under About, "View licenses".
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(
+        const ['Outfit'], await rootBundle.loadString('assets/fonts/OFL.txt'));
+    yield LicenseEntryWithLineBreaks(
+        const ['AutoEar v2 engine (WordNet-derived dictionary)'],
+        await rootBundle.loadString('assets/licenses/NOTICE-wordnet.txt'));
+  });
 
   final services = await AppServices.boot();
 

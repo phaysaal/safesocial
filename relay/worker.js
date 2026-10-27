@@ -723,6 +723,15 @@ export class RelayRoom {
       return new Response("OK");
     }
 
+    // The owner leaving: their bundle goes, so nobody can start a session
+    // with an identity that no longer exists. Signed like a publish, over an
+    // empty body. Deleting what is already gone is fine.
+    if (request.method === "DELETE") {
+      if (!(await this.verifyAuth(request, address, ""))) return unauthorized();
+      await this.state.storage.delete("prekey");
+      return new Response("OK");
+    }
+
     return new Response("Method not allowed", { status: 405 });
   }
 

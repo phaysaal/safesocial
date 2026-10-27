@@ -1051,6 +1051,16 @@ existing edit path with no new upload, the original one toggle away; a true-skin
 correction computed from the picture; nothing that changes a face. Planned in
 `look_plan.md` as L1 to L3.
 
+**Store listing, 27 October 2026.** What Play is told, and why: no ads today (the slot
+carries nothing; the declaration changes the day it does); not designed for children and
+13 or older, since the app asks no age until the teenager plan's T1; user-generated
+content and messaging, yes, with everything between known people and nothing public;
+account deletion from Settings, Reset Everything, which also deletes the prekey bundle
+and the wake registrations at the relay (`AppServices.deleteEverywhere`, signed `DELETE
+/prekey`), with `spheres.dev/privacy.html` as the page; the bundled font and the
+WordNet-derived dictionary under About, "View licenses". A closed test on the three
+phones comes before any production listing.
+
 **Not doing**, so that nobody re-opens it by accident: Veilid or any DHT transport (§3);
 a public audience of any kind (§1); server-side moderation; an in-app FCM code path that
 bypasses the wake abstraction; ffmpeg in the app.

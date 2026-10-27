@@ -69,6 +69,8 @@ flutter:
     - assets/images/icon_1024.png
     - assets/images/logo.png
     - assets/emoticons/
+    - assets/fonts/OFL.txt
+    - assets/licenses/
   fonts:
     - family: Outfit
       fonts:

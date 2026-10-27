@@ -418,6 +418,16 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   that used to set Inter asked Google's servers for it at every start and is gone. The
   bottom bar is Home, Spheres, Chat, Contacts, Profile, with the product's own object in
   the middle. The sphere a post reached us through is named on its card.
+- **Leaving, and what the store needs** (27 October 2026): Settings, Reset Everything now
+  goes through `AppServices.deleteEverywhere`, which switches wakes off (clearing every
+  registration at the relay), sends a signed `DELETE /prekey/<id>` (new on the relay, over
+  an empty body, tested) and then wipes the phone; a relay that cannot be reached does not
+  stop the wipe and the person is told what will age out instead. The bundled Outfit
+  licence and the WordNet notice from the AutoEar jar ship under About, "View licenses"
+  (`LicenseRegistry` in `main.dart`, `assets/licenses/`). The privacy policy is
+  `landing/privacy.html`, served at `spheres.dev/privacy.html`, and the landing banner no
+  longer says data is stored unencrypted, which stopped being true months ago. The About
+  dialog no longer says the encryption is unimplemented.
 - **Invite links** are `spheres://join?s=&t=&via=&n=&q=`; `q` carries the sphere's join
   questions, the request carries the answers, and approval makes the requester a contact
   and a member in one step, then posts the welcome line if the sphere has one.

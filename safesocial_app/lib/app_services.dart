@@ -232,6 +232,31 @@ class AppServices {
     }
   }
 
+  /// Leave for good: what the relay holds about this identity goes first,
+  /// then everything on the phone. The relay keeps a prekey bundle (so others
+  /// can start sessions with us) and a wake registration per mailbox (so it
+  /// can knock); both are deleted with signed requests. Undrained mail in
+  /// shared mailboxes cannot be singled out and ages out with the relay's
+  /// retention. A relay that cannot be reached does not stop the wipe; what
+  /// it holds then ages out too, and the person is told.
+  Future<String?> deleteEverywhere() async {
+    final key = identityService.publicKey;
+    final secret = identityService.secretKey;
+    String? leftBehind;
+    if (key != null && secret != null) {
+      try {
+        await wakeService.setEnabled(false);
+      } catch (e) {
+        DebugLogService().warn('Reset', 'Wake registrations not cleared: $e');
+        leftBehind = 'the wake registration';
+      }
+      final gone = await relayService.deletePrekey(key, secret);
+      if (!gone) leftBehind = leftBehind == null ? 'the prekey bundle' : '$leftBehind and the prekey bundle';
+    }
+    await identityService.resetEverything();
+    return leftBehind;
+  }
+
   /// Notes in a call. The call's `notesOn` is the one switch for both
   /// phones: the button or the setting turns it on here and tells the other
   /// side, the other side's button turns it on here. The engine follows it,
