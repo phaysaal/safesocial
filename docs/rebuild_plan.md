@@ -1059,7 +1059,10 @@ account deletion from Settings, Reset Everything, which also deletes the prekey 
 and the wake registrations at the relay (`AppServices.deleteEverywhere`, signed `DELETE
 /prekey`), with `spheres.dev/privacy.html` as the page; the bundled font and the
 WordNet-derived dictionary under About, "View licenses". A closed test on the three
-phones comes before any production listing.
+phones comes before any production listing. On 29 October 2026 the user-generated
+content and child safety requirements were met in code: terms agreed before posting, an
+in-app report to the operator sealed to the operator's key, a published child safety
+standards page, and bans that stop an identity being found or added (`docs/reports.md`).
 
 **Not doing**, so that nobody re-opens it by accident: Veilid or any DHT transport (§3);
 a public audience of any kind (§1); server-side moderation; an in-app FCM code path that

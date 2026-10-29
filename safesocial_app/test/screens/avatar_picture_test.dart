@@ -111,4 +111,25 @@ void main() {
     expect(find.byKey(face), findsOneWidget);
     expect(find.byKey(const Key('mine')), findsNothing, reason: 'the gutter is only for their side');
   });
+
+  testWidgets('our own avatar labelled "You" shows our initial, not "Y"', (tester) async {
+    final identity = IdentityService();
+    await identity.createIdentity('Maya');
+    final contacts = ContactService();
+    await tester.runAsync(() => pump(tester, identity, contacts,
+        UserAvatar(displayName: 'You', identityKey: identity.publicKey)));
+    await tester.pump();
+    expect(find.text('M'), findsOneWidget);
+    expect(find.text('Y'), findsNothing);
+  });
+
+  testWidgets('someone else\'s avatar keeps the name it is given', (tester) async {
+    final identity = IdentityService();
+    await identity.createIdentity('Maya');
+    final contacts = ContactService();
+    await tester.runAsync(() => pump(tester, identity, contacts,
+        UserAvatar(displayName: 'Yusuf', identityKey: 'b' * 64)));
+    await tester.pump();
+    expect(find.text('Y'), findsOneWidget);
+  });
 }

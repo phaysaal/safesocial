@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import '../../widgets/report_sheet.dart';
+import '../../services/terms.dart';
+import '../../models/abuse_report.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -432,6 +436,18 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Your time here'),
             subtitle: const Text('Breaks every 20 minutes, a daily reminder, quiet hours, pause'),
             onTap: () => context.push('/wellbeing'),
+          ),
+          ListTile(
+            leading: Icon(Icons.flag_outlined, color: cs.primary),
+            title: const Text('Report a concern to Spheres'),
+            subtitle: const Text('A child at risk, a threat, anything that breaks the rules'),
+            onTap: () => showReportToSpheres(context, subject: ReportSubject.general),
+          ),
+          ListTile(
+            leading: Icon(Icons.gavel_outlined, color: cs.primary),
+            title: const Text('Terms of use and child safety'),
+            subtitle: const Text('spheres.dev/terms · spheres.dev/child-safety'),
+            onTap: () => launchUrl(Uri.parse(Terms.url), mode: LaunchMode.externalApplication),
           ),
           ListTile(
             leading: Icon(Icons.favorite_outline, color: cs.primary),

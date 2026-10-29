@@ -20,7 +20,7 @@
 <main>
   <p><a href="/">Spheres</a></p>
   <h1>Privacy policy</h1>
-  <p class="muted">Last changed 27 October 2026. Applies to the Spheres app and the servers it uses.</p>
+  <p class="muted">Last changed 29 October 2026. Applies to the Spheres app and the servers it uses.</p>
 
   <p>Spheres is a social network in which nothing has a public audience. What you write,
   post, send and say in a call goes only to the people in the sphere you chose, encrypted
@@ -48,7 +48,7 @@
     <tr><th>Seen</th><th>Why</th><th>Kept for</th></tr>
     <tr><td>Your IP address and the time of each connection</td><td>To deliver</td><td>Not stored by us; Cloudflare's standard logs apply</td></tr>
     <tr><td>Sealed envelopes, their size and when they arrived</td><td>To deliver</td><td>Until collected, then at most 30 days</td></tr>
-    <tr><td>Your public key bundle</td><td>So a contact can start an encrypted session with you</td><td>Until you delete it, or it ages out</td></tr>
+    <tr><td>Your public key bundle</td><td>So a contact can start an encrypted session with you</td><td>Until you delete it</td></tr>
     <tr><td>A wake address per mailbox (a push endpoint)</td><td>So your phone is woken when something arrives; the knock carries no content</td><td>Until you delete it, or it ages out</td></tr>
     <tr><td>Encrypted media blobs</td><td>To deliver pictures and clips</td><td>Until collected, then by the retention sweep</td></tr>
   </table>
@@ -71,8 +71,17 @@
   recorded. The transcript is never stored and never sent; only the notes are kept, on your
   phone, and sent to the other person only if you say so at the end of the call.</p>
 
+  <h2>Reports</h2>
+  <p>When you use <strong>Report to Spheres</strong>, your phone seals the report to a key
+  only the people who run Spheres hold, and the relay stores that sealed box until it is
+  read. It contains your reason, your note, and, if you chose to include them, the words
+  and up to three small pictures you are reporting, with the reported person's public key.
+  It does not contain your identity. A report is deleted once dealt with, unless the law
+  requires us to keep it for the authorities. The relay counts reports per network address
+  per day, as a hash it cannot reverse, to stop floods; the count is gone the next day.</p>
+
   <h2>Children</h2>
-  <p>Spheres is not designed for children under 13 and asks no age today. A guardian role
+  <p>Spheres is not designed for children under 13 and asks no age today. Our <a href="/child-safety">child safety standards</a> say how we handle child sexual abuse and exploitation. A guardian role
   that approves a minor's new contacts, and sees nothing else, is planned.</p>
 
   <h2>Deleting everything</h2>

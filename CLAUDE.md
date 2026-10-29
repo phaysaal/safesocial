@@ -418,6 +418,22 @@ TURN), and lists what remains. §12 holds the decisions; §13 is the plan to fin
   that used to set Inter asked Google's servers for it at every start and is gone. The
   bottom bar is Home, Spheres, Chat, Contacts, Profile, with the product's own object in
   the middle. The sphere a post reached us through is named on its card.
+- **Terms and reports** (29 October 2026; `docs/reports.md`): a person agrees to the terms
+  of use (`Terms`, version 1, `spheres.dev/terms`) at onboarding before an identity exists,
+  and an identity made earlier meets `TermsGate` once. "Report to Spheres" is on posts
+  (beside "Report to the sphere"), others' messages, contacts, and in Settings as "Report
+  a concern to Spheres": `ReportService` seals an `AbuseReport` (reason, note, the reported
+  person's key and name, and only if the reporter chooses the words and up to three small
+  pictures; never the reporter's own key) to the operator's X25519 key from `GET /` and
+  posts it to `/report`; the relay keeps the box it cannot open in the `reports_operator`
+  object, pings the operator's ntfy topic with no content, and limits each client to 20 a
+  day. The operator reads, deletes and bans with `tool/reports.dart`, whose private key
+  lives in `~/.config/spheres/operator.json`; a ban (`/moderation/ban/<address>`) makes the
+  identity's prekey answer 410 and its inbox refuse new contact requests. The terms and
+  `spheres.dev/child-safety` say what is banned, how to report, and that CSAM goes to the
+  authorities. Proven on the live relay with a sealed test report opened by the tool.
+  The contact on both pages, `safety@spheres.dev`, is a Cloudflare Email Routing rule
+  forwarding to the account's address (`docs/reports.md`).
 - **Leaving, and what the store needs** (27 October 2026): Settings, Reset Everything now
   goes through `AppServices.deleteEverywhere`, which switches wakes off (clearing every
   registration at the relay), sends a signed `DELETE /prekey/<id>` (new on the relay, over
@@ -488,7 +504,14 @@ fuller copy (fixed: resend on reconnect and on the change); and that a stale "wa
 for them to approve" label outlived the fact (fixed: a sealed message clears it). Rules,
 topics, badges, suspension, keyword alerts through a ntfy wake, events with a co-host
 and an RSVP back, vanish mode, pokes, notes, tag review and a drawn avatar all crossed
-between the three. When a change touches the message path, say so in the commit and
+between the three. On 27 October 2026, approving a join request from a brand-new
+identity (the Motorola, reset) made it a contact but never a member: the add was sent
+before the newcomer's channel existed, the relay took nothing and the result was ignored.
+A membership op a member's channel does not take is now kept, sealed
+(`spheres_owed_ops_v1`, the latest per member and sphere), and sent again the moment
+that contact's channel comes up (`SphereService.resendOwed`, called from
+`chatService.onPeerConnected` beside the owed profile send); a later op that is taken
+clears it, a member since removed is owed nothing. When a change touches the message path, say so in the commit and
 prefer changes that a test can cover. Emulator pairs cannot
 scan QR codes; debug builds print the invite link instead (see `identity_service.dart`).
 
@@ -498,7 +521,7 @@ scan QR codes; debug builds print the invite link instead (see `identity_service
 ```bash
 flutter pub get
 flutter analyze --no-fatal-infos   # errors and warnings must stay at zero
-flutter test                       # 910 tests in 87 files under test/{crypto,models,screens,services}
+flutter test                       # 924 tests in 90 files under test/{crypto,models,screens,services}
 flutter test test/some_test.dart
 flutter run --flavor foss          # or --flavor play; every build names a flavour now
 flutter build apk --debug --flavor foss

@@ -159,10 +159,17 @@ Future<void> wireIdentity({
   // A send the relay did not take is owed; the moment that contact's channel
   // comes up (a start without network, a reconnect) it goes, not at the next
   // start only.
-  chatService.onPeerConnected = (peer) => unawaited(profileSync.sync(to: [peer]).catchError((Object e) {
-        DebugLogService().error('Wiring', 'Could not send our profile to $peer: $e');
-        return const <String>[];
-      }));
+  chatService.onPeerConnected = (peer) {
+    unawaited(profileSync.sync(to: [peer]).catchError((Object e) {
+      DebugLogService().error('Wiring', 'Could not send our profile to $peer: $e');
+      return const <String>[];
+    }));
+    // A membership op their channel did not take (a join approved before the
+    // new contact's channel existed) goes now.
+    unawaited(sphereService.resendOwed(peer).catchError((Object e) {
+      DebugLogService().error('Wiring', 'Could not resend sphere ops to $peer: $e');
+    }));
+  };
   chatService.onHeardFrom = (peer) => unawaited(contactService.heardFrom(peer));
   profileSyncOwnDevices = () => profileSync.sync().then((_) {}).catchError((Object e) {
         DebugLogService().error('Wiring', 'Could not send our profile to our devices: $e');

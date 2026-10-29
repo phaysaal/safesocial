@@ -34,6 +34,9 @@ class MessageBubble extends StatelessWidget {
 
   /// Change the look of a photo we sent; see `models/look.dart`.
   final void Function(Message)? onLook;
+
+  /// Report someone else's message to the people who run Spheres.
+  final void Function(Message)? onReportToSpheres;
   final void Function(Message)? onReply;
   final void Function(Message)? onForward;
   final void Function(Message)? onStar;
@@ -91,6 +94,7 @@ class MessageBubble extends StatelessWidget {
     this.onDeleteForEveryone,
     this.onEdit,
     this.onLook,
+    this.onReportToSpheres,
     this.onReply,
     this.onForward,
     this.onStar,
@@ -611,6 +615,15 @@ class MessageBubble extends StatelessWidget {
                   onTap: () {
                     Navigator.pop(ctx);
                     onEdit!(message);
+                  },
+                ),
+              if (onReportToSpheres != null && !isMine && !message.isDeleted)
+                ListTile(
+                  leading: const Icon(Icons.flag_outlined),
+                  title: const Text('Report to Spheres'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onReportToSpheres!(message);
                   },
                 ),
               if (onLook != null &&

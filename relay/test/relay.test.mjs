@@ -690,3 +690,92 @@ test("the owner deletes their prekey bundle; nobody else can; deleting twice is 
   res = await worker.fetch(await me.signedRequest("DELETE", path), env);
   assert.equal(res.status, 200);
 });
+
+// ── Reports to the operator, and bans ────────────────────────────────────────
+
+const OPERATOR = "operator-token-0123456789abcdef";
+const box = "A".repeat(300) + "==";
+
+test("a report is stored as the sealed box it arrived as, and only the operator can list or delete it", async () => {
+  const env = makeEnv({ REPORT_PUBLIC_KEY: "ab".repeat(32), REPORT_ADMIN_TOKEN: OPERATOR });
+  let res = await worker.fetch(new Request("https://relay/"), env);
+  assert.equal((await res.json()).report, "ab".repeat(32));
+
+  res = await worker.fetch(new Request("https://relay/report", { method: "POST", body: JSON.stringify({ box }) }), env);
+  assert.equal(res.status, 200);
+  const { id } = await res.json();
+  assert.ok(id);
+
+  // Nobody else can read it.
+  res = await worker.fetch(new Request("https://relay/report"), env);
+  assert.equal(res.status, 401);
+  res = await worker.fetch(new Request("https://relay/report", { headers: { Authorization: "Bearer wrong-token-0123456789abcdef" } }), env);
+  assert.equal(res.status, 401);
+
+  // The operator gets exactly the box back.
+  const auth = { Authorization: `Bearer ${OPERATOR}` };
+  res = await worker.fetch(new Request("https://relay/report", { headers: auth }), env);
+  const list = await res.json();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, id);
+  assert.equal(list[0].box, box);
+
+  res = await worker.fetch(new Request(`https://relay/report/${id}`, { method: "DELETE", headers: auth }), env);
+  assert.equal(res.status, 200);
+  res = await worker.fetch(new Request("https://relay/report", { headers: auth }), env);
+  assert.deepEqual(await res.json(), []);
+});
+
+test("a large report is chunked and comes back whole", async () => {
+  const env = makeEnv({ REPORT_PUBLIC_KEY: "ab".repeat(32), REPORT_ADMIN_TOKEN: OPERATOR });
+  const big = "B".repeat(250 * 1024) + "==";
+  let res = await worker.fetch(new Request("https://relay/report", { method: "POST", body: JSON.stringify({ box: big }) }), env);
+  assert.equal(res.status, 200);
+  res = await worker.fetch(new Request("https://relay/report", { headers: { Authorization: `Bearer ${OPERATOR}` } }), env);
+  assert.equal((await res.json())[0].box, big);
+});
+
+test("reports are refused when the operator has set no key, and malformed ones always", async () => {
+  let env = makeEnv();
+  let res = await worker.fetch(new Request("https://relay/report", { method: "POST", body: JSON.stringify({ box }) }), env);
+  assert.equal(res.status, 501);
+  res = await worker.fetch(new Request("https://relay/"), env);
+  assert.equal((await res.json()).report, null);
+
+  env = makeEnv({ REPORT_PUBLIC_KEY: "ab".repeat(32), REPORT_ADMIN_TOKEN: OPERATOR });
+  res = await worker.fetch(new Request("https://relay/report", { method: "POST", body: "not json" }), env);
+  assert.equal(res.status, 400);
+  res = await worker.fetch(new Request("https://relay/report", { method: "POST", body: JSON.stringify({ box: "<script>" }) }), env);
+  assert.equal(res.status, 400);
+});
+
+test("a client can send only so many reports a day", async () => {
+  const env = makeEnv({ REPORT_PUBLIC_KEY: "ab".repeat(32), REPORT_ADMIN_TOKEN: OPERATOR });
+  const post = () => worker.fetch(new Request("https://relay/report", {
+    method: "POST", body: JSON.stringify({ box }), headers: { "CF-Connecting-IP": "203.0.113.9" } }), env);
+  for (let i = 0; i < 20; i++) assert.equal((await post()).status, 200);
+  assert.equal((await post()).status, 429);
+});
+
+test("a banned identity cannot be found or added, until unbanned; only the operator bans", async () => {
+  const env = makeEnv({ REPORT_PUBLIC_KEY: "ab".repeat(32), REPORT_ADMIN_TOKEN: OPERATOR });
+  const me = await mailbox();
+  const path = `/prekey/${me.address}`;
+  const bundle = JSON.stringify({ identity: me.address });
+  assert.equal((await worker.fetch(await me.signedRequest("POST", path, bundle), env)).status, 200);
+
+  let res = await worker.fetch(new Request(`https://relay/moderation/ban/${me.address}`, { method: "POST" }), env);
+  assert.equal(res.status, 401);
+  res = await worker.fetch(new Request(`https://relay/moderation/ban/${me.address}`, {
+    method: "POST", headers: { Authorization: `Bearer ${OPERATOR}` } }), env);
+  assert.equal(res.status, 200);
+
+  assert.equal((await worker.fetch(new Request(`https://relay${path}`), env)).status, 410);
+  assert.equal((await worker.fetch(await me.signedRequest("POST", path, bundle), env)).status, 410, "cannot republish");
+  res = await worker.fetch(new Request(`https://relay/inbox/${me.address}`, { method: "POST", body: "hello" }), env);
+  assert.equal(res.status, 410, "no new contact requests");
+
+  await worker.fetch(new Request(`https://relay/moderation/unban/${me.address}`, {
+    method: "POST", headers: { Authorization: `Bearer ${OPERATOR}` } }), env);
+  assert.equal((await worker.fetch(new Request(`https://relay${path}`), env)).status, 200);
+});

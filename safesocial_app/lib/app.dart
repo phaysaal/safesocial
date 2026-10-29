@@ -47,6 +47,7 @@ import 'screens/wellbeing/wellbeing_screen.dart';
 import 'screens/wellbeing/year_review_screen.dart';
 import 'services/bubble_bridge.dart';
 import 'services/ad_service.dart';
+import 'widgets/terms_gate.dart';
 import 'services/call_notes_service.dart';
 import 'services/wellbeing_service.dart';
 import 'services/feed_service.dart';
@@ -516,7 +517,7 @@ class _SpheresAppState extends State<SpheresApp> with WidgetsBindingObserver {
           ),
           child: PauseGate(
             child: BreakOverlay(
-              child: _LockGate(child: child ?? const SizedBox.shrink()),
+              child: _LockGate(child: TermsGate(child: child ?? const SizedBox.shrink())),
             ),
           ),
         );

@@ -383,6 +383,12 @@ class SphereService extends ChangeNotifier {
   static const _prefsKey = 'spheres_spheres_v1';
 
   static const _prefsInvitesKey = 'spheres_invites_v1';
+
+  /// Membership ops a member's channel did not take, by member then sphere:
+  /// the latest payload only, sent again when that member's channel comes
+  /// up. Sealed: a payload carries the sphere key.
+  static const _prefsOwedKey = 'spheres_owed_ops_v1';
+  final Map<String, Map<String, String>> _owed = {};
   static const _prefsAuditKey = 'spheres_sphere_audit_v1';
   static const _prefsOffersKey = 'spheres_transfer_offers_v1';
   static const _prefsProposalsKey = 'spheres_removal_proposals_v1';
@@ -1479,9 +1485,16 @@ class SphereService extends ChangeNotifier {
           plaintext: payload,
           mode: SealMode.wrap,
         );
+        var taken = sealed.isNotEmpty;
         for (final item in sealed) {
-          await send(peer, item.sealed, deviceKey: item.deviceKey);
+          taken = await send(peer, item.sealed, deviceKey: item.deviceKey) && taken;
         }
+        // Found on hardware, 27 October 2026: approving a join added the
+        // requester as a contact and sent them the add at once, before their
+        // channel existed; the relay took nothing and the newcomer never
+        // heard of the sphere. What a channel does not take is kept and goes
+        // when that member's channel comes up.
+        await _noteDelivery(peer, sphere.id, payload, taken, what);
       } on NoSessionException {
         DebugLogService().warn(
             'Sphere', 'No encryption key for $peer yet; they will not see this $what');
@@ -1500,6 +1513,60 @@ class SphereService extends ChangeNotifier {
       DebugLogService().warn('Sphere', 'Could not reach our other devices: $e');
     }
   }
+
+  Future<void> _noteDelivery(String peer, String sphereId, String payload, bool taken, String what) async {
+    if (taken) {
+      final had = _owed[peer]?.remove(sphereId) != null;
+      if (_owed[peer]?.isEmpty ?? false) _owed.remove(peer);
+      if (had) await _persistOwed();
+      return;
+    }
+    (_owed[peer] ??= {})[sphereId] = payload;
+    await _persistOwed();
+    DebugLogService().info('Sphere', 'Owed a member this $what; it goes when their channel is up');
+  }
+
+  /// Whether anything is owed to [peer]. For tests and the debug console.
+  bool owes(String peer) => _owed[peer]?.isNotEmpty ?? false;
+
+  /// [peer]'s channel just came up: send what it did not take before. A
+  /// sphere since left, or a member since removed, is owed nothing.
+  Future<void> resendOwed(String peer) async {
+    final owed = _owed[peer];
+    final send = sendToPeer;
+    final sessions = _sessions;
+    if (owed == null || owed.isEmpty || send == null || sessions == null) return;
+    for (final entry in owed.entries.toList()) {
+      final sphere = _spheres[entry.key];
+      if (sphere == null || !sphere.contains(peer)) {
+        owed.remove(entry.key);
+        continue;
+      }
+      try {
+        final sealed = await sessions.sealForDevices(
+          peerIdentityKey: peer,
+          fallbackExchangeKey: _resolveExchangeKey?.call(peer),
+          type: 'sphere_op',
+          plaintext: entry.value,
+          mode: SealMode.wrap,
+        );
+        var taken = sealed.isNotEmpty;
+        for (final item in sealed) {
+          taken = await send(peer, item.sealed, deviceKey: item.deviceKey) && taken;
+        }
+        if (taken) {
+          owed.remove(entry.key);
+          DebugLogService().info('Sphere', 'Sent "${sphere.name}" to a member whose channel just came up');
+        }
+      } catch (e) {
+        DebugLogService().warn('Sphere', 'Still could not reach a member: $e');
+      }
+    }
+    if (owed.isEmpty) _owed.remove(peer);
+    await _persistOwed();
+  }
+
+  Future<void> _persistOwed() => SecureStore.instance.setString(_prefsOwedKey, jsonEncode(_owed));
 
   /// Seal an operation payload for every device of one member.
   Future<void> _sendOpPayloadTo(String peer, String payload, String what) async {
@@ -2424,6 +2491,18 @@ class SphereService extends ChangeNotifier {
     await _loadInviteState();
     await keyring.load();
     final prefs = SecureStore.instance;
+
+    final owedRaw = await prefs.getString(_prefsOwedKey);
+    if (owedRaw != null) {
+      try {
+        (jsonDecode(owedRaw) as Map<String, dynamic>).forEach((peer, spheres) {
+          _owed[peer] = {
+            for (final e in (spheres as Map<String, dynamic>).entries)
+              if (e.value is String) e.key: e.value as String
+          };
+        });
+      } catch (_) {}
+    }
 
     final invitesRaw = await prefs.getString(_prefsInvitesKey);
     if (invitesRaw != null) {

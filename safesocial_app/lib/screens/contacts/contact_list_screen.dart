@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../models/abuse_report.dart';
+import '../../widgets/report_sheet.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -221,6 +223,14 @@ class _ContactListTile extends StatelessWidget {
               dense: true,
             ),
           ),
+          const PopupMenuItem(
+            value: 'report_spheres',
+            child: ListTile(
+              leading: Icon(Icons.flag_outlined),
+              title: Text('Report to Spheres'),
+              dense: true,
+            ),
+          ),
           const PopupMenuDivider(),
           const PopupMenuItem(
             value: 'delete',
@@ -272,6 +282,14 @@ class _ContactListTile extends StatelessWidget {
         break;
       case 'block':
         service.toggleBlock(contact.publicKey);
+        break;
+      case 'report_spheres':
+        showReportToSpheres(
+          context,
+          subject: ReportSubject.person,
+          author: contact.publicKey,
+          authorName: contact.displayName,
+        );
         break;
       case 'share':
         final link = 'spheres://add?key=${contact.publicKey}&name=${Uri.encodeComponent(contact.displayName)}';

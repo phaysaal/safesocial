@@ -21,6 +21,8 @@ import '../../services/image_stats.dart';
 import '../../widgets/look_controls.dart';
 import '../../widgets/media_thumb.dart';
 import '../../widgets/writing_guide_sheet.dart';
+import '../../widgets/report_sheet.dart';
+import '../../models/abuse_report.dart';
 import '../../services/identity_service.dart';
 import '../../services/call_service.dart';
 import '../../services/app_lock_service.dart';
@@ -1239,6 +1241,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             : null,
                         onEdit: (msg) => _editMessage(msg),
                         onLook: isMine ? (msg) => _changeLook(msg) : null,
+                        onReportToSpheres: isMine
+                            ? null
+                            : (msg) => showReportToSpheres(
+                                  context,
+                                  subject: ReportSubject.message,
+                                  subjectId: msg.id,
+                                  author: msg.senderId,
+                                  authorName: context.read<ContactService>().getContact(msg.senderId)?.displayName,
+                                  text: msg.content,
+                                  mediaRefs: msg.mediaRefs,
+                                ),
                         onForward: _forward,
                         onStar: (msg) => library.toggleStar(widget.conversationId, msg.id),
                         onPin: (msg) => _guard(() => chatService.pinMessage(

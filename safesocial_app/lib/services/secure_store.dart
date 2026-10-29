@@ -87,6 +87,7 @@ class SecureStore {
     'spheres_archived_posts_v1',
     'spheres_post_mute_v1',
     'spheres_spheres_v1',
+    'spheres_owed_ops_v1',
     'spheres_keyring_v1',
     'spheres_devices_v1',
     'spheres_muted_members_v1',

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../services/terms.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -31,6 +33,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   bool _isCreating = false;
+  bool _agreed = false;
 
   @override
   void dispose() {
@@ -47,6 +50,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     try {
       final idService = context.read<IdentityService>();
+      await Terms.accept();
       await idService.createIdentity(name);
 
       if (!mounted) return;
@@ -252,8 +256,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
+                // The terms are agreed to before an identity exists, so
+                // nothing can be posted by someone who has not.
+                CheckboxListTile(
+                  value: _agreed,
+                  onChanged: (v) => setState(() => _agreed = v ?? false),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('I agree to the terms of use'),
+                  subtitle: GestureDetector(
+                    onTap: () => launchUrl(Uri.parse(Terms.url), mode: LaunchMode.externalApplication),
+                    child: Text('Read them at spheres.dev/terms',
+                        style: TextStyle(color: cs.primary, decoration: TextDecoration.underline)),
+                  ),
+                ),
+                const SizedBox(height: 8),
                 ElevatedButton(
-                  onPressed: _isCreating ? null : _handleOnboarding,
+                  onPressed: _isCreating || !_agreed ? null : _handleOnboarding,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.all(18),
                     shape: RoundedRectangleBorder(

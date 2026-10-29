@@ -73,11 +73,13 @@ on and off), and the daily appreciation. Tell us what breaks.
 |---|---|---|
 | App icon, 512×512 PNG | `store/icon_512.png` | made from the launcher icon |
 | Feature graphic, 1024×500 | `store/feature_graphic_1024x500.png` | made from the logo and the app's palette |
-| Phone screenshots, at least 2 | *to take* | from a phone with content you are happy to show |
+| Phone screenshots, 8 | `store/screenshots/1_home.png` to `8_profile.png` | 1080×2160, framed with a caption on the brand gradient |
 
-Screenshots: Home with a few posts, a sphere's page, a chat, the look sheet over
-a photo, the "You're caught up" end of the feed. Take them on a phone whose
-spheres hold nothing private; the Samsung's are real.
+The screenshots show two test identities talking to each other: Maya Rahman (an
+invented name, on the Motorola) and the Samsung's identity, shown as "Faisal". Six
+are from Maya's side; appreciation and security are from the Samsung. The content
+was made for the shots: a Family sphere, two posts, a reaction each way, a comment,
+four messages.
 
 ## App content answers
 
@@ -97,6 +99,8 @@ spheres hold nothing private; the Samsung's are real.
 | Data safety: encrypted in transit | Yes |
 | Data safety: deletion | Yes, in the app (Settings, Reset Everything) and described at `https://spheres.dev/privacy` |
 | Account creation | Yes, in the app; deletion in the app and at the privacy page |
+| Child safety standards (Social apps) | Published at `https://spheres.dev/child-safety`; in-app reporting via "Report to Spheres"; CSAM reported to the authorities; child safety contact: the contact address on that page |
+| User-generated content | Terms agreed before posting (`https://spheres.dev/terms`); in-app reporting of content and users to the developer; blocking; bans |
 
 Note on data safety: Play's definitions count data sent off the device. The relay
 receives encrypted content and IP addresses in transit, which Play treats as

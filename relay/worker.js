@@ -41,6 +41,12 @@ const MAX_BODY_BYTES = 256 * 1024;
 const MAX_MAILBOX_MESSAGES = 500;
 const MAX_MAILBOX_BYTES = 8 * 1024 * 1024;
 const MAX_PREKEY_BYTES = 4 * 1024;
+// A report to the operator: a sealed box with the reported text and up to
+// three small pictures. Stored in chunks, since one stored value is capped.
+const MAX_REPORT_BYTES = 1536 * 1024;
+const REPORT_CHUNK_BYTES = 96 * 1024;
+const MAX_REPORTS_PER_DAY_PER_CLIENT = 20;
+const MAX_STORED_REPORTS = 2000;
 
 // Blob storage for media. Chunked because a Durable Object storage value tops
 // out at 128 KiB, and base64 inflates by 4/3. The client writes 48 KB of
@@ -118,7 +124,41 @@ export default {
         // signed by this relay and nobody else. Null when the operator has
         // not set one; then a distributor that insists on VAPID refuses.
         vapid: vapidConfigured(env) ? env.VAPID_PUBLIC_KEY : null,
+        // The operator's X25519 key: a report is sealed to it on the
+        // reporter's phone, so this relay stores what it cannot read. Null
+        // when the operator has not set one; then reports are refused (501).
+        report: env.REPORT_PUBLIC_KEY || null,
       });
+    }
+
+    // Reports to the operator. POST /report is open (anyone in the app can
+    // report); GET /report and DELETE /report/<id> need the operator's token.
+    const report = url.pathname.match(/^\/report(?:\/([A-Za-z0-9_-]{1,64}))?$/);
+    if (report) {
+      if (!env.REPORT_PUBLIC_KEY) return json({ error: "This relay does not take reports" }, 501);
+      return room(env, "reports_operator").fetch(request);
+    }
+
+    // Moderation: /moderation/(ban|unban)/<identity address>, operator only.
+    // A banned identity's prekey bundle is gone and its inbox refuses new
+    // contact requests, so nobody new can find or add it through this relay.
+    // Conversations already set up run on pairwise mailboxes this relay cannot
+    // link to anyone, and are untouched.
+    const moderation = url.pathname.match(/^\/moderation\/(ban|unban)\/([A-Za-z0-9_=-]+)$/);
+    if (moderation) {
+      if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      if (!isOperator(request, env)) return unauthorized();
+      if (!ADDRESS_RE.test(moderation[2])) return new Response("Malformed address", { status: 400 });
+      const [, verb, address] = moderation;
+      for (const kind of ["prekey", "inbox"]) {
+        await room(env, `${kind}_${address}`).fetch(
+          new Request(`https://relay/${kind}/${address}/${verb}`, {
+            method: "POST",
+            headers: { Authorization: request.headers.get("Authorization") || "" },
+          }),
+        );
+      }
+      return new Response("OK");
     }
 
     // Sealed mailbox: /mbx/<address>[/sync|/ack|/subscribe|/publish|/unsubscribe|/wake]
@@ -274,7 +314,11 @@ export class RelayRoom {
     // subscription and are not rate limited: a busy conversation is not abuse.
     const internal =
       (kind === "hub" && action === "deliver") ||
-      (kind === "mbx" && (action === "publish" || action === "post"));
+      (kind === "mbx" && (action === "publish" || action === "post")) ||
+      // Reports are limited per client below, not per room: the room is one
+      // for everybody, and a flood must not silence a real report.
+      kind === "report" ||
+      ((kind === "prekey" || kind === "inbox") && (action === "ban" || action === "unban"));
     if (!internal && !(await this.underRateLimit())) {
       return new Response("Too many requests", { status: 429 });
     }
@@ -283,6 +327,13 @@ export class RelayRoom {
 
     if (kind === "hub") return this.handleHub(request, url, address, action);
     if (kind === "blob") return this.handleBlob(request, address, action);
+    if (kind === "report") return this.handleReports(request, address);
+    if ((kind === "prekey" || kind === "inbox") && (action === "ban" || action === "unban")) {
+      if (!isOperator(request, this.env)) return unauthorized();
+      if (action === "ban") await this.state.storage.put("banned", Date.now());
+      else await this.state.storage.delete("banned");
+      return new Response("OK");
+    }
     if (kind === "prekey") return this.handlePrekey(request, address);
     if (kind === "inbox") return this.handleInbox(request, url, address, action);
     return this.handleMailbox(request, url, address, action);
@@ -622,6 +673,7 @@ export class RelayRoom {
   async handleInbox(request, url, address, action) {
     // Unauthenticated write: a stranger sending a contact request.
     if (!action && request.method === "POST") {
+      if (await this.state.storage.get("banned")) return new Response("Gone", { status: 410 });
       const body = await this.readBody(request);
       if (body === null) return tooLarge();
       const queued = await this.queue(body);
@@ -708,6 +760,7 @@ export class RelayRoom {
   // ── Prekey bundle ──────────────────────────────────────────────────────────
 
   async handlePrekey(request, address) {
+    if (await this.state.storage.get("banned")) return new Response("Gone", { status: 410 });
     if (request.method === "GET") {
       const data = await this.state.storage.get("prekey");
       if (!data) return new Response(null, { status: 404 });
@@ -729,6 +782,78 @@ export class RelayRoom {
     if (request.method === "DELETE") {
       if (!(await this.verifyAuth(request, address, ""))) return unauthorized();
       await this.state.storage.delete("prekey");
+      return new Response("OK");
+    }
+
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  // ── Reports to the operator ────────────────────────────────────────────────
+
+  async handleReports(request, id) {
+    if (request.method === "POST" && !id) {
+      // Per client, per day, by a hash of the address the request came from;
+      // the address itself is not kept.
+      const day = new Date().toISOString().slice(0, 10);
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${day}:${ip}`));
+      const rlKey = `rl:${day}:${hexOf(new Uint8Array(digest)).slice(0, 24)}`;
+      const count = (await this.state.storage.get(rlKey)) || 0;
+      if (count >= MAX_REPORTS_PER_DAY_PER_CLIENT) return new Response("Too many reports today", { status: 429 });
+
+      const body = await this.readBody(request, MAX_REPORT_BYTES);
+      if (body === null) return tooLarge();
+      let box;
+      try {
+        box = JSON.parse(body).box;
+      } catch (_) {
+        return new Response("Malformed body", { status: 400 });
+      }
+      if (typeof box !== "string" || box.length < 64 || !/^[A-Za-z0-9+/=]+$/.test(box)) {
+        return new Response("Malformed report", { status: 400 });
+      }
+      const index = (await this.state.storage.get("index")) || [];
+      if (index.length >= MAX_STORED_REPORTS) return new Response("Report store full", { status: 507 });
+
+      const reportId = crypto.randomUUID();
+      const chunks = Math.ceil(box.length / REPORT_CHUNK_BYTES);
+      for (let i = 0; i < chunks; i++) {
+        await this.state.storage.put(`chunk:${reportId}:${i}`, box.slice(i * REPORT_CHUNK_BYTES, (i + 1) * REPORT_CHUNK_BYTES));
+      }
+      index.push({ id: reportId, at: Date.now(), chunks });
+      await this.state.storage.put("index", index);
+      await this.state.storage.put(rlKey, count + 1);
+      // Content-free word to the operator that something is waiting.
+      if (this.env.REPORT_NTFY_URL && this.state.waitUntil) {
+        this.state.waitUntil(
+          fetch(this.env.REPORT_NTFY_URL, {
+            method: "POST",
+            headers: { Title: "Spheres", Priority: "high" },
+            body: "A report arrived. Open it with the operator tool.",
+          }).catch(() => {}),
+        );
+      }
+      return json({ id: reportId });
+    }
+
+    if (!isOperator(request, this.env)) return unauthorized();
+    const index = (await this.state.storage.get("index")) || [];
+
+    if (request.method === "GET" && !id) {
+      const out = [];
+      for (const entry of index) {
+        let box = "";
+        for (let i = 0; i < entry.chunks; i++) box += (await this.state.storage.get(`chunk:${entry.id}:${i}`)) || "";
+        out.push({ id: entry.id, at: entry.at, box });
+      }
+      return json(out);
+    }
+
+    if (request.method === "DELETE" && id) {
+      const entry = index.find((e) => e.id === id);
+      if (!entry) return new Response("Not found", { status: 404 });
+      for (let i = 0; i < entry.chunks; i++) await this.state.storage.delete(`chunk:${entry.id}:${i}`);
+      await this.state.storage.put("index", index.filter((e) => e.id !== id));
       return new Response("OK");
     }
 
@@ -1260,6 +1385,20 @@ async function verifySignature(addressB64Url, sigHex, tsStr, message) {
     console.error("Signature verification failed:", e && e.message);
     return false;
   }
+}
+
+function hexOf(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The operator's bearer token, compared in constant time. */
+function isOperator(request, env) {
+  const want = env.REPORT_ADMIN_TOKEN;
+  const got = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
+  if (!want || got.length !== want.length) return false;
+  let diff = 0;
+  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
 }
 
 function unauthorized() {

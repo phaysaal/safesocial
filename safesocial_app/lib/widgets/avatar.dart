@@ -19,6 +19,15 @@ String? avatarRefFor(BuildContext context, String? identityKey) {
   return context.watch<ContactService?>()?.getContact(identityKey)?.avatarRef;
 }
 
+/// Our own display name when [identityKey] is ours, else null.
+String? ownNameFor(BuildContext context, String? identityKey) {
+  if (identityKey == null || identityKey.isEmpty) return null;
+  final identity = context.watch<IdentityService?>();
+  if (identity == null || identity.publicKey != identityKey) return null;
+  final name = identity.currentIdentity?.displayName;
+  return name == null || name.isEmpty ? null : name;
+}
+
 /// Avatar size presets.
 enum AvatarSize {
   small(16),
@@ -52,8 +61,12 @@ class UserAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
-    final bgColor = _colorFromName(displayName);
+    // Our own avatar is often labelled "You"; its initial and colour still
+    // come from our name, so it matches the one others see. Found in the
+    // listing screenshots of 27 October 2026: "Y" beside our posts.
+    final name = ownNameFor(context, identityKey) ?? displayName;
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final bgColor = _colorFromName(name);
 
     // Show image if we have a local file path
     final ref = imageRef ?? avatarRefFor(context, identityKey);

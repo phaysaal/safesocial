@@ -26,6 +26,8 @@ import 'translation_line.dart';
 import '../services/sphere_service.dart';
 import 'avatar.dart';
 import 'look_controls.dart';
+import 'report_sheet.dart';
+import '../models/abuse_report.dart';
 import 'looked.dart';
 import 'media_thumb.dart';
 import 'protected_veil.dart';
@@ -293,6 +295,7 @@ class _PostCardState extends State<PostCard> {
                                 : 'Follow again'),
                       ),
                       const PopupMenuItem(value: 'report', child: Text('Report to the sphere')),
+                      const PopupMenuItem(value: 'report_spheres', child: Text('Report to Spheres')),
                     ],
                   ],
                 ),
@@ -478,14 +481,16 @@ class _PostCardState extends State<PostCard> {
               children: [
                 // Reaction button: a tap leaves the primary one, a long press
                 // opens the set; once left, the emoji itself is the button.
-                GestureDetector(
-                    onLongPress: () => showReactionPicker(context,
-                        current: post.reactions
-                            .where((r) => r.reactorId == myKey)
-                            .firstOrNull
-                            ?.emoji,
-                        onPick: (e) => context.read<FeedService>().reactToPost(post.id, e)),
-                    child: _ActionButton(
+                // The long press belongs to the button itself: wrapped
+                // around it, it lost to the button's tooltip, and the picker
+                // never opened (found on the Samsung, 27 October 2026).
+                PostActionButton(
+                      onLongPress: () => showReactionPicker(context,
+                          current: post.reactions
+                              .where((r) => r.reactorId == myKey)
+                              .firstOrNull
+                              ?.emoji,
+                          onPick: (e) => context.read<FeedService>().reactToPost(post.id, e)),
                       icon: _selfReactionIcon(post, myKey),
                       emoji: post.reactions
                           .where((r) => r.reactorId == myKey)
@@ -507,16 +512,15 @@ class _PostCardState extends State<PostCard> {
                             .reactToPost(post.id, mine ?? ReactionKinds.primary.$1);
                       },
                     ),
-                  ),
                 const Spacer(),
-                _ActionButton(
+                PostActionButton(
                   icon: Icons.forum_outlined,
                   label: 'Comment',
                   count: post.visibleComments(myKey).length,
                   color: cs.onSurfaceVariant,
                   onTap: () => _showCommentSheet(context, post),
                 ),
-                _ActionButton(
+                PostActionButton(
                   icon: Icons.send_outlined,
                   label: 'Pass on',
                   color: cs.onSurfaceVariant,
@@ -780,6 +784,16 @@ class _PostCardState extends State<PostCard> {
           ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Reported to the admins of this sphere')));
         });
+      case 'report_spheres':
+        showReportToSpheres(
+          context,
+          subject: ReportSubject.post,
+          subjectId: post.id,
+          author: post.authorId,
+          authorName: post.authorName,
+          text: post.content,
+          mediaRefs: post.mediaRefs,
+        );
       case 'pin':
         final feed = context.read<FeedService>();
         final pinned = feed.isPinned(post.id);
@@ -1483,8 +1497,13 @@ class _CommentThread extends StatelessWidget {
 
 // ─── Action button ───────────────────────────────────────────────────────────
 
-class _ActionButton extends StatelessWidget {
+/// One button of a post's action row. Public for its test.
+class PostActionButton extends StatelessWidget {
   final IconData icon;
+
+  /// The reaction set, on a long press; the tooltip then stays out of the
+  /// long press so the two do not compete.
+  final VoidCallback? onLongPress;
 
   /// Drawn in place of [icon] when set: the reaction we left.
   final String? emoji;
@@ -1495,13 +1514,15 @@ class _ActionButton extends StatelessWidget {
   final VoidCallback onTap;
   final int? count;
 
-  const _ActionButton({
+  const PostActionButton({
+    super.key,
     required this.icon,
     required this.label,
     required this.color,
     required this.onTap,
     this.count,
     this.emoji,
+    this.onLongPress,
   });
 
   @override
@@ -1513,11 +1534,13 @@ class _ActionButton extends StatelessWidget {
       padding: const EdgeInsets.only(right: 8),
       child: Tooltip(
         message: label,
+        triggerMode: onLongPress == null ? null : TooltipTriggerMode.manual,
         child: Material(
           color: active ? cs.primary.withValues(alpha: 0.12) : cs.surfaceContainerHighest.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(20),
           child: InkWell(
             onTap: onTap,
+            onLongPress: onLongPress,
             borderRadius: BorderRadius.circular(20),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
